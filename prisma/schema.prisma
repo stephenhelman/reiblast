@@ -1,0 +1,36 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id            String   @id @default(cuid())
+  email         String   @unique
+  name          String?
+  passwordHash  String?
+  plan          String   @default("core")
+  status        String   @default("active")
+  ghlLocationId String?
+  ghlSubAccount String?
+  stripeCustomerId     String?
+  stripeSubscriptionId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model PromoCode {
+  id              String   @id @default(cuid())
+  code            String   @unique
+  description     String?
+  discountPct     Int
+  originalPrice   Int
+  discountedPrice Int
+  active          Boolean  @default(true)
+  usageCount      Int      @default(0)
+  usageLimit      Int?
+  createdAt       DateTime @default(now())
+}

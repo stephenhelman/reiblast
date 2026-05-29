@@ -1,36 +1,168 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# REIblast
 
-## Getting Started
+Real estate wholesaling SaaS platform. Serves two domains from one Next.js 15 deployment using middleware-based hostname routing.
 
-First, run the development server:
+| Domain | Purpose |
+|--------|---------|
+| `reiblast.app` | Public marketing site + signup flow |
+| `tools.reiblast.app` | Member tools portal + GHL iframe widgets |
+
+## Tech Stack
+
+- **Next.js 15** App Router
+- **TypeScript**
+- **Tailwind CSS v4**
+- **Prisma ORM v6** + Neon PostgreSQL
+- **Stripe** — subscription billing
+- **Resend** — transactional email (stubbed, ready for Phase 2)
+- **NextAuth v4** — session management (JWT strategy)
+- **bcryptjs** — password hashing
+
+## Setup
+
+### 1. Install dependencies
+
+```bash
+npm install
+```
+
+### 2. Environment variables
+
+Copy `.env.local` and fill in all values:
+
+```bash
+cp .env.local .env.local
+```
+
+| Variable | Description |
+|----------|-------------|
+| `DATABASE_URL` | Neon PostgreSQL connection string |
+| `STRIPE_SECRET_KEY` | Stripe secret key (`sk_live_...` or `sk_test_...`) |
+| `STRIPE_WEBHOOK_SECRET` | Stripe webhook signing secret (`whsec_...`) |
+| `STRIPE_CORE_PRICE_ID` | Stripe Price ID for REIblast Core ($57/mo) |
+| `RESEND_API_KEY` | Resend API key for transactional email |
+| `NEXTAUTH_SECRET` | Random secret — generate with `openssl rand -base64 32` |
+| `NEXTAUTH_URL` | Base URL (`https://reiblast.app` in production) |
+| `GHL_API_KEY` | GoHighLevel API key |
+| `GHL_LOCATION_ID` | GHL Agency location ID |
+| `NEXT_PUBLIC_APP_URL` | `https://reiblast.app` |
+| `NEXT_PUBLIC_TOOLS_URL` | `https://tools.reiblast.app` |
+
+### 3. Database
+
+```bash
+# Generate Prisma client
+npx prisma generate
+
+# Run migrations (requires DATABASE_URL)
+npx prisma migrate dev --name init
+
+# Seed promo codes (optional)
+npx prisma studio
+```
+
+### 4. Run dev server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The marketing site is at `http://localhost:3000`. To test the tools portal locally, either set up a subdomain proxy or temporarily modify middleware.ts to route `/tools` based on path.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Vercel Deployment — Two-Domain Setup
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+### Step 1: Deploy to Vercel
 
-## Learn More
+Push to GitHub and import the repo at vercel.com/new. Add all environment variables in the Vercel project settings.
 
-To learn more about Next.js, take a look at the following resources:
+### Step 2: Add both domains
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+In your Vercel project → **Settings → Domains**, add:
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `reiblast.app`
+- `tools.reiblast.app`
 
-## Deploy on Vercel
+Both domains point to the same Next.js deployment. The middleware reads the `host` header and rewrites routes accordingly.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+### Step 3: DNS
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Point both domains to Vercel's nameservers or add the CNAME/A records Vercel provides.
+
+### Step 4: Stripe webhook
+
+In the Stripe Dashboard → Webhooks, create an endpoint:
+
+```
+https://reiblast.app/api/stripe/webhook
+```
+
+Listen for:
+- `checkout.session.completed`
+- `customer.subscription.deleted`
+
+Copy the signing secret into `STRIPE_WEBHOOK_SECRET`.
+
+## Project Structure
+
+```
+app/
+  marketing/          ← reiblast.app routes
+    layout.tsx
+    page.tsx
+    pricing/page.tsx
+    signup/page.tsx
+    login/page.tsx
+  tools/              ← tools.reiblast.app routes
+    layout.tsx
+    page.tsx
+    analyzer/page.tsx
+    jv/page.tsx
+    leads/page.tsx
+    widget/           ← GHL iframe embeds (no chrome)
+      layout.tsx
+      header/page.tsx
+      analyzer/page.tsx
+  api/
+    auth/
+      [...nextauth]/route.ts   ← NextAuth
+      signup/route.ts          ← User registration + Stripe checkout
+    stripe/webhook/route.ts    ← Stripe events
+    promo/validate/route.ts    ← Promo code validation (stubbed UI)
+components/
+  shared/             ← Logo, Button, Input, Card
+  marketing/          ← Nav, Hero, Features, Pricing, Footer
+  tools/              ← ToolsNav
+lib/
+  constants.ts        ← Brand/config constants
+  prisma.ts           ← PrismaClient singleton
+  stripe.ts           ← Stripe client + createCheckoutSession
+  ghl.ts              ← GHL provisioning (stub, ready for Phase 2)
+  resend.ts           ← Email sending (stub, ready for Phase 2)
+  promo.ts            ← Promo code validation logic
+middleware.ts         ← Hostname-based routing
+prisma.config.ts      ← Prisma v6 datasource config for migrations
+```
+
+## GHL Widget Embedding
+
+The widget routes (`/widget/header`, `/widget/analyzer`) render with zero chrome — no nav, no padding, transparent background. Embed them in GHL custom pages as iframes:
+
+```html
+<!-- Dashboard header banner -->
+<iframe src="https://tools.reiblast.app/widget/header"
+  width="100%" height="80" frameborder="0" scrolling="no" />
+
+<!-- Deal analyzer widget -->
+<iframe src="https://tools.reiblast.app/widget/analyzer"
+  width="600" height="320" frameborder="0" />
+```
+
+Widget routes bypass the session check in middleware — they are publicly accessible on the tools subdomain.
+
+## Phase 2 Roadmap
+
+- `lib/ghl.ts` — wire up real GHL API to provision sub-accounts on signup
+- `lib/resend.ts` — wire up Resend templates for welcome + billing emails
+- CRM Sync tool (currently marked "Coming Soon")
+- Forgot password flow
+- Admin dashboard
