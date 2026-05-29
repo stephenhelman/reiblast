@@ -1,5 +1,6 @@
-import Link from 'next/link'
 import { LogoStacked } from '../shared/Logo'
+
+const paymentLink = process.env.NEXT_PUBLIC_GHL_PAYMENT_LINK ?? '#'
 
 export default function Hero() {
   return (
@@ -35,13 +36,13 @@ export default function Hero() {
         </p>
 
         <div className="flex flex-col sm:flex-row gap-4">
-          <Link
-            href="/signup"
+          <a
+            href={paymentLink}
             className="bg-gold text-black font-bold text-lg px-8 py-4 rounded-xl hover:bg-gold-hover transition-colors"
             style={{ fontWeight: 700 }}
           >
             Get Started — $57/mo
-          </Link>
+          </a>
           <a
             href="#features"
             className="border border-gold text-gold font-semibold text-lg px-8 py-4 rounded-xl hover:bg-gold/10 transition-colors"

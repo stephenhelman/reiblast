@@ -1,6 +1,8 @@
 import Link from 'next/link'
 import { LogoFull } from '../shared/Logo'
 
+const paymentLink = process.env.NEXT_PUBLIC_GHL_PAYMENT_LINK ?? '#'
+
 export default function Nav() {
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border-default bg-black/90 backdrop-blur-sm">
@@ -18,19 +20,19 @@ export default function Nav() {
           <Link href="/login" className="text-white/70 hover:text-white text-sm transition-colors">
             Login
           </Link>
-          <Link
-            href="/signup"
+          <a
+            href={paymentLink}
             className="bg-gold text-black font-semibold text-sm px-5 py-2 rounded-lg hover:bg-gold-hover transition-colors"
           >
             Get Started
-          </Link>
+          </a>
         </div>
-        <Link
-          href="/signup"
+        <a
+          href={paymentLink}
           className="md:hidden bg-gold text-black font-semibold text-sm px-4 py-2 rounded-lg"
         >
           Get Started
-        </Link>
+        </a>
       </div>
     </nav>
   )

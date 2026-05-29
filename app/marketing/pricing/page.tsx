@@ -1,10 +1,11 @@
 import type { Metadata } from 'next'
-import Link from 'next/link'
 import Pricing from '@/components/marketing/Pricing'
 
 export const metadata: Metadata = {
   title: 'Pricing — REIblast',
 }
+
+const paymentLink = process.env.NEXT_PUBLIC_GHL_PAYMENT_LINK ?? '#'
 
 const INCLUDED = [
   { category: 'CRM & Pipeline', items: ['Pre-built wholesale pipeline', 'Lead tracking & status management', 'Contact database', 'Deal history'] },
@@ -61,12 +62,12 @@ export default function PricingPage() {
           <p className="text-white/50 mb-8 max-w-xl mx-auto">
             Join wholesalers who are running their entire operation inside REIblast.
           </p>
-          <Link
-            href="/signup"
+          <a
+            href={paymentLink}
             className="inline-block bg-gold text-black font-bold text-lg px-10 py-4 rounded-xl hover:bg-gold-hover transition-colors"
           >
             Get Started — $57/mo
-          </Link>
+          </a>
           <p className="text-white/30 text-sm mt-4">No contracts. Cancel anytime.</p>
         </div>
       </div>

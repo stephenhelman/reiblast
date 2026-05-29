@@ -1,4 +1,4 @@
-import Link from 'next/link'
+const paymentLink = process.env.NEXT_PUBLIC_GHL_PAYMENT_LINK ?? '#'
 
 const INCLUDED = [
   'Full CRM with pre-built wholesale pipeline',
@@ -49,12 +49,12 @@ export default function Pricing() {
               ))}
             </ul>
 
-            <Link
-              href="/signup"
+            <a
+              href={paymentLink}
               className="block w-full bg-gold text-black font-bold text-center py-4 rounded-xl hover:bg-gold-hover transition-colors"
             >
               Get Started — $57/mo
-            </Link>
+            </a>
           </div>
         </div>
       </div>
