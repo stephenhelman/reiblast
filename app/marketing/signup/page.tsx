@@ -80,9 +80,7 @@ export default function SignupPage() {
       }
 
       window.location.href =
-        data.checkoutUrl ??
-        process.env.NEXT_PUBLIC_TOOLS_URL ??
-        "https://tools.reiblast.app";
+        process.env.NEXT_PUBLIC_TOOLS_URL ?? "https://tools.reiblast.app";
     } catch {
       setServerError("Network error. Please try again.");
     } finally {

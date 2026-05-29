@@ -1,115 +1,86 @@
 import { NextRequest, NextResponse } from 'next/server'
-import crypto from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { provisionSubAccount, suspendSubAccount, updateGHLContact } from '@/lib/ghl'
 import { sendWelcomeEmail } from '@/lib/resend'
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface GHLOrderFulfilledPayload {
-  type: 'OrderFulfilled'
-  contactId: string
-  contactName: string
-  contactEmail: string
-  productName: string
-  subscriptionId: string
+interface GHLPayload {
+  event: string
+  contact: {
+    id: string
+    name: string
+    email: string
+    phone: string
+  }
+  product: string
+  plan: string
+  amount: number
 }
-
-interface GHLSubscriptionCancelledPayload {
-  type: 'SubscriptionCancelled'
-  contactId: string
-  contactEmail: string
-  subscriptionId: string
-}
-
-type GHLPayload = GHLOrderFulfilledPayload | GHLSubscriptionCancelledPayload
-
-// ─── Signature verification ────────────────────────────────────────────────────
-
-function verifySignature(body: string, signature: string | null): boolean {
-  const secret = process.env.GHL_WEBHOOK_SECRET
-  if (!secret || !signature) return false
-
-  const expected = crypto
-    .createHmac('sha256', secret)
-    .update(body)
-    .digest('hex')
-
-  return crypto.timingSafeEqual(
-    Buffer.from(signature, 'hex'),
-    Buffer.from(expected, 'hex'),
-  )
-}
-
-// ─── Handler ──────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
-  const body = await req.text()
-  const signature = req.headers.get('x-ghl-signature')
+  // Verify shared secret
+  const incomingSecret = req.headers.get('x-reiblast-secret')
+  const expectedSecret = process.env.GHL_WEBHOOK_SECRET
 
-  if (!verifySignature(body, signature)) {
-    console.warn('[GHL webhook] signature verification failed')
+  if (!incomingSecret || incomingSecret !== expectedSecret) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
   let payload: GHLPayload
+
   try {
-    payload = JSON.parse(body)
+    payload = await req.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
   if (process.env.NODE_ENV === 'development') {
     console.log('[GHL webhook] incoming payload:', JSON.stringify(payload, null, 2))
+  } else {
+    console.log(`[GHL webhook] event=${payload.event} email=${payload.contact?.email}`)
   }
 
   try {
-    switch (payload.type) {
-      case 'OrderFulfilled':
-        await handleOrderFulfilled(payload)
-        break
+    switch (payload.event) {
+      case 'order.fulfilled':
+        return await handleOrderFulfilled(payload)
 
-      case 'SubscriptionCancelled':
-        await handleSubscriptionCancelled(payload)
-        break
+      case 'subscription.cancelled':
+        return await handleSubscriptionCancelled(payload)
 
       default:
-        console.log(`[GHL webhook] unhandled event type: ${(payload as GHLPayload).type}`)
+        console.log(`[GHL webhook] unhandled event type: ${payload.event}`)
+        return NextResponse.json({ received: true })
     }
-
-    return NextResponse.json({ received: true })
   } catch (err) {
-    console.error('[GHL webhook] handler error:', err)
+    console.error('[GHL webhook] error:', err, '\npayload:', JSON.stringify(payload))
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
 
-// ─── Event handlers ───────────────────────────────────────────────────────────
-
-async function handleOrderFulfilled(payload: GHLOrderFulfilledPayload) {
-  const { contactId, contactName, contactEmail, subscriptionId } = payload
+async function handleOrderFulfilled(payload: GHLPayload) {
+  const { id: contactId, name, email } = payload.contact
 
   const user = await prisma.user.upsert({
-    where: { email: contactEmail.toLowerCase() },
+    where: { email: email.toLowerCase() },
     update: {
-      plan: 'core',
       status: 'active',
-      stripeSubscriptionId: subscriptionId,
+      plan: 'core',
+      ghlSubAccount: contactId,
     },
     create: {
-      email: contactEmail.toLowerCase(),
-      name: contactName,
+      email: email.toLowerCase(),
+      name,
       plan: 'core',
       status: 'active',
-      stripeSubscriptionId: subscriptionId,
+      ghlSubAccount: contactId,
     },
   })
 
-  const locationId = await provisionSubAccount(contactName, contactEmail, contactId)
+  const { locationId } = await provisionSubAccount(name, email, contactId)
 
   await prisma.user.update({
     where: { id: user.id },
-    data: { ghlLocationId: locationId, ghlSubAccount: contactId },
+    data: { ghlLocationId: locationId },
   })
 
   await updateGHLContact(contactId, {
@@ -119,29 +90,33 @@ async function handleOrderFulfilled(payload: GHLOrderFulfilledPayload) {
     loginUrl: `${process.env.NEXT_PUBLIC_TOOLS_URL ?? 'https://tools.reiblast.app'}/login`,
   })
 
-  await sendWelcomeEmail(contactName, contactEmail)
+  await sendWelcomeEmail(name, email)
 
-  console.log(`[GHL webhook] OrderFulfilled processed — user=${user.id} location=${locationId}`)
+  console.log(`[GHL webhook] order.fulfilled success — user=${user.id} location=${locationId}`)
+
+  return NextResponse.json({ success: true, locationId })
 }
 
-async function handleSubscriptionCancelled(payload: GHLSubscriptionCancelledPayload) {
-  const { contactId, contactEmail } = payload
+async function handleSubscriptionCancelled(payload: GHLPayload) {
+  const { email } = payload.contact
 
-  const user = await prisma.user.updateMany({
-    where: { email: contactEmail.toLowerCase() },
-    data: { status: 'inactive' },
+  const user = await prisma.user.findUnique({
+    where: { email: email.toLowerCase() },
+    select: { id: true, ghlLocationId: true },
   })
 
-  if (user.count > 0 && contactId) {
-    const record = await prisma.user.findUnique({
-      where: { email: contactEmail.toLowerCase() },
-      select: { ghlLocationId: true },
+  if (user) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { status: 'inactive' },
     })
-    if (record?.ghlLocationId) {
-      await suspendSubAccount(record.ghlLocationId)
+
+    if (user.ghlLocationId) {
+      await suspendSubAccount(user.ghlLocationId)
     }
-    await updateGHLContact(contactId, { status: 'inactive' })
   }
 
-  console.log(`[GHL webhook] SubscriptionCancelled processed — email=${contactEmail}`)
+  console.log(`[GHL webhook] subscription.cancelled success — email=${email}`)
+
+  return NextResponse.json({ success: true })
 }

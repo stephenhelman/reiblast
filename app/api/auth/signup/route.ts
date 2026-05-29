@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/prisma'
-import { createCheckoutSession } from '@/lib/stripe'
 
 export async function POST(req: NextRequest) {
   try {
@@ -32,9 +31,7 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    const checkoutUrl = await createCheckoutSession(email.toLowerCase())
-
-    return NextResponse.json({ success: true, checkoutUrl })
+    return NextResponse.json({ success: true })
   } catch (err) {
     console.error('[signup]', err)
     return NextResponse.json({ error: 'Internal server error.' }, { status: 500 })
