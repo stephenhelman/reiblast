@@ -1,3 +1,5 @@
+export {} // keeps this file a valid TS module while the route is commented out
+
 // ─── Phase 2: Self-serve signup (restore when ready) ───────────────────────────
 // GHL handles payment and account creation via webhook for now.
 // Uncomment this route when adding direct signup back to the app.

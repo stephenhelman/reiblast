@@ -1,6 +1,8 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  serverExternalPackages: ["@prisma/client", "bcryptjs"],
+  experimental: {
+    serverComponentsExternalPackages: ["@prisma/client", "bcryptjs"],
+  },
   images: {
     remotePatterns: [
       { protocol: "https", hostname: "reiblast.app" },
