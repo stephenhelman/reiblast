@@ -142,7 +142,7 @@ function AnalyzerContent() {
   const [analyzing, setAnalyzing] = useState(false)
 
   const inputRef = useRef<HTMLInputElement>(null)
-  const acRef = useRef<ReturnType<typeof window.google.maps.places.Autocomplete> | null>(null)
+  const acRef = useRef<InstanceType<typeof window.google.maps.places.Autocomplete> | null>(null)
   const latRef = useRef<number>(0)
   const lngRef = useRef<number>(0)
 
