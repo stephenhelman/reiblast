@@ -1,8 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Input from '@/components/shared/Input'
 import Button from '@/components/shared/Button'
+import MinimalHeader from '@/components/tools/MinimalHeader'
 
 interface ServiceState {
   apiKey: string
@@ -19,7 +21,11 @@ interface Lead {
 
 const PROPERTY_TYPES = ['All', 'SFR', 'MFR', 'Land', 'Commercial']
 
-export default function LeadsPage() {
+function LeadsContent() {
+  const searchParams = useSearchParams()
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const token = searchParams.get('token') // Phase 2: passed to API calls
+
   const [dealMachine, setDealMachine] = useState<ServiceState>({ apiKey: '', connected: false })
   const [batchLeads, setBatchLeads] = useState<ServiceState>({ apiKey: '', connected: false })
   const [market, setMarket] = useState('')
@@ -64,7 +70,6 @@ export default function LeadsPage() {
   }
 
   function pullList() {
-    // Stub: generate mock leads
     const count = Math.min(parseInt(listSize) || 10, 500)
     const mocked: Lead[] = Array.from({ length: Math.min(count, 5) }, (_, i) => ({
       ownerName: `Owner ${i + 1}`,
@@ -78,22 +83,15 @@ export default function LeadsPage() {
   }
 
   return (
-    <div>
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold text-white mb-2">Lead Sourcing</h1>
-        <p className="text-white/50">Connect a list provider, pull targeted leads, and import to your CRM.</p>
-      </div>
-
+    <div className="max-w-6xl mx-auto px-6 py-8">
       {/* Connection cards */}
       <div className="grid md:grid-cols-2 gap-6 mb-8">
-        {/* DealMachine */}
         <div className="bg-surface border border-border-default rounded-xl p-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-white font-semibold text-lg">DealMachine</h2>
             {dealMachine.connected && (
               <span className="flex items-center gap-1.5 text-xs font-medium text-green-400 bg-green-400/10 border border-green-400/20 px-3 py-1 rounded-full">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                Connected
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400" />Connected
               </span>
             )}
           </div>
@@ -107,29 +105,23 @@ export default function LeadsPage() {
                 onChange={(e) => setDealMachine((s) => ({ ...s, apiKey: e.target.value }))}
                 className="flex-1 bg-surface-2 text-white text-sm rounded-lg border border-white/10 focus:border-gold px-3 py-2.5 outline-none placeholder:text-white/30"
               />
-              <Button variant="outline" size="sm" onClick={() => connectService('dm')} disabled={!dealMachine.apiKey}>
-                Connect
-              </Button>
+              <Button variant="outline" size="sm" onClick={() => connectService('dm')} disabled={!dealMachine.apiKey}>Connect</Button>
             </div>
           ) : (
-            <Button variant="ghost" size="sm" onClick={() => disconnectService('dm')}>
-              Disconnect
-            </Button>
+            <Button variant="ghost" size="sm" onClick={() => disconnectService('dm')}>Disconnect</Button>
           )}
         </div>
 
-        {/* BatchLeads */}
         <div className="bg-surface border border-border-default rounded-xl p-6">
           <div className="flex items-center justify-between mb-3">
             <h2 className="text-white font-semibold text-lg">BatchLeads</h2>
             {batchLeads.connected && (
               <span className="flex items-center gap-1.5 text-xs font-medium text-green-400 bg-green-400/10 border border-green-400/20 px-3 py-1 rounded-full">
-                <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
-                Connected
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400" />Connected
               </span>
             )}
           </div>
-          <p className="text-white/40 text-sm mb-4">Access BatchLeads' skip-tracing and list-building tools.</p>
+          <p className="text-white/40 text-sm mb-4">Access BatchLeads&apos; skip-tracing and list-building tools.</p>
           {!batchLeads.connected ? (
             <div className="flex gap-2">
               <input
@@ -139,14 +131,10 @@ export default function LeadsPage() {
                 onChange={(e) => setBatchLeads((s) => ({ ...s, apiKey: e.target.value }))}
                 className="flex-1 bg-surface-2 text-white text-sm rounded-lg border border-white/10 focus:border-gold px-3 py-2.5 outline-none placeholder:text-white/30"
               />
-              <Button variant="outline" size="sm" onClick={() => connectService('bl')} disabled={!batchLeads.apiKey}>
-                Connect
-              </Button>
+              <Button variant="outline" size="sm" onClick={() => connectService('bl')} disabled={!batchLeads.apiKey}>Connect</Button>
             </div>
           ) : (
-            <Button variant="ghost" size="sm" onClick={() => disconnectService('bl')}>
-              Disconnect
-            </Button>
+            <Button variant="ghost" size="sm" onClick={() => disconnectService('bl')}>Disconnect</Button>
           )}
         </div>
       </div>
@@ -160,13 +148,7 @@ export default function LeadsPage() {
           </div>
         )}
         <div className="grid md:grid-cols-3 gap-4 mb-4">
-          <Input
-            label="Market / Zip Code"
-            type="text"
-            placeholder="75201 or Dallas, TX"
-            value={market}
-            onChange={(e) => setMarket(e.target.value)}
-          />
+          <Input label="Market / Zip Code" type="text" placeholder="75201 or Dallas, TX" value={market} onChange={(e) => setMarket(e.target.value)} />
           <div className="flex flex-col gap-1">
             <label className="text-sm font-medium text-white/80">Property Type</label>
             <select
@@ -174,22 +156,12 @@ export default function LeadsPage() {
               onChange={(e) => setPropertyType(e.target.value)}
               className="bg-surface-2 text-white rounded-lg border border-white/10 focus:border-gold px-4 py-3 outline-none transition-colors"
             >
-              {PROPERTY_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
+              {PROPERTY_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
-          <Input
-            label="List Size (max 500)"
-            type="number"
-            placeholder="100"
-            value={listSize}
-            onChange={(e) => setListSize(e.target.value)}
-          />
+          <Input label="List Size (max 500)" type="number" placeholder="100" value={listSize} onChange={(e) => setListSize(e.target.value)} />
         </div>
-        <Button variant="primary" size="md" onClick={pullList} disabled={!anyConnected || !market}>
-          Pull List
-        </Button>
+        <Button variant="primary" size="md" onClick={pullList} disabled={!anyConnected || !market}>Pull List</Button>
       </div>
 
       {/* Results table */}
@@ -198,22 +170,16 @@ export default function LeadsPage() {
           <h2 className="text-white font-semibold">Results</h2>
           {leads.length > 0 && (
             <div className="group relative">
-              <Button variant="outline" size="sm" disabled>
-                Import Selected
-              </Button>
+              <Button variant="outline" size="sm" disabled>Import Selected</Button>
               <div className="absolute bottom-full right-0 mb-2 hidden group-hover:block">
-                <div className="bg-surface-2 border border-border-default text-white/70 text-xs px-3 py-2 rounded-lg whitespace-nowrap">
-                  🔒 CRM Sync required
-                </div>
+                <div className="bg-surface border border-border-default text-white/70 text-xs px-3 py-2 rounded-lg whitespace-nowrap">🔒 CRM Sync required</div>
               </div>
             </div>
           )}
         </div>
 
         {!listPulled ? (
-          <div className="px-6 py-16 text-center text-white/30">
-            Pull a list above to see results
-          </div>
+          <div className="px-6 py-16 text-center text-white/30">Pull a list above to see results</div>
         ) : leads.length === 0 ? (
           <div className="px-6 py-16 text-center text-white/30">No leads found for that search.</div>
         ) : (
@@ -221,9 +187,7 @@ export default function LeadsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-border-default">
-                  <th className="text-left px-6 py-3 text-white/40 font-medium">
-                    <input type="checkbox" className="accent-[#F5C842]" />
-                  </th>
+                  <th className="text-left px-6 py-3 text-white/40 font-medium"><input type="checkbox" className="accent-gold" /></th>
                   {['Owner Name', 'Property Address', 'Mailing Address', 'Phone', 'Status', 'Actions'].map((h) => (
                     <th key={h} className="text-left px-6 py-3 text-white/40 font-medium">{h}</th>
                   ))}
@@ -232,30 +196,19 @@ export default function LeadsPage() {
               <tbody>
                 {leads.map((lead, i) => (
                   <tr key={i} className="border-b border-border-default hover:bg-white/2 transition-colors">
-                    <td className="px-6 py-4">
-                      <input type="checkbox" className="accent-[#F5C842]" />
-                    </td>
+                    <td className="px-6 py-4"><input type="checkbox" className="accent-gold" /></td>
                     <td className="px-6 py-4 text-white">{lead.ownerName}</td>
                     <td className="px-6 py-4 text-white/70">{lead.propertyAddress}</td>
                     <td className="px-6 py-4 text-white/70">{lead.mailingAddress}</td>
                     <td className="px-6 py-4 text-white/70">{lead.phone}</td>
                     <td className="px-6 py-4">
-                      <span className="text-xs bg-gold/10 text-gold border border-gold/20 px-2 py-1 rounded-full">
-                        {lead.status}
-                      </span>
+                      <span className="text-xs bg-gold/10 text-gold border border-gold/20 px-2 py-1 rounded-full">{lead.status}</span>
                     </td>
                     <td className="px-6 py-4">
                       <div className="group relative inline-block">
-                        <button
-                          disabled
-                          className="text-xs border border-gold/40 text-gold/40 px-3 py-1.5 rounded-lg cursor-not-allowed"
-                        >
-                          🔒 Import
-                        </button>
+                        <button disabled className="text-xs border border-gold/40 text-gold/40 px-3 py-1.5 rounded-lg cursor-not-allowed">🔒 Import</button>
                         <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block">
-                          <div className="bg-surface-2 border border-border-default text-white/70 text-xs px-3 py-2 rounded-lg whitespace-nowrap">
-                            CRM Sync coming soon
-                          </div>
+                          <div className="bg-surface border border-border-default text-white/70 text-xs px-3 py-2 rounded-lg whitespace-nowrap">CRM Sync coming soon</div>
                         </div>
                       </div>
                     </td>
@@ -271,6 +224,17 @@ export default function LeadsPage() {
         <span>ℹ</span>
         Imported leads will be tagged <span className="text-gold">New Lead</span> in your REIblast CRM automatically.
       </p>
+    </div>
+  )
+}
+
+export default function LeadsPage() {
+  return (
+    <div className="min-h-screen bg-black">
+      <MinimalHeader title="Lead Sourcing" />
+      <Suspense>
+        <LeadsContent />
+      </Suspense>
     </div>
   )
 }

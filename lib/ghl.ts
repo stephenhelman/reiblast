@@ -1,31 +1,175 @@
+const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
+
+function agencyHeaders() {
+  return {
+    Authorization: `Bearer ${process.env.GHL_AGENCY_API_KEY}`,
+    'Content-Type': 'application/json',
+    Version: '2021-07-28',
+  }
+}
+
+function hqHeaders() {
+  return {
+    Authorization: `Bearer ${process.env.GHL_HQ_API_KEY}`,
+    'Content-Type': 'application/json',
+    Version: '2021-07-28',
+  }
+}
+
+export async function createHQContact(
+  name: string,
+  email: string,
+  phone?: string
+): Promise<{ contactId: string }> {
+  const res = await fetch(`${GHL_BASE_URL}/contacts/`, {
+    method: 'POST',
+    headers: hqHeaders(),
+    body: JSON.stringify({
+      locationId: process.env.GHL_HQ_LOCATION_ID,
+      name,
+      email,
+      phone: phone || '',
+    }),
+  })
+  if (!res.ok) throw new Error('Failed to create HQ contact')
+  const data = await res.json()
+  return { contactId: data.contact.id }
+}
+
+export async function addTag(contactId: string, tag: string): Promise<boolean> {
+  const res = await fetch(`${GHL_BASE_URL}/contacts/${contactId}/tags`, {
+    method: 'POST',
+    headers: hqHeaders(),
+    body: JSON.stringify({ tags: [tag] }),
+  })
+  return res.ok
+}
+
+export async function removeTag(contactId: string, tag: string): Promise<boolean> {
+  const res = await fetch(`${GHL_BASE_URL}/contacts/${contactId}/tags`, {
+    method: 'DELETE',
+    headers: hqHeaders(),
+    body: JSON.stringify({ tags: [tag] }),
+  })
+  return res.ok
+}
+
+export async function moveToStage(contactId: string, stage: string): Promise<boolean> {
+  const searchRes = await fetch(
+    `${GHL_BASE_URL}/opportunities/search?contact_id=${contactId}&pipeline_id=${process.env.GHL_ONBOARDING_PIPELINE_ID}`,
+    { headers: hqHeaders() }
+  )
+
+  const searchData = await searchRes.json()
+  const opportunity = searchData?.opportunities?.[0]
+
+  if (opportunity) {
+    const updateRes = await fetch(`${GHL_BASE_URL}/opportunities/${opportunity.id}`, {
+      method: 'PUT',
+      headers: hqHeaders(),
+      body: JSON.stringify({ name: stage }),
+    })
+    return updateRes.ok
+  } else {
+    const createRes = await fetch(`${GHL_BASE_URL}/opportunities/`, {
+      method: 'POST',
+      headers: hqHeaders(),
+      body: JSON.stringify({
+        pipelineId: process.env.GHL_ONBOARDING_PIPELINE_ID,
+        locationId: process.env.GHL_HQ_LOCATION_ID,
+        name: stage,
+        contactId,
+        status: 'open',
+      }),
+    })
+    return createRes.ok
+  }
+}
+
 export async function provisionSubAccount(
   name: string,
   email: string,
-  contactId: string,
-): Promise<{ locationId: string }> {
-  // TODO Phase 2: POST to GHL agency API to create sub-account
-  // TODO Phase 2: Apply REIblast Core snapshot to new sub-account
-  // TODO Phase 2: Create GHL user with email and temp password
-  console.log(`[GHL] Provisioning sub-account for ${email}`)
-  return { locationId: `mock-location-${Date.now()}` }
+  businessName: string,
+  contactId: string
+): Promise<{ locationId: string; userId: string; tempPassword: string }> {
+  const tempPassword = `REI${Math.random().toString(36).slice(2, 8).toUpperCase()}!`
+
+  const locationRes = await fetch(`${GHL_BASE_URL}/locations/`, {
+    method: 'POST',
+    headers: agencyHeaders(),
+    body: JSON.stringify({
+      name: businessName || `${name}'s REIblast Account`,
+      email,
+      snapshotId: process.env.GHL_SNAPSHOT_ID,
+      address: '',
+      city: '',
+      state: '',
+      country: 'US',
+      timezone: 'America/Chicago',
+    }),
+  })
+
+  if (!locationRes.ok) {
+    const err = await locationRes.text()
+    throw new Error(`Failed to create sub-account: ${err}`)
+  }
+
+  const locationData = await locationRes.json()
+  const locationId = locationData.location.id
+
+  const userRes = await fetch(`${GHL_BASE_URL}/users/`, {
+    method: 'POST',
+    headers: agencyHeaders(),
+    body: JSON.stringify({
+      companyId: locationId,
+      firstName: name.split(' ')[0],
+      lastName: name.split(' ').slice(1).join(' ') || '',
+      email,
+      password: tempPassword,
+      type: 'account',
+      role: 'user',
+      locationIds: [locationId],
+    }),
+  })
+
+  if (!userRes.ok) {
+    const err = await userRes.text()
+    throw new Error(`Failed to create GHL user: ${err}`)
+  }
+
+  const userData = await userRes.json()
+  return { locationId, userId: userData.id, tempPassword }
 }
 
 export async function suspendSubAccount(locationId: string): Promise<boolean> {
-  // TODO Phase 2: PUT to GHL agency API to suspend sub-account
-  console.log(`[GHL] Suspending sub-account ${locationId}`)
-  return true
+  const res = await fetch(`${GHL_BASE_URL}/locations/${locationId}`, {
+    method: 'PUT',
+    headers: agencyHeaders(),
+    body: JSON.stringify({ suspended: true }),
+  })
+  return res.ok
 }
 
-export async function updateGHLContact(
-  contactId: string,
-  fields: {
-    plan?: string
-    status?: string
-    locationId?: string
-    loginUrl?: string
-  },
+export async function populateA2PSite(
+  locationId: string,
+  businessData: {
+    businessName: string
+    businessAddress: string
+    businessCity: string
+    businessState: string
+    businessZip: string
+    businessPhone: string
+    businessEmail: string
+    websiteUrl?: string
+  }
 ): Promise<boolean> {
-  // TODO Phase 2: PUT to GHL contacts API to update custom fields
-  console.log(`[GHL] Updating contact ${contactId}`, fields)
-  return true
+  const res = await fetch(`${GHL_BASE_URL}/locations/${locationId}/customValues`, {
+    method: 'POST',
+    headers: agencyHeaders(),
+    body: JSON.stringify({
+      name: 'A2P Business Info',
+      value: JSON.stringify(businessData),
+    }),
+  })
+  return res.ok
 }

@@ -8,18 +8,38 @@ datasource db {
 }
 
 model User {
-  id            String   @id @default(cuid())
-  email         String   @unique
-  name          String?
-  passwordHash  String?
-  plan          String   @default("core")
-  status        String   @default("active")
-  ghlLocationId String?
-  ghlSubAccount String?
-  stripeCustomerId     String?
-  stripeSubscriptionId String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id                  String   @id @default(cuid())
+  email               String   @unique
+  name                String?
+  plan                String   @default("core")
+  status              String   @default("pending_onboarding")
+
+  // Whop
+  whopMemberId        String?
+
+  // Business / A2P info
+  businessName        String?
+  ein                 String?
+  businessType        String?
+  businessAddress     String?
+  businessCity        String?
+  businessState       String?
+  businessZip         String?
+  businessPhone       String?
+  businessEmail       String?
+  websiteUrl          String?
+  targetMarket        String?
+  smsComplianceAgreed Boolean  @default(false)
+  onboardingComplete  Boolean  @default(false)
+
+  // GHL
+  ghlContactId        String?
+  ghlLocationId       String?
+  ghlUserId           String?
+  onboardingStage     String?
+
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model PromoCode {

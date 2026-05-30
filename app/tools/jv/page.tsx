@@ -4,10 +4,14 @@ import { useState, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Input from '@/components/shared/Input'
 import Button from '@/components/shared/Button'
+import MinimalHeader from '@/components/tools/MinimalHeader'
 import { JV_SPLIT_CORE } from '@/lib/constants'
 
 function JVForm() {
   const params = useSearchParams()
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const token = params.get('token') // Phase 2: passed to API calls
+
   const fileRef = useRef<HTMLInputElement>(null)
 
   const [form, setForm] = useState({
@@ -25,12 +29,7 @@ function JVForm() {
   }
 
   return (
-    <div className="max-w-2xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-4xl font-bold text-white mb-2">Submit a JV Deal</h1>
-        <p className="text-white/50">Partner with the REIblast network to get your deal closed.</p>
-      </div>
-
+    <div className="max-w-2xl mx-auto px-6 py-8">
       <div className="bg-gold/10 border border-gold/30 rounded-xl px-5 py-4 mb-6 flex gap-3">
         <span className="text-gold text-lg shrink-0">ℹ</span>
         <p className="text-gold text-sm leading-relaxed">
@@ -42,42 +41,12 @@ function JVForm() {
       <div className="bg-surface border border-border-default rounded-xl p-6 space-y-4">
         <div className="grid grid-cols-2 gap-4">
           <div className="col-span-2">
-            <Input
-              label="Property Address"
-              type="text"
-              placeholder="123 Main St, Dallas TX"
-              value={form.address}
-              onChange={set('address')}
-            />
+            <Input label="Property Address" type="text" placeholder="123 Main St, Dallas TX" value={form.address} onChange={set('address')} />
           </div>
-          <Input
-            label="Market / City"
-            type="text"
-            placeholder="Dallas, TX"
-            value={form.market}
-            onChange={set('market')}
-          />
-          <Input
-            label="ARV"
-            type="number"
-            placeholder="200000"
-            value={form.arv}
-            onChange={set('arv')}
-          />
-          <Input
-            label="Purchase Price"
-            type="number"
-            placeholder="120000"
-            value={form.purchasePrice}
-            onChange={set('purchasePrice')}
-          />
-          <Input
-            label="Assignment Fee"
-            type="number"
-            placeholder="10000"
-            value={form.assignmentFee}
-            onChange={set('assignmentFee')}
-          />
+          <Input label="Market / City" type="text" placeholder="Dallas, TX" value={form.market} onChange={set('market')} />
+          <Input label="ARV" type="number" placeholder="200000" value={form.arv} onChange={set('arv')} />
+          <Input label="Purchase Price" type="number" placeholder="120000" value={form.purchasePrice} onChange={set('purchasePrice')} />
+          <Input label="Assignment Fee" type="number" placeholder="10000" value={form.assignmentFee} onChange={set('assignmentFee')} />
         </div>
 
         <div className="flex flex-col gap-1">
@@ -105,16 +74,11 @@ function JVForm() {
 
         <div className="pt-2">
           <div className="group relative">
-            <Button
-              variant="primary"
-              size="lg"
-              className="w-full opacity-50 cursor-not-allowed"
-              disabled
-            >
+            <Button variant="primary" size="lg" className="w-full opacity-50 cursor-not-allowed" disabled>
               Submit JV Deal
             </Button>
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block">
-              <div className="bg-surface-2 border border-border-default text-white/70 text-xs px-3 py-2 rounded-lg whitespace-nowrap">
+              <div className="bg-surface border border-border-default text-white/70 text-xs px-3 py-2 rounded-lg whitespace-nowrap">
                 🔒 Connect your CRM to enable submissions
               </div>
             </div>
@@ -127,8 +91,11 @@ function JVForm() {
 
 export default function JVPage() {
   return (
-    <Suspense>
-      <JVForm />
-    </Suspense>
+    <div className="min-h-screen bg-black">
+      <MinimalHeader title="JV with Ari" />
+      <Suspense>
+        <JVForm />
+      </Suspense>
+    </div>
   )
 }
