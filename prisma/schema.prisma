@@ -11,6 +11,7 @@ model User {
   id                  String   @id @default(cuid())
   email               String   @unique
   name                String?
+  passwordHash        String?
   plan                String   @default("core")
   status              String   @default("pending_onboarding")
 
