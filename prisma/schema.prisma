@@ -55,3 +55,24 @@ model PromoCode {
   usageLimit      Int?
   createdAt       DateTime @default(now())
 }
+
+model Deal {
+  id            String   @id @default(cuid())
+  locationId    String
+  address       String
+  arv           Float
+  endBuyerMax   Float
+  repairLevel   String
+  repairs       Float
+  wholesaleFee  Float
+  mao           Float
+  anchorOffer   Float
+  investorPct   Float
+  narrative     String
+  compsUsed     Int
+  dealUrl       String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([locationId, address])
+}

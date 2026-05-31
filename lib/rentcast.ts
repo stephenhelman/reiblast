@@ -17,15 +17,23 @@ export async function getPropertyDetails(address: string) {
 }
 
 export async function getSalesComps(
-  address: string,
   latitude: number,
   longitude: number,
-  radius: number = 0.5,
-  months: number = 6
+  beds: number,
+  sqft: number
 ) {
-  const maxAge = months * 30
+  const params = new URLSearchParams({
+    latitude: String(latitude),
+    longitude: String(longitude),
+    radius: '1',
+    propertyType: 'Single Family',
+    bedrooms: `${beds - 1}:${beds + 1}`,
+    squareFootage: `${sqft - 500}:${sqft + 500}`,
+    saleDateRange: '*:365',
+    limit: '50',
+  })
   const res = await fetch(
-    `${RENTCAST_BASE}/avm/sales/comps?address=${encodeURIComponent(address)}&latitude=${latitude}&longitude=${longitude}&radius=${radius}&maxAge=${maxAge}&limit=25`,
+    `${RENTCAST_BASE}/properties/sale/comps?${params}`,
     {
       headers: {
         'X-Api-Key': process.env.RENTCAST_API_KEY!,

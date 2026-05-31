@@ -1,46 +1,91 @@
 import { NextRequest, NextResponse } from 'next/server'
 
-const ARV_SYSTEM_PROMPT = `You are a real estate wholesale deal analyzer.
-You receive a subject property and comparable sales selected by the user. Analyze the comps and produce a deal analysis for a wholesale investor.
+const ARV_SYSTEM_PROMPT = `You are a real estate deal analyzer for wholesale investors. You analyze a subject property and comparable sales and return a structured JSON object. You never fabricate data. You only analyze what is provided.
 
-Respond with valid JSON only. No preamble, no markdown, no text outside the JSON.
+ADJUSTMENT TABLE
+These adjustments have already been applied to each comp's adjusted_price before being sent to you. Use adjusted_price — not sale_price — in all ARV and as-is calculations.
 
-Return exactly this structure:
+COMP CLASSIFICATION
+Classify each comp as RENOVATED or AS_IS.
+
+RENOVATED indicators: staged listing, high $/sqft for area, retail financing, short DOM, recently updated kitchen/bath mentioned, clear fix-and-flip characteristics.
+
+AS_IS indicators: cash sale, distressed language (sold as-is, investor special, needs work, estate sale), low $/sqft, long DOM, clearly below neighborhood standard.
+
+When classification is ambiguous: default to RENOVATED and note uncertainty in type_reasoning.
+
+ARV ESTIMATION
+Use only RENOVATED comps (adjusted_price) to estimate ARV.
+Weight by: proximity (closer = higher weight), recency (more recent = higher weight), similarity after adjustment (less total adjustment = higher weight).
+
+Factor in the subject property condition:
+- light: subject is livable, minor work only — ARV should reflect full retail value
+- full: moderate renovation needed — ARV is achievable but buyer needs margin
+- heavy: significant investment required — flag if ARV spread is thin
+
+Return arv_estimate, arv_low, arv_high, arv_confidence (high/medium/low), arv_confidence_reason.
+
+If fewer than 2 renovated comps: use all comps, apply confidence penalty, note in warnings.
+
+AS-IS VALUE ESTIMATION
+Use only AS_IS comps (adjusted_price) to estimate current as-is value.
+If no AS_IS comps: return null values and note absence.
+Return as_is_value, as_is_low, as_is_high, as_is_note.
+
+EXIT STRATEGY
+Based on ARV, as-is value, condition, and comp mix — recommend one of:
+WHOLESALE, FIX_AND_FLIP, SUBJECT_TO, PASS
+Provide 2-3 sentences of plain-language reasoning.
+
+DEAL NARRATIVE
+3-5 sentences for a beginner wholesaler. Plain language. Cover:
+- What the comps say about this neighborhood
+- Whether this is worth pursuing given the condition
+- What to watch out for before making an offer
+
+WARNINGS
+Return array of warning strings for:
+- Fewer than 3 comps total
+- Fewer than 2 renovated comps
+- ARV spread exceeds 15% of estimate
+- As-is value within 10% of ARV (thin spread)
+- All comps same type
+- Any comp older than 9 months
+- Any comp required more than $20,000 total adjustment
+
+OUTPUT — return only valid JSON, no markdown, no preamble:
+
 {
+  "comps": [
+    {
+      "address": "string",
+      "sale_price": number,
+      "adjusted_price": number,
+      "type": "RENOVATED" | "AS_IS",
+      "type_reasoning": "string",
+      "weight": "high" | "medium" | "low"
+    }
+  ],
   "arv": {
+    "estimate": number,
     "low": number,
     "high": number,
-    "estimate": number,
-    "pricePerSqft": number,
     "confidence": "high" | "medium" | "low",
-    "confidenceReason": string
+    "confidence_reason": "string"
   },
-  "repairs": {
-    "light": { "low": number, "high": number, "description": string },
-    "medium": { "low": number, "high": number, "description": string },
-    "heavy": { "low": number, "high": number, "description": string }
+  "as_is": {
+    "value": number | null,
+    "low": number | null,
+    "high": number | null,
+    "note": "string"
   },
-  "mao": { "light": number, "medium": number, "heavy": number },
-  "dealScore": "strong" | "borderline" | "pass",
-  "dealScoreReason": string,
-  "narrative": string,
-  "bestComp": string
-}
-
-MAO formula: (ARV * 0.70) - repairs - 5000
-5000 = minimum assignment fee
-
-Repair guidelines:
-- Light: cosmetic only, paint, flooring, fixtures. 5-15 per sqft.
-- Medium: kitchen update, bath refresh, flooring, paint, minor systems. 20-40 per sqft.
-- Heavy: full gut, kitchen, baths, roof, HVAC, electrical, plumbing. 50-100 per sqft.
-
-Adjust for property age, sqft, and state labor costs.
-
-Deal score:
-- strong: clear margin at medium rehab MAO
-- borderline: works at light rehab only
-- pass: MAO below any reasonable asking price`
+  "exit_strategy": {
+    "recommendation": "WHOLESALE" | "FIX_AND_FLIP" | "SUBJECT_TO" | "PASS",
+    "reasoning": "string"
+  },
+  "narrative": "string",
+  "warnings": ["string"]
+}`
 
 export async function POST(req: NextRequest) {
   let body: { subject?: unknown; comps?: unknown[] }
@@ -54,8 +99,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'subject and comps are required' }, { status: 400 })
   }
 
-  if (!Array.isArray(body.comps) || body.comps.length < 3 || body.comps.length > 6) {
-    return NextResponse.json({ error: 'Select between 3 and 6 comps' }, { status: 400 })
+  if (!Array.isArray(body.comps) || body.comps.length < 3) {
+    return NextResponse.json({ error: 'Select at least 3 comps' }, { status: 400 })
   }
 
   try {
@@ -68,7 +113,7 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-20250514',
-        max_tokens: 1000,
+        max_tokens: 1500,
         system: ARV_SYSTEM_PROMPT,
         messages: [
           {
@@ -87,18 +132,13 @@ export async function POST(req: NextRequest) {
 
     const claudeData = await claudeRes.json()
     let text = claudeData.content?.[0]?.text || ''
-
-    // Strip markdown fences if present
     text = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
 
     const analysis = JSON.parse(text)
 
-    // Validate required top-level keys
-    const required = ['arv', 'repairs', 'mao', 'dealScore', 'dealScoreReason', 'narrative', 'bestComp']
+    const required = ['comps', 'arv', 'as_is', 'exit_strategy', 'narrative', 'warnings']
     for (const key of required) {
-      if (!(key in analysis)) {
-        throw new Error(`Missing field in analysis: ${key}`)
-      }
+      if (!(key in analysis)) throw new Error(`Missing field in analysis: ${key}`)
     }
 
     return NextResponse.json(analysis)
