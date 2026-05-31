@@ -1,4 +1,65 @@
+import { prisma } from '@/lib/prisma'
+
 const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
+
+// Buffer: refresh the token if it expires within 10 minutes
+const TOKEN_REFRESH_BUFFER_MS = 10 * 60 * 1000
+
+export async function getLocationToken(locationId: string): Promise<string> {
+  // 1. Check cache
+  const user = await prisma.user.findFirst({
+    where: { ghlLocationId: locationId },
+    select: { id: true, ghlLocationToken: true, ghlLocationTokenExpiresAt: true },
+  })
+
+  if (
+    user?.ghlLocationToken &&
+    user.ghlLocationTokenExpiresAt &&
+    user.ghlLocationTokenExpiresAt.getTime() - Date.now() > TOKEN_REFRESH_BUFFER_MS
+  ) {
+    console.log('[ghl/getLocationToken] Using cached token for location:', locationId)
+    return user.ghlLocationToken
+  }
+
+  // 2. Fetch a fresh token
+  console.log('[ghl/getLocationToken] Refreshing token for location:', locationId)
+  const res = await fetch(`${GHL_BASE_URL}/oauth/locationToken`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${process.env.GHL_AGENCY_API_KEY}`,
+      'Content-Type': 'application/json',
+      Version: '2021-07-28',
+    },
+    body: JSON.stringify({
+      companyId: process.env.GHL_COMPANY_ID,
+      locationId,
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`GHL location token fetch failed (${res.status}): ${err}`)
+  }
+
+  const data = await res.json()
+  console.log('[ghl/getLocationToken] Token response:', JSON.stringify(data))
+
+  const token: string = data.access_token ?? data.token
+  const expiresIn: number = data.expires_in ?? 86400 // default 24h if not returned
+  const expiresAt = new Date(Date.now() + expiresIn * 1000)
+
+  if (!token) throw new Error('GHL returned no access_token in location token response')
+
+  // 3. Cache in DB
+  if (user) {
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { ghlLocationToken: token, ghlLocationTokenExpiresAt: expiresAt },
+    })
+  }
+
+  return token
+}
 
 function agencyHeaders() {
   return {

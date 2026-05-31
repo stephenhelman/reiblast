@@ -1,18 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { HighLevel, GHLError } from '@gohighlevel/api-client'
 import { prisma } from '@/lib/prisma'
+import { getLocationToken } from '@/lib/ghl'
 import { TOOLS_URL } from '@/lib/constants'
 
-function makeGHLClient(apiKey: string) {
-  return new HighLevel({ privateIntegrationToken: apiKey })
-}
-
-async function resolveLocationApiKey(locationId: string): Promise<string | null> {
-  const user = await prisma.user.findFirst({
-    where: { ghlLocationId: locationId },
-    select: { ghlLocationApiKey: true },
-  })
-  return user?.ghlLocationApiKey ?? null
+function makeGHLClient(token: string) {
+  return new HighLevel({ privateIntegrationToken: token })
 }
 
 interface SaveBody {
@@ -105,10 +98,15 @@ export async function POST(req: NextRequest) {
 
     let ghlWarning: string | undefined
 
-    const locationApiKey = await resolveLocationApiKey(locationId)
-    console.log('[analyzer/save] Location API key resolved:', locationApiKey ? 'yes' : 'not found')
+    let locationToken: string | null = null
+    try {
+      locationToken = await getLocationToken(locationId)
+    } catch (err) {
+      console.warn('[analyzer/save] Could not get location token — GHL sync skipped:', err)
+    }
+    console.log('[analyzer/save] Location token resolved:', locationToken ? 'yes' : 'not found')
 
-    if (locationApiKey) {
+    if (locationToken) {
       // CHANGE 3 — custom fields sent with both key and id (id undefined until GHL confirms field IDs)
       const customFields = [
         { key: 'analysis_url',              id: undefined, field_value: dealUrl },
@@ -130,7 +128,7 @@ export async function POST(req: NextRequest) {
       )
 
       try {
-        const ghl = makeGHLClient(locationApiKey)
+        const ghl = makeGHLClient(locationToken)
         const ghlResponse = await ghl.contacts.upsertContact(
           {
             locationId,

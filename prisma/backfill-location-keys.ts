@@ -6,58 +6,68 @@
  *   npx tsx prisma/backfill-location-keys.ts
  */
 
-import 'dotenv/config'
-import { PrismaClient } from '@prisma/client'
+import dotenv from "dotenv";
+dotenv.config({ path: ".env.local" });
+dotenv.config(); // fallback to .env for anything not in .env.local
+import { PrismaClient } from "@prisma/client";
 
-const prisma = new PrismaClient()
-const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
+const prisma = new PrismaClient();
+const GHL_BASE_URL = "https://services.leadconnectorhq.com";
 
 async function getLocationApiKey(locationId: string): Promise<string | null> {
   const res = await fetch(`${GHL_BASE_URL}/locations/${locationId}`, {
     headers: {
       Authorization: `Bearer ${process.env.GHL_AGENCY_API_KEY}`,
-      'Content-Type': 'application/json',
-      Version: '2021-07-28',
+      "Content-Type": "application/json",
+      Version: "2021-07-28",
     },
-  })
+  });
   if (!res.ok) {
-    console.error(`  GHL error ${res.status} for location ${locationId}:`, await res.text())
-    return null
+    console.error(
+      `  GHL error ${res.status} for location ${locationId}:`,
+      await res.text(),
+    );
+    return null;
   }
-  const data = await res.json()
-  return data?.location?.apiKey ?? data?.apiKey ?? null
+  const data = await res.json();
+  console.log(data);
+  return data?.location?.apiKey ?? data?.apiKey ?? null;
 }
 
 async function main() {
   const users = await prisma.user.findMany({
     where: {
       ghlLocationId: { not: null },
-      ghlLocationApiKey: null,
     },
     select: { id: true, email: true, ghlLocationId: true },
-  })
+  });
 
-  console.log(`Found ${users.length} user(s) to backfill.`)
+  console.log(`Found ${users.length} user(s) to backfill.`);
 
   for (const user of users) {
-    console.log(`\nProcessing ${user.email} — locationId: ${user.ghlLocationId}`)
-    const apiKey = await getLocationApiKey(user.ghlLocationId!)
+    console.log(
+      `\nProcessing ${user.email} — locationId: ${user.ghlLocationId}`,
+    );
+    const apiKey = await getLocationApiKey(user.ghlLocationId!);
 
     if (!apiKey) {
-      console.warn(`  ⚠ No API key returned — skipping.`)
-      continue
+      console.warn(`  ⚠ No API key returned — skipping.`);
+      continue;
     }
 
     await prisma.user.update({
       where: { id: user.id },
       data: { ghlLocationApiKey: apiKey },
-    })
-    console.log(`  ✓ Stored API key (${apiKey.slice(0, 8)}…)`)
+    });
+    console.log(`  ✓ Stored API key (${apiKey.slice(0, 8)}…)`);
   }
 
-  console.log('\nBackfill complete.')
+  console.log("\nBackfill complete.");
 }
 
 main()
-  .catch((err) => { console.error(err); process.exit(1) })
-  .finally(() => prisma.$disconnect())
+  .catch((err) => {
+    console.error(err);
+    process.exit(1);
+  })
+  .finally(() => prisma.$disconnect());

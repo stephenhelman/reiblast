@@ -34,11 +34,13 @@ model User {
   onboardingComplete  Boolean  @default(false)
 
   // GHL
-  ghlContactId        String?
-  ghlLocationId       String?
-  ghlUserId           String?
-  ghlLocationApiKey   String?
-  onboardingStage     String?
+  ghlContactId              String?
+  ghlLocationId             String?
+  ghlUserId                 String?
+  ghlLocationApiKey         String?
+  ghlLocationToken          String?
+  ghlLocationTokenExpiresAt DateTime?
+  onboardingStage           String?
 
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
