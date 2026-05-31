@@ -29,8 +29,13 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const data = await getSalesComps(body.lat, body.lng, body.beds, body.sqft)
-    const records: unknown[] = Array.isArray(data) ? data : []
+    const records = await getSalesComps(body.lat, body.lng, body.beds, body.sqft)
+    console.log('[analyzer/comps] records before filter:', records.length)
+
+    if (records.length === 0) {
+      return NextResponse.json([])
+    }
+
     const now = Date.now()
 
     const mapped = records
