@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 
-const GHL_BASE = 'https://services.leadconnectorhq.com'
 const REDIRECT_URI = 'https://tools.reiblast.app/api/analyzer/callback'
 
 function htmlResponse(body: string, status = 200) {
@@ -180,7 +179,7 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const tokenRes = await fetch(`${GHL_BASE}/oauth/token`, {
+    const tokenRes = await fetch('https://services.leadconnectorhq.com/oauth/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -201,65 +200,48 @@ export async function GET(req: NextRequest) {
     }
 
     const data = await tokenRes.json()
-    const { access_token, refresh_token, expires_in, companyId } = data
+    console.log('[analyzer/callback] Full token response:', JSON.stringify(data))
+
+    const { access_token, refresh_token, expires_in, locationId, companyId } = data
 
     if (!access_token || !refresh_token) {
-      console.error('[analyzer/callback] OAuth callback error — missing tokens in response:', JSON.stringify(data))
+      console.error('[analyzer/callback] Missing tokens in response')
       return htmlResponse(ERROR_HTML, 500)
     }
 
     const expiresAt = new Date(Date.now() + (expires_in ?? 86400) * 1000)
 
-    console.log('[analyzer/callback] Company-level install detected for companyId', companyId)
+    if (locationId) {
+      // Sub-account level install — locationId comes directly
+      console.log('[analyzer/callback] Location-level install detected for locationId', locationId)
 
-    // ── Fetch all locations under this company ────────────────────────────────
+      await prisma.ghlToken.upsert({
+        where: { locationId },
+        create: { locationId, accessToken: access_token, refreshToken: refresh_token, expiresAt },
+        update: { accessToken: access_token, refreshToken: refresh_token, expiresAt },
+      })
 
-    console.log('[analyzer/callback] Fetching locations for company', companyId)
+      console.log('[analyzer/callback] Token stored for locationId', locationId)
+      return htmlResponse(SUCCESS_HTML)
 
-    let locationsStored = 0
+    } else if (companyId) {
+      // Company-level fallback — should not happen with new app
+      // but keep as safety net
+      console.warn('[analyzer/callback] Company-level token received — storing by companyId as fallback', companyId)
 
-    try {
-      const locRes = await fetch(
-        `${GHL_BASE}/locations/search?companyId=${companyId}`,
-        {
-          headers: {
-            Authorization: `Bearer ${access_token}`,
-            Version: '2021-07-28',
-          },
-        }
-      )
-
-      if (!locRes.ok) {
-        throw new Error(`Locations search failed (${locRes.status}): ${await locRes.text()}`)
-      }
-
-      const locData = await locRes.json()
-      const locations: Array<{ id: string }> = locData.locations ?? locData ?? []
-
-      console.log('[analyzer/callback] Found', locations.length, 'locations')
-
-      for (const loc of locations) {
-        await prisma.ghlToken.upsert({
-          where: { locationId: loc.id },
-          create: { locationId: loc.id, accessToken: access_token, refreshToken: refresh_token, expiresAt },
-          update: { accessToken: access_token, refreshToken: refresh_token, expiresAt },
-        })
-        console.log('[analyzer/callback] Stored token for locationId', loc.id)
-        locationsStored++
-      }
-
-      console.log('[analyzer/callback] All location tokens stored successfully')
-    } catch (locErr) {
-      console.warn('[analyzer/callback] Could not fetch locations — storing by companyId as fallback:', locErr)
       await prisma.ghlToken.upsert({
         where: { locationId: companyId },
         create: { locationId: companyId, accessToken: access_token, refreshToken: refresh_token, expiresAt },
         update: { accessToken: access_token, refreshToken: refresh_token, expiresAt },
       })
-      console.log('[analyzer/callback] Stored token for locationId (companyId fallback):', companyId)
-    }
 
-    return htmlResponse(SUCCESS_HTML)
+      console.log('[analyzer/callback] Stored token for companyId fallback', companyId)
+      return htmlResponse(SUCCESS_HTML)
+
+    } else {
+      console.error('[analyzer/callback] No locationId or companyId in token response')
+      return htmlResponse(ERROR_HTML, 500)
+    }
   } catch (err) {
     console.error('[analyzer/callback] OAuth callback error:', err)
     return htmlResponse(ERROR_HTML, 500)
