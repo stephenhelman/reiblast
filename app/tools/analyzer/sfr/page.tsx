@@ -635,7 +635,7 @@ function SFRContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          locationId: locationId || 'unknown',
+          locationId,
           address: place.formattedAddress,
           arv: analysis.arv.estimate,
           endBuyerMax: calcResults.endBuyerMax,
