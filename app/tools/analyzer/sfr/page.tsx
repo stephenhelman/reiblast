@@ -64,7 +64,7 @@ interface CalcResults {
 
 interface Filters {
   radius: 0.25 | 0.5 | 1
-  days: 30 | 60 | 90 | 180
+  days: 30 | 60 | 90 | 180 | 365
   sqftRange: 100 | 250 | 500
   yearRange: 5 | 10 | 20
 }
@@ -504,9 +504,10 @@ function SFRContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          address: place.formattedAddress,
-          latitude: place.lat,
-          longitude: place.lng,
+          lat: place.lat,
+          lng: place.lng,
+          beds: typeof propInfo.beds === 'number' ? propInfo.beds : 0,
+          sqft: typeof propInfo.sqft === 'number' ? propInfo.sqft : 0,
         }),
       })
       if (!res.ok) {
@@ -913,226 +914,200 @@ function SFRContent() {
 
         {/* ── STEP 3: Comp Selection ── */}
         {step === 3 && (
-          <div className="flex gap-6 min-h-[600px]">
-            {/* Left column */}
-            <div className="flex-1 min-w-0 flex flex-col">
-              {/* Filter controls */}
-              <div className="bg-surface border border-border-default rounded-xl p-3 mb-4 space-y-2">
-                {/* Radius */}
-                <div className="flex items-center gap-2">
-                  <span className="text-white/30 text-xs w-20 shrink-0">Radius</span>
-                  <div className="flex gap-1">
-                    {([0.25, 0.5, 1] as const).map((r) => (
-                      <button
-                        key={r}
-                        onClick={() => setFilters((f) => ({ ...f, radius: r }))}
-                        className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
-                          filters.radius === r ? 'bg-gold text-black' : 'text-white/40 hover:text-white'
-                        }`}
-                      >
-                        {r}mi
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {/* Days */}
-                <div className="flex items-center gap-2">
-                  <span className="text-white/30 text-xs w-20 shrink-0">Sold within</span>
-                  <div className="flex gap-1">
-                    {([30, 60, 90, 180] as const).map((d) => (
-                      <button
-                        key={d}
-                        onClick={() => setFilters((f) => ({ ...f, days: d }))}
-                        className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
-                          filters.days === d ? 'bg-gold text-black' : 'text-white/40 hover:text-white'
-                        }`}
-                      >
-                        {d}d
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {/* Sqft */}
-                <div className="flex items-center gap-2">
-                  <span className="text-white/30 text-xs w-20 shrink-0">Sqft ±</span>
-                  <div className="flex gap-1">
-                    {([100, 250, 500] as const).map((s) => (
-                      <button
-                        key={s}
-                        onClick={() => setFilters((f) => ({ ...f, sqftRange: s }))}
-                        className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
-                          filters.sqftRange === s ? 'bg-gold text-black' : 'text-white/40 hover:text-white'
-                        }`}
-                      >
-                        {s}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-                {/* Year built */}
-                <div className="flex items-center gap-2">
-                  <span className="text-white/30 text-xs w-20 shrink-0">Year built ±</span>
-                  <div className="flex gap-1">
-                    {([5, 10, 20] as const).map((y) => (
-                      <button
-                        key={y}
-                        onClick={() => setFilters((f) => ({ ...f, yearRange: y }))}
-                        className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
-                          filters.yearRange === y ? 'bg-gold text-black' : 'text-white/40 hover:text-white'
-                        }`}
-                      >
-                        {y}yr
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
+          <div className="flex flex-col gap-4">
 
-              {/* Comp count */}
-              <div className="flex items-center justify-between mb-3">
-                <p className="text-white/40 text-sm">
-                  {filteredComps.length} comp{filteredComps.length !== 1 ? 's' : ''} visible
-                </p>
-                <p className={`text-sm font-semibold ${canAnalyze ? 'text-gold' : 'text-white/30'}`}>
-                  {selectedCount} selected · min 3 required
-                </p>
-              </div>
+            {/* Map — top */}
+            <div className="relative rounded-xl overflow-hidden border border-border-default" style={{ height: 300 }}>
+              <div ref={mapContainerRef} className="w-full h-full" />
+              {!googleMapsLoaded && <Skeleton className="absolute inset-0" />}
+            </div>
 
-              {/* Comp list */}
-              {fetchingComps ? (
-                <div className="flex-1 space-y-3 overflow-y-auto pb-24">
-                  {[1, 2, 3, 4].map((k) => (
-                    <div key={k} className="bg-surface border border-border-default rounded-xl p-4 flex gap-3">
-                      <Skeleton className="w-20 h-14 shrink-0 rounded" />
-                      <div className="flex-1 space-y-2">
-                        <Skeleton className="h-3 w-3/4" />
-                        <Skeleton className="h-3 w-1/2" />
-                        <Skeleton className="h-3 w-1/3" />
-                      </div>
-                    </div>
+            {/* Filters */}
+            <div className="bg-surface border border-border-default rounded-xl p-3 space-y-2">
+              <div className="flex items-center gap-2">
+                <span className="text-white/30 text-xs w-20 shrink-0">Radius</span>
+                <div className="flex gap-1">
+                  {([0.25, 0.5, 1] as const).map((r) => (
+                    <button
+                      key={r}
+                      onClick={() => setFilters((f) => ({ ...f, radius: r }))}
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+                        filters.radius === r ? 'bg-gold text-black' : 'text-white/40 hover:text-white'
+                      }`}
+                    >
+                      {r}mi
+                    </button>
                   ))}
                 </div>
-              ) : compsError ? (
-                <div className="flex-1 flex items-center justify-center">
-                  <div className="text-center">
-                    <p className="text-red-400 text-sm mb-3">{compsError}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-white/30 text-xs w-20 shrink-0">Sold within</span>
+                <div className="flex gap-1">
+                  {([30, 60, 90, 180, 365] as const).map((d) => (
                     <button
-                      onClick={() => fetchComps()}
-                      className="text-gold hover:underline text-sm"
+                      key={d}
+                      onClick={() => setFilters((f) => ({ ...f, days: d }))}
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+                        filters.days === d ? 'bg-gold text-black' : 'text-white/40 hover:text-white'
+                      }`}
                     >
-                      Try again
+                      {d}d
                     </button>
-                  </div>
+                  ))}
                 </div>
-              ) : filteredComps.length === 0 ? (
-                <div className="flex-1 flex items-center justify-center">
-                  <p className="text-white/30 text-sm text-center">
-                    No comps match these filters.
-                    <br />Try a wider radius or time period.
-                  </p>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-white/30 text-xs w-20 shrink-0">Sqft ±</span>
+                <div className="flex gap-1">
+                  {([100, 250, 500] as const).map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => setFilters((f) => ({ ...f, sqftRange: s }))}
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+                        filters.sqftRange === s ? 'bg-gold text-black' : 'text-white/40 hover:text-white'
+                      }`}
+                    >
+                      {s}
+                    </button>
+                  ))}
                 </div>
-              ) : (
-                <div className="flex-1 overflow-y-auto space-y-2 pb-24 pr-1">
-                  {filteredComps.map((comp) => {
-                    const selected = selectedIds.has(comp.id)
-                    const totalAdj = comp.adjustments.reduce((s, a) => s + a.amount, 0)
-                    return (
-                      <div
-                        key={comp.id}
-                        onClick={() => toggleComp(comp.id)}
-                        className={`bg-surface rounded-xl p-3 cursor-pointer transition-all flex gap-3 border ${
-                          selected ? 'border-gold' : 'border-border-default hover:border-white/20'
-                        }`}
-                      >
-                        {/* Street view thumb */}
-                        {comp.latitude && comp.longitude && MAPS_KEY ? (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img
-                            src={`https://maps.googleapis.com/maps/api/streetview?size=160x120&location=${comp.latitude},${comp.longitude}&key=${MAPS_KEY}`}
-                            alt=""
-                            className="w-20 h-14 object-cover rounded-lg shrink-0"
-                          />
-                        ) : (
-                          <div className="w-20 h-14 bg-surface-2 rounded-lg shrink-0" />
-                        )}
-
-                        {/* Comp info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-start justify-between gap-2 mb-1">
-                            <p className="text-white text-xs font-semibold leading-tight truncate">{comp.address}</p>
-                            <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${selected ? 'bg-gold border-gold' : 'border-white/20'}`}>
-                              {selected && (
-                                <svg className="w-2.5 h-2.5 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                                </svg>
-                              )}
-                            </div>
-                          </div>
-
-                          <div className="flex items-baseline gap-1.5 mb-1">
-                            <span className="text-white/50 text-xs line-through">{fmt(comp.salePrice)}</span>
-                            <span className="text-gold text-sm font-bold">{fmt(comp.adjustedPrice)}</span>
-                          </div>
-
-                          <p className="text-white/30 text-[11px] mb-1.5">
-                            {comp.beds}bd · {comp.baths}ba · {comp.sqft?.toLocaleString()} sqft
-                            {comp.pricePerSqft ? ` · $${comp.pricePerSqft}/sf` : ''}
-                            {' · '}{comp.distanceMiles?.toFixed(2)}mi{' · '}{comp.daysAgo}d ago
-                          </p>
-
-                          {/* Adjustment pills */}
-                          {comp.adjustments.length > 0 && (
-                            <div className="flex flex-wrap gap-1">
-                              {comp.adjustments.map((a, i) => (
-                                <span
-                                  key={i}
-                                  className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                                    a.amount > 0
-                                      ? 'bg-green-400/10 text-green-400'
-                                      : 'bg-red-400/10 text-red-400'
-                                  }`}
-                                >
-                                  {a.label} ({a.amount > 0 ? '+' : ''}{fmt(a.amount)})
-                                </span>
-                              ))}
-                              {totalAdj !== 0 && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-white/5 text-white/50">
-                                  net {totalAdj > 0 ? '+' : ''}{fmt(totalAdj)}
-                                </span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )
-                  })}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-white/30 text-xs w-20 shrink-0">Year built ±</span>
+                <div className="flex gap-1">
+                  {([5, 10, 20] as const).map((y) => (
+                    <button
+                      key={y}
+                      onClick={() => setFilters((f) => ({ ...f, yearRange: y }))}
+                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
+                        filters.yearRange === y ? 'bg-gold text-black' : 'text-white/40 hover:text-white'
+                      }`}
+                    >
+                      {y}yr
+                    </button>
+                  ))}
                 </div>
-              )}
-
-              {/* Drawing tool stub */}
-              <div className="mt-2">
-                <button
-                  disabled
-                  className="text-white/20 text-xs border border-border-default rounded-lg px-3 py-2 cursor-not-allowed w-full"
-                >
-                  Draw custom area (coming soon)
-                </button>
               </div>
             </div>
 
-            {/* Right column — Map */}
-            <div className="w-80 xl:w-96 shrink-0 flex flex-col gap-3">
-              <div
-                ref={mapContainerRef}
-                className="flex-1 rounded-xl overflow-hidden border border-border-default min-h-[500px]"
-                style={{ minHeight: 500 }}
-              />
-              {!googleMapsLoaded && (
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <Skeleton className="w-full h-full" />
-                </div>
-              )}
+            {/* Comp count */}
+            <div className="flex items-center justify-between">
+              <p className="text-white/40 text-sm">
+                {filteredComps.length} comp{filteredComps.length !== 1 ? 's' : ''} visible
+              </p>
+              <p className={`text-sm font-semibold ${canAnalyze ? 'text-gold' : 'text-white/30'}`}>
+                {selectedCount} selected · min 3 required
+              </p>
             </div>
+
+            {/* Comp list */}
+            {fetchingComps ? (
+              <div className="space-y-3 pb-24">
+                {[1, 2, 3, 4].map((k) => (
+                  <div key={k} className="bg-surface border border-border-default rounded-xl p-4 flex gap-3">
+                    <Skeleton className="w-20 h-14 shrink-0 rounded" />
+                    <div className="flex-1 space-y-2">
+                      <Skeleton className="h-3 w-3/4" />
+                      <Skeleton className="h-3 w-1/2" />
+                      <Skeleton className="h-3 w-1/3" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : compsError ? (
+              <div className="text-center py-10">
+                <p className="text-red-400 text-sm mb-3">{compsError}</p>
+                <button onClick={() => fetchComps()} className="text-gold hover:underline text-sm">
+                  Try again
+                </button>
+              </div>
+            ) : filteredComps.length === 0 ? (
+              <p className="text-white/30 text-sm text-center py-10">
+                No comps match these filters. Try a wider radius or time period.
+              </p>
+            ) : (
+              <div className="space-y-2 pb-24">
+                {filteredComps.map((comp) => {
+                  const selected = selectedIds.has(comp.id)
+                  const totalAdj = comp.adjustments.reduce((s, a) => s + a.amount, 0)
+                  return (
+                    <div
+                      key={comp.id}
+                      onClick={() => toggleComp(comp.id)}
+                      className={`bg-surface rounded-xl p-3 cursor-pointer transition-all flex gap-3 border ${
+                        selected ? 'border-gold' : 'border-border-default hover:border-white/20'
+                      }`}
+                    >
+                      {/* Street view thumb */}
+                      {comp.latitude && comp.longitude && MAPS_KEY ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={`https://maps.googleapis.com/maps/api/streetview?size=160x120&location=${comp.latitude},${comp.longitude}&key=${MAPS_KEY}`}
+                          alt=""
+                          className="w-20 h-14 object-cover rounded-lg shrink-0"
+                        />
+                      ) : (
+                        <div className="w-20 h-14 bg-surface-2 rounded-lg shrink-0" />
+                      )}
+
+                      {/* Comp info */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-start justify-between gap-2 mb-1">
+                          <p className="text-white text-xs font-semibold leading-tight truncate">{comp.address}</p>
+                          <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${selected ? 'bg-gold border-gold' : 'border-white/20'}`}>
+                            {selected && (
+                              <svg className="w-2.5 h-2.5 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="flex items-baseline gap-1.5 mb-1">
+                          <span className="text-white/50 text-xs line-through">{fmt(comp.salePrice)}</span>
+                          <span className="text-gold text-sm font-bold">{fmt(comp.adjustedPrice)}</span>
+                        </div>
+
+                        <p className="text-white/30 text-[11px] mb-1.5">
+                          {comp.beds}bd · {comp.baths}ba · {comp.sqft?.toLocaleString()} sqft
+                          {comp.pricePerSqft ? ` · $${comp.pricePerSqft}/sf` : ''}
+                          {' · '}{comp.distanceMiles?.toFixed(2)}mi{' · '}{comp.daysAgo}d ago
+                        </p>
+
+                        {/* Adjustment pills */}
+                        {comp.adjustments.length > 0 && (
+                          <div className="flex flex-wrap gap-1">
+                            {comp.adjustments.map((a, i) => (
+                              <span
+                                key={i}
+                                className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
+                                  a.amount > 0 ? 'bg-green-400/10 text-green-400' : 'bg-red-400/10 text-red-400'
+                                }`}
+                              >
+                                {a.label} ({a.amount > 0 ? '+' : ''}{fmt(a.amount)})
+                              </span>
+                            ))}
+                            {totalAdj !== 0 && (
+                              <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-white/5 text-white/50">
+                                net {totalAdj > 0 ? '+' : ''}{fmt(totalAdj)}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Drawing tool stub */}
+            <button
+              disabled
+              className="text-white/20 text-xs border border-border-default rounded-lg px-3 py-2 cursor-not-allowed w-full"
+            >
+              Draw custom area (coming soon)
+            </button>
           </div>
         )}
 
