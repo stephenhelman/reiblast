@@ -7,23 +7,168 @@ const REDIRECT_URI = 'https://tools.reiblast.app/api/analyzer/callback'
 function htmlResponse(body: string, status = 200) {
   return new NextResponse(body, {
     status,
-    headers: { 'Content-Type': 'text/html' },
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
   })
 }
 
-const SUCCESS_HTML = `
-  <!DOCTYPE html>
-  <html>
-    <head><title>REIblast Connected</title></head>
-    <body style="font-family:sans-serif;display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;background:#0A0A0A;color:#fff;">
-      <div style="text-align:center;">
-        <p style="font-size:18px;font-weight:600;color:#F5C842;margin-bottom:8px;">✓ REIblast connected successfully.</p>
-        <p style="color:rgba(255,255,255,0.5);font-size:14px;">You can close this window.</p>
-      </div>
-    </body>
-  </html>
-`
-const ERROR_HTML = '<p>Connection failed. Please try again or contact support.</p>'
+const SUCCESS_HTML = `<!DOCTYPE html>
+<html>
+<head>
+  <title>REIblast Connected</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #0f0f0f;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .card {
+      text-align: center;
+      padding: 48px 40px;
+      border: 0.5px solid #2a2a2a;
+      border-radius: 12px;
+      max-width: 420px;
+      width: 90%;
+    }
+    .icon {
+      width: 56px;
+      height: 56px;
+      background: #DABD5920;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+    }
+    .checkmark {
+      width: 24px;
+      height: 24px;
+      stroke: #DABD59;
+      fill: none;
+      stroke-width: 2.5;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 500;
+      color: #ffffff;
+      margin-bottom: 10px;
+    }
+    p {
+      font-size: 14px;
+      color: #888;
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 12px;
+      color: #DABD59;
+      border: 0.5px solid #DABD5940;
+      padding: 4px 14px;
+      border-radius: 99px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">
+      <svg class="checkmark" viewBox="0 0 24 24">
+        <polyline points="20 6 9 17 4 12"></polyline>
+      </svg>
+    </div>
+    <h1>REIblast connected</h1>
+    <p>Your account has been linked successfully.
+    You can close this window and return to your dashboard.</p>
+    <span class="badge">Deal Analyzer ready</span>
+  </div>
+</body>
+</html>`
+
+const ERROR_HTML = `<!DOCTYPE html>
+<html>
+<head>
+  <title>Connection Failed</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+      background: #0f0f0f;
+      color: #ffffff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+    }
+    .card {
+      text-align: center;
+      padding: 48px 40px;
+      border: 0.5px solid #2a2a2a;
+      border-radius: 12px;
+      max-width: 420px;
+      width: 90%;
+    }
+    .icon {
+      width: 56px;
+      height: 56px;
+      background: #ff444420;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 24px;
+    }
+    .xmark {
+      width: 24px;
+      height: 24px;
+      stroke: #ff4444;
+      fill: none;
+      stroke-width: 2.5;
+      stroke-linecap: round;
+    }
+    h1 {
+      font-size: 20px;
+      font-weight: 500;
+      color: #ffffff;
+      margin-bottom: 10px;
+    }
+    p {
+      font-size: 14px;
+      color: #888;
+      line-height: 1.6;
+      margin-bottom: 28px;
+    }
+    .badge {
+      display: inline-block;
+      font-size: 12px;
+      color: #ff4444;
+      border: 0.5px solid #ff444440;
+      padding: 4px 14px;
+      border-radius: 99px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">
+      <svg class="xmark" viewBox="0 0 24 24">
+        <line x1="18" y1="6" x2="6" y2="18"></line>
+        <line x1="6" y1="6" x2="18" y2="18"></line>
+      </svg>
+    </div>
+    <h1>Connection failed</h1>
+    <p>Something went wrong linking your account.
+    Please try reinstalling the app or contact
+    REIblast support.</p>
+    <span class="badge">Error — see logs</span>
+  </div>
+</body>
+</html>`
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')
