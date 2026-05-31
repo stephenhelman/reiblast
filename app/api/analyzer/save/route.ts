@@ -1,6 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { HighLevel, GHLError } from '@gohighlevel/api-client'
 import { prisma } from '@/lib/prisma'
 import { TOOLS_URL } from '@/lib/constants'
+
+function makeGHLClient(apiKey: string) {
+  return new HighLevel({ privateIntegrationToken: apiKey })
+}
+
+async function resolveLocationApiKey(locationId: string): Promise<string | null> {
+  const user = await prisma.user.findFirst({
+    where: { ghlLocationId: locationId },
+    select: { ghlLocationApiKey: true },
+  })
+  return user?.ghlLocationApiKey ?? null
+}
 
 interface SaveBody {
   locationId: string
@@ -25,6 +38,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
+  // CHANGE 2 — log 1: full request body (no sensitive redaction needed here)
+  console.log('[analyzer/save] Save route called. Body:', JSON.stringify(body))
+
   const required: (keyof SaveBody)[] = [
     'locationId', 'address', 'arv', 'endBuyerMax', 'repairLevel',
     'repairs', 'wholesaleFee', 'mao', 'anchorOffer', 'investorPct',
@@ -43,6 +59,9 @@ export async function POST(req: NextRequest) {
 
   let deal: { id: string }
   try {
+    // CHANGE 2 — log 2: writing to Neon
+    console.log('[analyzer/save] Writing to Neon. address:', address, '| locationId:', locationId)
+
     deal = await prisma.deal.upsert({
       where: { locationId_address: { locationId, address } },
       create: {
@@ -81,47 +100,76 @@ export async function POST(req: NextRequest) {
       data: { dealUrl },
     })
 
+    // CHANGE 2 — log 3: Neon write result
+    console.log('[analyzer/save] Neon write result. deal.id:', deal.id, '| dealUrl:', dealUrl)
+
     let ghlWarning: string | undefined
-    if (process.env.GHL_API_KEY) {
+
+    const locationApiKey = await resolveLocationApiKey(locationId)
+    console.log('[analyzer/save] Location API key resolved:', locationApiKey ? 'yes' : 'not found')
+
+    if (locationApiKey) {
+      // CHANGE 3 — custom fields sent with both key and id (id undefined until GHL confirms field IDs)
+      const customFields = [
+        { key: 'analysis_url',              id: undefined, field_value: dealUrl },
+        { key: 'analysis_arv',              id: undefined, field_value: arv },
+        { key: 'analysis_ebm',              id: undefined, field_value: endBuyerMax },
+        { key: 'analysis_repair_level',     id: undefined, field_value: repairLevel },
+        { key: 'analysis_repairs',          id: undefined, field_value: repairs },
+        { key: 'analysis_wholesale_fee',    id: undefined, field_value: wholesaleFee },
+        { key: 'analysis_mao',              id: undefined, field_value: mao },
+        { key: 'analysis_anchor',           id: undefined, field_value: anchorOffer },
+        { key: 'analysis_investor_percent', id: undefined, field_value: investorPct },
+      ]
+
+      // CHANGE 2 — log 4: GHL call details
+      console.log(
+        '[analyzer/save] Calling GHL upsert. locationId:', locationId,
+        '| address:', address,
+        '| customFields:', JSON.stringify(customFields),
+      )
+
       try {
-        const ghlRes = await fetch('https://services.leadconnectorhq.com/contacts/upsert', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${process.env.GHL_API_KEY}`,
-            Version: '2021-07-28',
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
+        const ghl = makeGHLClient(locationApiKey)
+        const ghlResponse = await ghl.contacts.upsertContact(
+          {
             locationId,
             name: address,
             address1: address,
-            customFields: [
-              { key: 'analysis_url', field_value: dealUrl },
-              { key: 'analysis_arv', field_value: arv },
-              { key: 'analysis_ebm', field_value: endBuyerMax },
-              { key: 'analysis_repair_level', field_value: repairLevel },
-              { key: 'analysis_repairs', field_value: repairs },
-              { key: 'analysis_wholesale_fee', field_value: wholesaleFee },
-              { key: 'analysis_mao', field_value: mao },
-              { key: 'analysis_anchor', field_value: anchorOffer },
-              { key: 'analysis_investor_percent', field_value: investorPct },
-            ],
-          }),
-        })
-        if (!ghlRes.ok) {
-          const errText = await ghlRes.text()
-          console.error('[analyzer/save] GHL upsert failed:', errText)
-          ghlWarning = 'Deal saved, but CRM sync failed. Contact support if this persists.'
-        }
+            customFields,
+          },
+          { headers: { Version: '2021-07-28' } },
+        )
+
+        // CHANGE 2 — log 5: full GHL response
+        console.log('[analyzer/save] GHL response:', JSON.stringify(ghlResponse))
       } catch (err) {
-        console.error('[analyzer/save] GHL upsert error:', err)
+        if (err instanceof GHLError) {
+          // CHANGE 2 — log 6: structured GHL error
+          console.error('[analyzer/save] GHL error. statusCode:', err.statusCode)
+          console.error('[analyzer/save] GHL error message:', err.message)
+          console.error('[analyzer/save] GHL error response body:', JSON.stringify(err.response))
+
+          // CHANGE 3 — hint if field IDs are required
+          const body = JSON.stringify(err.response ?? '')
+          if (
+            body.toLowerCase().includes('field') &&
+            (body.toLowerCase().includes('id') || body.toLowerCase().includes('key'))
+          ) {
+            console.error(
+              '[analyzer/save] GHL requires field IDs — keys are not accepted by this endpoint'
+            )
+          }
+        } else {
+          console.error('[analyzer/save] GHL error (non-GHLError):', err)
+        }
         ghlWarning = 'Deal saved, but CRM sync failed. Contact support if this persists.'
       }
     }
 
-    return NextResponse.json({ dealUrl: `${TOOLS_URL}/analyzer/deals/${deal.id}`, ghlWarning })
+    return NextResponse.json({ dealUrl, ghlWarning })
   } catch (err) {
-    console.error('[analyzer/save] error:', err)
+    console.error('[analyzer/save] Neon error:', err)
     return NextResponse.json({ error: 'Failed to save deal' }, { status: 500 })
   }
 }

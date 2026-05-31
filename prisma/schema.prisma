@@ -37,6 +37,7 @@ model User {
   ghlContactId        String?
   ghlLocationId       String?
   ghlUserId           String?
+  ghlLocationApiKey   String?
   onboardingStage     String?
 
   createdAt           DateTime @default(now())

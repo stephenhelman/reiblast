@@ -141,6 +141,20 @@ export async function provisionSubAccount(
   return { locationId, userId: userData.id, tempPassword }
 }
 
+export async function getLocationApiKey(locationId: string): Promise<string> {
+  const res = await fetch(`${GHL_BASE_URL}/locations/${locationId}`, {
+    headers: agencyHeaders(),
+  })
+  if (!res.ok) {
+    const err = await res.text()
+    throw new Error(`Failed to fetch location ${locationId}: ${err}`)
+  }
+  const data = await res.json()
+  const apiKey = data?.location?.apiKey ?? data?.apiKey
+  if (!apiKey) throw new Error(`No apiKey found in GHL response for location ${locationId}`)
+  return apiKey
+}
+
 export async function suspendSubAccount(locationId: string): Promise<boolean> {
   const res = await fetch(`${GHL_BASE_URL}/locations/${locationId}`, {
     method: 'PUT',

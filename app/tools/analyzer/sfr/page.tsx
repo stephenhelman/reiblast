@@ -65,8 +65,9 @@ interface CalcResults {
 interface Filters {
   radius: 0.25 | 0.5 | 1
   days: 30 | 60 | 90 | 180 | 365
-  sqftRange: 100 | 250 | 500
-  yearRange: 5 | 10 | 20
+  sqftRange: 250 | 500 | 750
+  yearRange: 5 | 10 | 20 | null
+  bedsRange: 0 | 1 | 2 | null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -264,7 +265,7 @@ function SFRContent() {
   const [allComps, setAllComps] = useState<RawComp[]>([])
   const [fetchingComps, setFetchingComps] = useState(false)
   const [compsError, setCompsError] = useState('')
-  const [filters, setFilters] = useState<Filters>({ radius: 0.5, days: 90, sqftRange: 250, yearRange: 10 })
+  const [filters, setFilters] = useState<Filters>({ radius: 0.5, days: 90, sqftRange: 750, yearRange: 10, bedsRange: 1 })
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [googleMapsLoaded, setGoogleMapsLoaded] = useState(false)
 
@@ -305,10 +306,15 @@ function SFRContent() {
 
   const filteredComps = useMemo<ProcessedComp[]>(() => {
     const sqft = typeof propInfo.sqft === 'number' ? propInfo.sqft : null
+    const subBeds = typeof propInfo.beds === 'number' ? propInfo.beds : null
     return processedComps.filter((c) => {
       if (c.distanceMiles > filters.radius) return false
       if (c.daysAgo > filters.days) return false
       if (sqft && c.sqft && Math.abs(c.sqft - sqft) > filters.sqftRange) return false
+      if (filters.bedsRange !== null && subBeds !== null && c.beds != null) {
+        if (filters.bedsRange === 0 && c.beds !== subBeds) return false
+        if (filters.bedsRange > 0 && Math.abs(c.beds - subBeds) > filters.bedsRange) return false
+      }
       return true
     })
   }, [processedComps, filters, propInfo])
@@ -690,7 +696,7 @@ function SFRContent() {
     setPropInfo({ beds: '', baths: '', sqft: '', parking: 'none', garageSpaces: 1, features: [], condition: 'light' })
     setAllComps([])
     setSelectedIds(new Set())
-    setFilters({ radius: 0.5, days: 90, sqftRange: 250, yearRange: 10 })
+    setFilters({ radius: 0.5, days: 90, sqftRange: 750, yearRange: 10, bedsRange: 1 })
     setAnalysis(null)
     setAnalysisError('')
     setActiveTab(1)
@@ -917,76 +923,93 @@ function SFRContent() {
         {step === 3 && (
           <div className="flex flex-col gap-4">
 
-            {/* Map — top */}
-            <div className="relative rounded-xl overflow-hidden border border-border-default" style={{ height: 300 }}>
+            {/* Map — top (~40vh) */}
+            <div className="relative rounded-xl overflow-hidden border border-border-default" style={{ height: '40vh', minHeight: 240 }}>
               <div ref={mapContainerRef} className="w-full h-full" />
               {!googleMapsLoaded && <Skeleton className="absolute inset-0" />}
             </div>
 
-            {/* Filters */}
-            <div className="bg-surface border border-border-default rounded-xl p-3 space-y-2">
-              <div className="flex items-center gap-2">
-                <span className="text-white/30 text-xs w-20 shrink-0">Radius</span>
-                <div className="flex gap-1">
-                  {([0.25, 0.5, 1] as const).map((r) => (
-                    <button
-                      key={r}
-                      onClick={() => setFilters((f) => ({ ...f, radius: r }))}
-                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
-                        filters.radius === r ? 'bg-gold text-black' : 'text-white/40 hover:text-white'
-                      }`}
-                    >
-                      {r}mi
-                    </button>
-                  ))}
+            {/* Filters — single row of dropdowns */}
+            <div className="bg-surface border border-border-default rounded-xl p-3">
+              <div className="flex gap-2">
+                {/* Radius */}
+                <div className="flex flex-col gap-1 flex-1 min-w-0">
+                  <label className="text-white/30 text-[10px] uppercase tracking-wider">Radius</label>
+                  <select
+                    value={filters.radius}
+                    onChange={(e) => setFilters((f) => ({ ...f, radius: Number(e.target.value) as 0.25 | 0.5 | 1 }))}
+                    className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
+                  >
+                    <option value={0.25}>0.25 mi</option>
+                    <option value={0.5}>0.5 mi</option>
+                    <option value={1}>1 mi</option>
+                  </select>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-white/30 text-xs w-20 shrink-0">Sold within</span>
-                <div className="flex gap-1">
-                  {([30, 60, 90, 180, 365] as const).map((d) => (
-                    <button
-                      key={d}
-                      onClick={() => setFilters((f) => ({ ...f, days: d }))}
-                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
-                        filters.days === d ? 'bg-gold text-black' : 'text-white/40 hover:text-white'
-                      }`}
-                    >
-                      {d}d
-                    </button>
-                  ))}
+
+                {/* Sold within */}
+                <div className="flex flex-col gap-1 flex-1 min-w-0">
+                  <label className="text-white/30 text-[10px] uppercase tracking-wider">Sold within</label>
+                  <select
+                    value={filters.days}
+                    onChange={(e) => setFilters((f) => ({ ...f, days: Number(e.target.value) as 30 | 60 | 90 | 180 | 365 }))}
+                    className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
+                  >
+                    <option value={30}>30 days</option>
+                    <option value={60}>60 days</option>
+                    <option value={90}>90 days</option>
+                    <option value={180}>180 days</option>
+                    <option value={365}>1 year</option>
+                  </select>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-white/30 text-xs w-20 shrink-0">Sqft ±</span>
-                <div className="flex gap-1">
-                  {([100, 250, 500] as const).map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setFilters((f) => ({ ...f, sqftRange: s }))}
-                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
-                        filters.sqftRange === s ? 'bg-gold text-black' : 'text-white/40 hover:text-white'
-                      }`}
-                    >
-                      {s}
-                    </button>
-                  ))}
+
+                {/* Sqft range */}
+                <div className="flex flex-col gap-1 flex-1 min-w-0">
+                  <label className="text-white/30 text-[10px] uppercase tracking-wider">Sqft ±</label>
+                  <select
+                    value={filters.sqftRange}
+                    onChange={(e) => setFilters((f) => ({ ...f, sqftRange: Number(e.target.value) as 250 | 500 | 750 }))}
+                    className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
+                  >
+                    <option value={250}>±250</option>
+                    <option value={500}>±500</option>
+                    <option value={750}>±750</option>
+                  </select>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <span className="text-white/30 text-xs w-20 shrink-0">Year built ±</span>
-                <div className="flex gap-1">
-                  {([5, 10, 20] as const).map((y) => (
-                    <button
-                      key={y}
-                      onClick={() => setFilters((f) => ({ ...f, yearRange: y }))}
-                      className={`px-2.5 py-1 rounded-md text-xs font-semibold transition-colors ${
-                        filters.yearRange === y ? 'bg-gold text-black' : 'text-white/40 hover:text-white'
-                      }`}
-                    >
-                      {y}yr
-                    </button>
-                  ))}
+
+                {/* Year built range */}
+                <div className="flex flex-col gap-1 flex-1 min-w-0">
+                  <label className="text-white/30 text-[10px] uppercase tracking-wider">Year built</label>
+                  <select
+                    value={filters.yearRange ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setFilters((f) => ({ ...f, yearRange: v === '' ? null : (Number(v) as 5 | 10 | 20) }))
+                    }}
+                    className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
+                  >
+                    <option value={5}>±5 yr</option>
+                    <option value={10}>±10 yr</option>
+                    <option value={20}>±20 yr</option>
+                    <option value="">Any</option>
+                  </select>
+                </div>
+
+                {/* Bedrooms */}
+                <div className="flex flex-col gap-1 flex-1 min-w-0">
+                  <label className="text-white/30 text-[10px] uppercase tracking-wider">Bedrooms</label>
+                  <select
+                    value={filters.bedsRange ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setFilters((f) => ({ ...f, bedsRange: v === '' ? null : (Number(v) as 0 | 1 | 2) }))
+                    }}
+                    className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
+                  >
+                    <option value={0}>Exact</option>
+                    <option value={1}>±1</option>
+                    <option value={2}>±2</option>
+                    <option value="">Any</option>
+                  </select>
                 </div>
               </div>
             </div>
