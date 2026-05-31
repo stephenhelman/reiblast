@@ -73,49 +73,52 @@ export async function POST(req: NextRequest) {
 
     console.log('[analyzer/save] Attempting GHL sync for locationId', locationId)
 
-    let accessToken: string
+    let ghlSynced = false
+    let ghlError: string | null = null
+
     try {
-      accessToken = await getGhlAccessToken(locationId)
+      const accessToken = await getGhlAccessToken(locationId)
+
+      const customFields = [
+        { key: 'analysis_url',              field_value: dealUrl },
+        { key: 'analysis_arv',              field_value: arv.toString() },
+        { key: 'analysis_ebm',              field_value: endBuyerMax.toString() },
+        { key: 'analysis_repair_level',     field_value: repairLevel },
+        { key: 'analysis_repairs',          field_value: repairs.toString() },
+        { key: 'analysis_wholesale_fee',    field_value: wholesaleFee.toString() },
+        { key: 'analysis_mao',              field_value: mao.toString() },
+        { key: 'analysis_anchor',           field_value: anchorOffer.toString() },
+        { key: 'analysis_investor_percent', field_value: investorPct.toString() },
+      ]
+
+      const ghlRes = await fetch(`${GHL_BASE}/contacts/upsert`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          Version: '2021-07-28',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ locationId, name: address, address1: address, customFields }),
+      })
+
+      console.log('[analyzer/save] GHL upsert response status:', ghlRes.status)
+
+      if (!ghlRes.ok) {
+        const errBody = await ghlRes.text()
+        console.error('[analyzer/save] GHL upsert failed:', errBody)
+        ghlError = errBody
+      } else {
+        const ghlData = await ghlRes.json()
+        console.log('[analyzer/save] GHL upsert success. contact id:', ghlData?.contact?.id ?? ghlData?.id)
+        ghlSynced = true
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      console.error('[analyzer/save] GHL token error — skipping sync:', msg)
-      return NextResponse.json({ success: true, dealUrl, ghlSynced: false, ghlError: msg })
+      console.error('[analyzer/save] GHL sync failed:', msg)
+      ghlError = msg
     }
 
-    const customFields = [
-      { key: 'analysis_url',              field_value: dealUrl },
-      { key: 'analysis_arv',              field_value: arv.toString() },
-      { key: 'analysis_ebm',              field_value: endBuyerMax.toString() },
-      { key: 'analysis_repair_level',     field_value: repairLevel },
-      { key: 'analysis_repairs',          field_value: repairs.toString() },
-      { key: 'analysis_wholesale_fee',    field_value: wholesaleFee.toString() },
-      { key: 'analysis_mao',              field_value: mao.toString() },
-      { key: 'analysis_anchor',           field_value: anchorOffer.toString() },
-      { key: 'analysis_investor_percent', field_value: investorPct.toString() },
-    ]
-
-    const ghlRes = await fetch(`${GHL_BASE}/contacts/upsert`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Version: '2021-07-28',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ locationId, name: address, address1: address, customFields }),
-    })
-
-    console.log('[analyzer/save] GHL upsert response status:', ghlRes.status)
-
-    if (!ghlRes.ok) {
-      const errBody = await ghlRes.text()
-      console.error('[analyzer/save] GHL upsert failed:', errBody)
-      return NextResponse.json({ success: true, dealUrl, ghlSynced: false, ghlError: errBody })
-    }
-
-    const ghlData = await ghlRes.json()
-    console.log('[analyzer/save] GHL upsert success. contact id:', ghlData?.contact?.id ?? ghlData?.id)
-
-    return NextResponse.json({ success: true, dealUrl, ghlSynced: true })
+    return NextResponse.json({ success: true, dealUrl, ghlSynced, ghlError })
   } catch (err) {
     console.error('[analyzer/save] Neon error:', err)
     return NextResponse.json({ error: 'Failed to save deal' }, { status: 500 })

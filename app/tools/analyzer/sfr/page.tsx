@@ -285,8 +285,7 @@ function SFRContent() {
   // Tab 3
   const [calcResults, setCalcResults] = useState<CalcResults | null>(null)
   const [saving, setSaving] = useState(false)
-  const [saveResult, setSaveResult] = useState<{ dealUrl: string; ghlSynced: boolean; ghlError?: string } | null>(null)
-  const [saveError, setSaveError] = useState('')
+  const [saveFeedback, setSaveFeedback] = useState<{ text: string; variant: 'success' | 'warning' | 'error' } | null>(null)
 
   // Refs
   const addressInputRef = useRef<HTMLInputElement>(null)
@@ -625,8 +624,6 @@ function SFRContent() {
   async function handleSave() {
     if (!place || !analysis || !calcResults) return
     setSaving(true)
-    setSaveError('')
-    setSaveResult(null)
     const sqft = typeof propInfo.sqft === 'number' ? propInfo.sqft : 0
     const repairs = sqft * REPAIR_RATES[repairLevel]
     try {
@@ -650,14 +647,17 @@ function SFRContent() {
       })
       const data = await res.json()
       if (!res.ok) {
-        setSaveError(data.error || 'Save failed')
-        return
+        setSaveFeedback({ text: data.error || 'Save failed. Try again.', variant: 'error' })
+      } else if (data.ghlSynced) {
+        setSaveFeedback({ text: 'Saved and synced to CRM.', variant: 'success' })
+      } else {
+        setSaveFeedback({ text: 'Saved locally. CRM sync failed — click again to retry.', variant: 'warning' })
       }
-      setSaveResult(data)
     } catch {
-      setSaveError('Network error. Try again.')
+      setSaveFeedback({ text: 'Network error. Try again.', variant: 'error' })
     } finally {
       setSaving(false)
+      setTimeout(() => setSaveFeedback(null), 4000)
     }
   }
 
@@ -702,8 +702,7 @@ function SFRContent() {
     setTab2Unlocked(false)
     setTab3Unlocked(false)
     setCalcResults(null)
-    setSaveResult(null)
-    setSaveError('')
+    setSaveFeedback(null)
     setConditionUsedForAnalysis(null)
     gMapRef.current = null
     markersRef.current.clear()
@@ -1564,21 +1563,17 @@ function SFRContent() {
                   </p>
                 </div>
 
-                {/* Save result */}
-                {saveResult && (
-                  <div className="bg-green-400/10 border border-green-400/30 rounded-xl p-4">
-                    <p className="text-green-400 font-semibold text-sm">Deal saved to REIblast!</p>
-                    <p className="text-green-400/60 text-xs mt-0.5 break-all">{saveResult.dealUrl}</p>
-                    {saveResult.ghlSynced && (
-                      <p className="text-green-400/60 text-xs mt-1">✓ CRM contact updated</p>
-                    )}
-                    {saveResult.ghlError && (
-                      <p className="text-yellow-400/70 text-xs mt-1">CRM sync skipped — {saveResult.ghlError}</p>
-                    )}
+                {/* Save feedback — auto-clears after 4s */}
+                {saveFeedback && (
+                  <div className={`rounded-xl px-4 py-3 text-xs leading-relaxed ${
+                    saveFeedback.variant === 'success'
+                      ? 'bg-green-400/10 text-green-400'
+                      : saveFeedback.variant === 'warning'
+                      ? 'bg-yellow-400/10 text-yellow-400/80'
+                      : 'bg-red-400/10 text-red-400'
+                  }`}>
+                    {saveFeedback.text}
                   </div>
-                )}
-                {saveError && (
-                  <p className="text-red-400 text-sm">{saveError}</p>
                 )}
 
                 {/* Action buttons */}
@@ -1594,10 +1589,10 @@ function SFRContent() {
                   </button>
                   <button
                     onClick={handleSave}
-                    disabled={saving || !!saveResult}
+                    disabled={saving}
                     className="bg-gold text-black font-bold py-3 rounded-xl hover:bg-gold-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
-                    {saving ? 'Saving…' : saveResult ? 'Saved ✓' : 'Add to REIblast'}
+                    {saving ? 'Saving…' : 'Add to REIblast'}
                   </button>
                 </div>
 
