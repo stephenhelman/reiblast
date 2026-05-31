@@ -350,7 +350,7 @@ function SFRContent() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const key = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY
+    const key = process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY
     if (!key) return
 
     window.initSFRGoogleMaps = () => {
@@ -705,7 +705,7 @@ function SFRContent() {
     autocompleteRef.current = null
   }
 
-  const MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_KEY ?? ''
+  const MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY ?? ''
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
