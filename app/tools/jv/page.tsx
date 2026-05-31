@@ -3,14 +3,14 @@
 import { useState, useRef, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Input from '@/components/shared/Input'
+import { useLocationId } from '@/lib/hooks/use-location-id'
 import Button from '@/components/shared/Button'
 import MinimalHeader from '@/components/tools/MinimalHeader'
 import { JV_SPLIT_CORE } from '@/lib/constants'
 
 function JVForm() {
   const params = useSearchParams()
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const token = params.get('token') // Phase 2: passed to API calls
+  const locationId = useLocationId()
 
   const fileRef = useRef<HTMLInputElement>(null)
 
@@ -22,6 +22,8 @@ function JVForm() {
     assignmentFee: params.get('assignmentFee') ?? '',
     notes: '',
   })
+
+  void locationId // passed to API calls when JV submission is wired up
 
   function set(field: string) {
     return (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>

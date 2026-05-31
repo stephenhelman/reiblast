@@ -1,17 +1,16 @@
 'use client'
 
 import { Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useRouter } from 'next/navigation'
 import MinimalHeader from '@/components/tools/MinimalHeader'
+import { useLocationId, toolUrl } from '@/lib/hooks/use-location-id'
 
 function AnalyzerContent() {
   const router = useRouter()
-  const searchParams = useSearchParams()
-  const token = searchParams.get('token') ?? ''
+  const locationId = useLocationId()
 
   function goToSFR() {
-    const dest = token ? `/analyzer/sfr?token=${token}` : '/analyzer/sfr'
-    router.push(dest)
+    router.push(toolUrl('/analyzer/sfr', locationId))
   }
 
   return (

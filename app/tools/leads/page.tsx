@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
 import Input from '@/components/shared/Input'
+import { useLocationId } from '@/lib/hooks/use-location-id'
 import Button from '@/components/shared/Button'
 import MinimalHeader from '@/components/tools/MinimalHeader'
 
@@ -22,9 +22,8 @@ interface Lead {
 const PROPERTY_TYPES = ['All', 'SFR', 'MFR', 'Land', 'Commercial']
 
 function LeadsContent() {
-  const searchParams = useSearchParams()
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  const token = searchParams.get('token') // Phase 2: passed to API calls
+  const locationId = useLocationId()
+  void locationId // passed to API calls when lead import is wired up
 
   const [dealMachine, setDealMachine] = useState<ServiceState>({ apiKey: '', connected: false })
   const [batchLeads, setBatchLeads] = useState<ServiceState>({ apiKey: '', connected: false })

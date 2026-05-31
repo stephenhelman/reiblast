@@ -1,8 +1,8 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
-import { useSearchParams } from 'next/navigation'
 import MinimalHeader from '@/components/tools/MinimalHeader'
+import { useLocationId } from '@/lib/hooks/use-location-id'
 import {
   type AdjustmentPill,
   type SFRAnalysisPayload,
@@ -239,8 +239,7 @@ function AnalysisSkeleton() {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 function SFRContent() {
-  const searchParams = useSearchParams()
-  const locationId = searchParams.get('token') ?? ''
+  const locationId = useLocationId()
 
   // Step state
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
@@ -286,7 +285,7 @@ function SFRContent() {
   // Tab 3
   const [calcResults, setCalcResults] = useState<CalcResults | null>(null)
   const [saving, setSaving] = useState(false)
-  const [saveResult, setSaveResult] = useState<{ dealUrl: string; ghlWarning?: string } | null>(null)
+  const [saveResult, setSaveResult] = useState<{ dealUrl: string; ghlSynced: boolean; ghlError?: string } | null>(null)
   const [saveError, setSaveError] = useState('')
 
   // Refs
@@ -1152,16 +1151,31 @@ function SFRContent() {
           <div className="fixed bottom-0 left-0 right-0 bg-black border-t border-border-default px-4 py-4 flex items-center justify-between gap-4 z-20">
             <div>
               <p className={`text-sm font-semibold ${canAnalyze ? 'text-white' : 'text-white/30'}`}>
-                {selectedCount} comp{selectedCount !== 1 ? 's' : ''} selected
+                {analyzing ? 'Running analysis…' : `${selectedCount} comp${selectedCount !== 1 ? 's' : ''} selected`}
               </p>
-              {selectedCount === 0 && <p className="text-white/30 text-xs">Select comps to run analysis</p>}
+              {!analyzing && selectedCount === 0 && (
+                <p className="text-white/30 text-xs">Select comps to run analysis</p>
+              )}
+              {analyzing && (
+                <p className="text-white/30 text-xs">This takes 10–20 seconds — hang tight</p>
+              )}
             </div>
             <button
               onClick={runAnalysis}
-              disabled={!canAnalyze}
-              className="bg-gold text-black font-bold px-6 py-3 rounded-xl hover:bg-gold-hover transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+              disabled={!canAnalyze || analyzing}
+              className="bg-gold text-black font-bold px-6 py-3 rounded-xl hover:bg-gold-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 min-w-[160px] justify-center"
             >
-              Run analysis →
+              {analyzing ? (
+                <>
+                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                  Analyzing…
+                </>
+              ) : (
+                'Run analysis →'
+              )}
             </button>
           </div>
         )}
@@ -1181,9 +1195,10 @@ function SFRContent() {
                 </div>
                 <button
                   onClick={runAnalysis}
-                  className="text-yellow-400 border border-yellow-400/40 rounded-lg px-3 py-1.5 text-xs font-semibold hover:bg-yellow-400/10 transition-colors shrink-0"
+                  disabled={analyzing}
+                  className="text-yellow-400 border border-yellow-400/40 rounded-lg px-3 py-1.5 text-xs font-semibold hover:bg-yellow-400/10 transition-colors shrink-0 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  Re-run analysis
+                  {analyzing ? 'Running…' : 'Re-run analysis'}
                 </button>
               </div>
             )}
@@ -1554,8 +1569,11 @@ function SFRContent() {
                   <div className="bg-green-400/10 border border-green-400/30 rounded-xl p-4">
                     <p className="text-green-400 font-semibold text-sm">Deal saved to REIblast!</p>
                     <p className="text-green-400/60 text-xs mt-0.5 break-all">{saveResult.dealUrl}</p>
-                    {saveResult.ghlWarning && (
-                      <p className="text-yellow-400/70 text-xs mt-2">{saveResult.ghlWarning}</p>
+                    {saveResult.ghlSynced && (
+                      <p className="text-green-400/60 text-xs mt-1">✓ CRM contact updated</p>
+                    )}
+                    {saveResult.ghlError && (
+                      <p className="text-yellow-400/70 text-xs mt-1">CRM sync skipped — {saveResult.ghlError}</p>
                     )}
                   </div>
                 )}
