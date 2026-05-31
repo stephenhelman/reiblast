@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const records = await getSalesComps(body.lat, body.lng, body.beds, body.sqft)
+    const records = await getSalesComps(body.lat, body.lng, body.sqft)
     console.log('[analyzer/comps] records before filter:', records.length)
 
     if (records.length === 0) {

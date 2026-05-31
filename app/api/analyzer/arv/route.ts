@@ -99,8 +99,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'subject and comps are required' }, { status: 400 })
   }
 
-  if (!Array.isArray(body.comps) || body.comps.length < 3) {
-    return NextResponse.json({ error: 'Select at least 3 comps' }, { status: 400 })
+  if (!Array.isArray(body.comps) || body.comps.length < 1) {
+    return NextResponse.json({ error: 'Select at least 1 comp' }, { status: 400 })
   }
 
   try {

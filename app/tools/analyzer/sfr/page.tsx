@@ -314,7 +314,8 @@ function SFRContent() {
   }, [processedComps, filters, propInfo])
 
   const selectedCount = selectedIds.size
-  const canAnalyze = selectedCount >= 3
+  const canAnalyze = selectedCount >= 1
+  const hasLowComps = selectedCount >= 1 && selectedCount < 3
 
   const selectedCompsForPayload = useMemo(() => {
     return processedComps.filter((c) => selectedIds.has(c.id))
@@ -554,7 +555,7 @@ function SFRContent() {
   // ── Analysis ────────────────────────────────────────────────────────────────
 
   async function runAnalysis() {
-    if (!place || selectedCompsForPayload.length < 3) return
+    if (!place || selectedCompsForPayload.length < 1) return
     setAnalyzing(true)
     setAnalysisError('')
     setTab2Unlocked(false)
@@ -995,10 +996,22 @@ function SFRContent() {
               <p className="text-white/40 text-sm">
                 {filteredComps.length} comp{filteredComps.length !== 1 ? 's' : ''} visible
               </p>
-              <p className={`text-sm font-semibold ${canAnalyze ? 'text-gold' : 'text-white/30'}`}>
-                {selectedCount} selected · min 3 required
+              <p className={`text-sm font-semibold ${selectedCount > 0 ? 'text-gold' : 'text-white/30'}`}>
+                {selectedCount} selected
               </p>
             </div>
+
+            {/* Low-comp warning banner */}
+            {hasLowComps && (
+              <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-xl px-4 py-3 flex items-start gap-2">
+                <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                </svg>
+                <p className="text-yellow-400/90 text-xs leading-relaxed">
+                  Only {selectedCount} comp{selectedCount === 1 ? '' : 's'} found in this area. The AI analysis will note limited data — treat results as directional only.
+                </p>
+              </div>
+            )}
 
             {/* Comp list */}
             {fetchingComps ? (
@@ -1023,7 +1036,7 @@ function SFRContent() {
               </div>
             ) : filteredComps.length === 0 ? (
               <p className="text-white/30 text-sm text-center py-10">
-                No comps match these filters. Try a wider radius or time period.
+                No comparable sales found in this area. Try expanding your filters.
               </p>
             ) : (
               <div className="space-y-2 pb-24">
@@ -1118,7 +1131,7 @@ function SFRContent() {
               <p className={`text-sm font-semibold ${canAnalyze ? 'text-white' : 'text-white/30'}`}>
                 {selectedCount} comp{selectedCount !== 1 ? 's' : ''} selected
               </p>
-              {!canAnalyze && <p className="text-white/30 text-xs">Select at least 3 comps to run analysis</p>}
+              {selectedCount === 0 && <p className="text-white/30 text-xs">Select comps to run analysis</p>}
             </div>
             <button
               onClick={runAnalysis}

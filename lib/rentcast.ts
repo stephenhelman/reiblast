@@ -19,7 +19,6 @@ export async function getPropertyDetails(address: string) {
 export async function getSalesComps(
   latitude: number,
   longitude: number,
-  beds: number,
   sqft: number
 ) {
   const params = new URLSearchParams({
@@ -27,8 +26,7 @@ export async function getSalesComps(
     longitude: String(longitude),
     radius: '1',
     propertyType: 'Single Family',
-    bedrooms: `${beds - 1}:${beds + 1}`,
-    squareFootage: `${sqft - 500}:${sqft + 500}`,
+    squareFootage: `${sqft - 750}:${sqft + 750}`,
     saleDateRange: '365',
     limit: '50',
   })
