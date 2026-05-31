@@ -6,7 +6,18 @@ const REFRESH_BUFFER_MS = 5 * 60 * 1000 // refresh when within 5 minutes of expi
 export async function getGhlAccessToken(locationId: string): Promise<string> {
   console.log('[ghl-token] Getting GHL token for locationId', locationId)
 
-  const record = await prisma.ghlToken.findUnique({ where: { locationId } })
+  let record = await prisma.ghlToken.findUnique({ where: { locationId } })
+
+  if (record) {
+    console.log('[ghl-token] Token found by locationId')
+  } else {
+    // Fallback: the callback stored a company-level token (locations fetch failed).
+    // findFirst returns whichever token is available — works for single-agency installs.
+    record = await prisma.ghlToken.findFirst()
+    if (record) {
+      console.log('[ghl-token] Token found via companyId fallback')
+    }
+  }
 
   if (!record) {
     throw new Error(
