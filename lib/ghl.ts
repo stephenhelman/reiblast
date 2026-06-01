@@ -110,6 +110,29 @@ export async function createHQContact(
   return { contactId: data.contact.id };
 }
 
+export async function updateHQContact(
+  contactId: string,
+  fields: Record<string, string | boolean>,
+): Promise<boolean> {
+  const customFields = Object.entries(fields).map(([key, value]) => ({
+    key,
+    field_value: String(value),
+  }))
+
+  const res = await fetch(`${GHL_BASE_URL}/contacts/${contactId}`, {
+    method: 'PUT',
+    headers: hqHeaders(),
+    body: JSON.stringify({ customFields }),
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    console.error('[GHL] updateHQContact failed:', err)
+  }
+
+  return res.ok
+}
+
 export async function addTag(contactId: string, tag: string): Promise<boolean> {
   const res = await fetch(`${GHL_BASE_URL}/contacts/${contactId}/tags`, {
     method: "POST",

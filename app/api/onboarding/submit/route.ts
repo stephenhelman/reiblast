@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { moveToStage } from '@/lib/ghl'
+import { moveToStage, updateHQContact } from '@/lib/ghl'
 import { ONBOARDING_STAGES, SUPPORT_EMAIL } from '@/lib/constants'
 
 const REQUIRED_FIELDS = [
@@ -62,6 +62,28 @@ export async function POST(req: NextRequest) {
 
     const contactId = user.ghlContactId!
     const contactName = user.name || email
+
+    try {
+      await updateHQContact(contactId, {
+        business_name: body.legalBusinessName as string,
+        ein: body.ein as string,
+        business_type: body.businessType as string,
+        business_address: body.businessAddress as string,
+        business_city: body.businessCity as string,
+        business_state: body.businessState as string,
+        business_zip: body.businessZip as string,
+        business_phone: body.businessPhone as string,
+        business_email: body.businessEmail as string,
+        website_url: (body.websiteUrl as string) || '',
+        target_market: body.targetMarket as string,
+        sms_compliance_agreed: 'true',
+        onboarding_stage: 'Onboarding Form Submitted',
+      })
+      console.log('[onboarding/submit] GHL contact updated')
+    } catch (ghlErr) {
+      console.error('[onboarding/submit] GHL contact update failed:', ghlErr)
+      // Non-blocking — DB is source of truth
+    }
 
     try {
       await moveToStage(contactId, ONBOARDING_STAGES.ONBOARDING_FORM_SUBMITTED, contactName)

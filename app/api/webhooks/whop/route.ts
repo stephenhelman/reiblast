@@ -12,11 +12,13 @@ import { MEMBER_TAGS, ONBOARDING_STAGES } from "@/lib/constants";
 
 export async function POST(req: NextRequest) {
   const rawBody = await req.text();
-  const signature = req.headers.get("whop-signature") || "";
+  const signature = req.headers.get("webhook-signature") || "";
+  const webhookId = req.headers.get("webhook-id") || "";
+  const webhookTimestamp = req.headers.get("webhook-timestamp") || "";
 
-  /* if (!verifyWhopWebhook(rawBody, signature)) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  } */
+  if (!verifyWhopWebhook(rawBody, signature, webhookId, webhookTimestamp)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
   let body: Record<string, unknown>;
   try {
@@ -25,9 +27,18 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const { event, email, name, whopMemberId, planId, userId } =
+  const { event, email, name, whopMemberId, planId, productId } =
     extractWhopEvent(body);
-  console.log(`[Whop webhook] event=${event} email=${email}`);
+  console.log(`[Whop] event=${event} email=${email} productId=${productId}`);
+
+  // Guard — only process REIblast GHL product
+  if (
+    process.env.WHOP_PRODUCT_ID &&
+    productId !== process.env.WHOP_PRODUCT_ID
+  ) {
+    console.log(`[Whop] Skipping event for product: ${productId}`);
+    return NextResponse.json({ received: true });
+  }
 
   try {
     if (event === "membership.activated") {
