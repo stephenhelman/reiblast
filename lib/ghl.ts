@@ -271,7 +271,7 @@ export async function provisionSubAccount(
       email,
       password: tempPassword,
       phone: phone || "",
-      type: "location",
+      type: "account",
       role: "user",
       locationIds: [locationId],
     }),
