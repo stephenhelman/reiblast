@@ -82,7 +82,7 @@ export async function POST(req: NextRequest) {
       arvHigh: arvHigh ?? null,
       arvConfidence: arvConfidence ?? null,
       exitStrategy: exitStrategy ?? null,
-      warnings: warnings ?? [],
+      warnings: Array.isArray(warnings) ? warnings : [],
       compsJson: compsJson ?? null,
     }
 
