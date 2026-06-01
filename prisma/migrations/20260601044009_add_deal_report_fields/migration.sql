@@ -1,0 +1,14 @@
+-- AlterTable
+ALTER TABLE "Deal" ADD COLUMN     "arvConfidence" TEXT,
+ADD COLUMN     "arvHigh" DOUBLE PRECISION,
+ADD COLUMN     "arvLow" DOUBLE PRECISION,
+ADD COLUMN     "asIsHigh" DOUBLE PRECISION,
+ADD COLUMN     "asIsLow" DOUBLE PRECISION,
+ADD COLUMN     "asIsValue" DOUBLE PRECISION,
+ADD COLUMN     "baths" INTEGER,
+ADD COLUMN     "beds" INTEGER,
+ADD COLUMN     "compsJson" TEXT,
+ADD COLUMN     "dealType" TEXT NOT NULL DEFAULT 'sfr',
+ADD COLUMN     "exitStrategy" TEXT,
+ADD COLUMN     "sqft" INTEGER,
+ADD COLUMN     "warnings" TEXT[];

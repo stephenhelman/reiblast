@@ -711,6 +711,7 @@ function SFRContent() {
         body: JSON.stringify({
           locationId,
           address: place.formattedAddress,
+          dealType: 'sfr',
           arv: analysis.arv.estimate,
           endBuyerMax: calcResults.endBuyerMax,
           repairLevel,
@@ -723,6 +724,30 @@ function SFRContent() {
           compsUsed: selectedCompsForPayload.length,
           contactId,
           skipGhl,
+          beds: typeof propInfo.beds === 'number' ? propInfo.beds : null,
+          baths: typeof propInfo.baths === 'number' ? propInfo.baths : null,
+          sqft: typeof propInfo.sqft === 'number' ? propInfo.sqft : null,
+          asIsValue: analysis.as_is.value,
+          asIsLow: analysis.as_is.low,
+          asIsHigh: analysis.as_is.high,
+          arvLow: analysis.arv.low,
+          arvHigh: analysis.arv.high,
+          arvConfidence: analysis.arv.confidence,
+          exitStrategy: analysis.exit_strategy.recommendation,
+          warnings: analysis.warnings,
+          compsJson: JSON.stringify(
+            analysis.comps.map((ac) => {
+              const raw = selectedCompsForPayload.find((c) => c.address === ac.address)
+              return {
+                address: ac.address,
+                salePrice: ac.sale_price,
+                adjustedPrice: ac.adjusted_price,
+                type: ac.type,
+                weight: ac.weight,
+                adjustments: raw?.adjustments ?? [],
+              }
+            })
+          ),
         }),
       })
       const data = await res.json()

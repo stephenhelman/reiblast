@@ -80,6 +80,7 @@ model Deal {
   id            String   @id @default(cuid())
   locationId    String
   address       String
+  dealType      String   @default("sfr")
   arv           Float
   endBuyerMax   Float
   repairLevel   String
@@ -91,6 +92,18 @@ model Deal {
   narrative     String
   compsUsed     Int
   dealUrl       String
+  beds          Int?
+  baths         Int?
+  sqft          Int?
+  asIsValue     Float?
+  asIsLow       Float?
+  asIsHigh      Float?
+  arvLow        Float?
+  arvHigh       Float?
+  arvConfidence String?
+  exitStrategy  String?
+  warnings      String[]
+  compsJson     String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

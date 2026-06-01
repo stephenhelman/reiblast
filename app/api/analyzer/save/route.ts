@@ -20,6 +20,19 @@ interface SaveBody {
   compsUsed: number
   contactId?: string | null
   skipGhl?: boolean
+  dealType?: string
+  beds?: number | null
+  baths?: number | null
+  sqft?: number | null
+  asIsValue?: number | null
+  asIsLow?: number | null
+  asIsHigh?: number | null
+  arvLow?: number | null
+  arvHigh?: number | null
+  arvConfidence?: string | null
+  exitStrategy?: string | null
+  warnings?: string[]
+  compsJson?: string | null
 }
 
 export async function POST(req: NextRequest) {
@@ -47,11 +60,31 @@ export async function POST(req: NextRequest) {
     locationId, address, arv, endBuyerMax, repairLevel, repairs,
     wholesaleFee, mao, anchorOffer, investorPct, narrative, compsUsed,
     contactId, skipGhl,
+    dealType, beds, baths, sqft,
+    asIsValue, asIsLow, asIsHigh,
+    arvLow, arvHigh, arvConfidence,
+    exitStrategy, warnings, compsJson,
   } = body as SaveBody
 
   let deal: { id: string }
   try {
     console.log('[analyzer/save] Writing to Neon. address:', address, '| locationId:', locationId)
+
+    const reportFields = {
+      dealType: dealType ?? 'sfr',
+      beds: beds ?? null,
+      baths: baths ?? null,
+      sqft: sqft ?? null,
+      asIsValue: asIsValue ?? null,
+      asIsLow: asIsLow ?? null,
+      asIsHigh: asIsHigh ?? null,
+      arvLow: arvLow ?? null,
+      arvHigh: arvHigh ?? null,
+      arvConfidence: arvConfidence ?? null,
+      exitStrategy: exitStrategy ?? null,
+      warnings: warnings ?? [],
+      compsJson: compsJson ?? null,
+    }
 
     deal = await prisma.deal.upsert({
       where: { locationId_address: { locationId, address } },
@@ -59,15 +92,17 @@ export async function POST(req: NextRequest) {
         locationId, address, arv, endBuyerMax, repairLevel, repairs,
         wholesaleFee, mao, anchorOffer, investorPct, narrative, compsUsed,
         dealUrl: '',
+        ...reportFields,
       },
       update: {
         arv, endBuyerMax, repairLevel, repairs,
         wholesaleFee, mao, anchorOffer, investorPct, narrative, compsUsed,
+        ...reportFields,
       },
       select: { id: true },
     })
 
-    const dealUrl = `${TOOLS_URL}/analyzer/deals/${deal.id}`
+    const dealUrl = `${TOOLS_URL}/tools/analyzer/deals/sfr/${deal.id}`
     await prisma.deal.update({ where: { id: deal.id }, data: { dealUrl } })
 
     console.log('[analyzer/save] Neon write result. deal.id:', deal.id, '| dealUrl:', dealUrl)
@@ -87,6 +122,16 @@ export async function POST(req: NextRequest) {
     try {
       const accessToken = await getGhlAccessToken(locationId)
 
+      const timestamp = new Date().toLocaleString('en-US', {
+        month: '2-digit',
+        day: '2-digit',
+        year: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: true,
+        timeZone: 'America/Chicago',
+      })
+
       const customFields = [
         { key: 'analysis_url',              field_value: dealUrl },
         { key: 'analysis_arv',              field_value: arv.toString() },
@@ -97,6 +142,7 @@ export async function POST(req: NextRequest) {
         { key: 'analysis_mao',              field_value: mao.toString() },
         { key: 'analysis_anchor',           field_value: anchorOffer.toString() },
         { key: 'analysis_investor_percent', field_value: investorPct.toString() },
+        { key: 'analysis_last_updated',     field_value: timestamp },
       ]
 
       if (contactId) {
