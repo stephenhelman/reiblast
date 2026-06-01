@@ -439,10 +439,11 @@ function SFRContent() {
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    if (connectionStatus !== 'connected') return
     if (step === 1 && googleMapsLoaded && addressInputRef.current && !autocompleteRef.current) {
       initAutocomplete()
     }
-  }, [step, googleMapsLoaded]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [step, googleMapsLoaded, connectionStatus]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Map initialization ──────────────────────────────────────────────────────
 
