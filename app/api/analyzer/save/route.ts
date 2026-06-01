@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
       select: { id: true },
     })
 
-    const dealUrl = `${TOOLS_URL}/tools/analyzer/deals/sfr/${deal.id}`
+    const dealUrl = `${TOOLS_URL}/analyzer/deals/sfr/${deal.id}`
     await prisma.deal.update({ where: { id: deal.id }, data: { dealUrl } })
 
     console.log('[analyzer/save] Neon write result. deal.id:', deal.id, '| dealUrl:', dealUrl)
