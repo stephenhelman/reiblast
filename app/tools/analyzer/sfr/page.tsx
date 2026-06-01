@@ -1,11 +1,11 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import MinimalHeader from '@/components/tools/MinimalHeader'
 import { useLocationId } from '@/lib/hooks/use-location-id'
 import {
   type AdjustmentPill,
-  type SFRAnalysisPayload,
   type SFRAnalysisResult,
   analyzeSFR,
 } from './analyze'
@@ -16,6 +16,13 @@ interface PlaceSelection {
   formattedAddress: string
   lat: number
   lng: number
+}
+
+interface CrmContact {
+  id: string
+  name: string
+  phone: string | null
+  address: string | null
 }
 
 interface PropertyInfo {
@@ -71,6 +78,10 @@ interface Filters {
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function capitalizeName(name: string): string {
+  return name.replace(/\b\w/g, (c) => c.toUpperCase())
+}
 
 function fmt(n: number | null | undefined) {
   if (n == null) return '—'
@@ -236,12 +247,31 @@ function AnalysisSkeleton() {
   )
 }
 
+// ─── Spinner ──────────────────────────────────────────────────────────────────
+
+function Spinner({ className }: { className?: string }) {
+  return (
+    <svg className={`animate-spin ${className ?? 'w-5 h-5'}`} fill="none" viewBox="0 0 24 24">
+      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+    </svg>
+  )
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 function SFRContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
   const locationId = useLocationId()
 
-  // Step state
+  // ── Connection gate ─────────────────────────────────────────────────────────
+
+  const [connectionStatus, setConnectionStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking')
+  const [connectedBanner, setConnectedBanner] = useState(false)
+
+  // ── Step state ──────────────────────────────────────────────────────────────
+
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1)
 
   // Step 1
@@ -287,6 +317,14 @@ function SFRContent() {
   const [saving, setSaving] = useState(false)
   const [saveFeedback, setSaveFeedback] = useState<{ text: string; variant: 'success' | 'warning' | 'error' } | null>(null)
 
+  // Save modal
+  const [saveModalOpen, setSaveModalOpen] = useState(false)
+  const [saveModalSearching, setSaveModalSearching] = useState(false)
+  const [saveModalContacts, setSaveModalContacts] = useState<CrmContact[]>([])
+  const [saveModalSelection, setSaveModalSelection] = useState<string | 'new' | 'skip' | null>(null)
+  const [saveModalSellerName, setSaveModalSellerName] = useState('')
+  const [saveModalSaving, setSaveModalSaving] = useState(false)
+
   // Refs
   const addressInputRef = useRef<HTMLInputElement>(null)
   const autocompleteRef = useRef<unknown>(null)
@@ -324,6 +362,29 @@ function SFRContent() {
   const selectedCompsForPayload = useMemo(() => {
     return processedComps.filter((c) => selectedIds.has(c.id))
   }, [processedComps, selectedIds])
+
+  // ── Connection check ────────────────────────────────────────────────────────
+
+  useEffect(() => {
+    if (searchParams.get('connected') === 'true') {
+      setConnectionStatus('connected')
+      setConnectedBanner(true)
+      setTimeout(() => setConnectedBanner(false), 4000)
+      const params = new URLSearchParams(searchParams.toString())
+      params.delete('connected')
+      const qs = params.toString()
+      router.replace(window.location.pathname + (qs ? '?' + qs : ''))
+      return
+    }
+    if (!locationId) {
+      setConnectionStatus('disconnected')
+      return
+    }
+    fetch(`/api/analyzer/check-connection?locationId=${encodeURIComponent(locationId)}`)
+      .then((r) => r.json())
+      .then((data) => setConnectionStatus(data.connected ? 'connected' : 'disconnected'))
+      .catch(() => setConnectionStatus('disconnected'))
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Google Maps loading ─────────────────────────────────────────────────────
 
@@ -378,7 +439,6 @@ function SFRContent() {
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Re-init autocomplete when step returns to 1 and google is already loaded
   useEffect(() => {
     if (step === 1 && googleMapsLoaded && addressInputRef.current && !autocompleteRef.current) {
       initAutocomplete()
@@ -523,7 +583,6 @@ function SFRContent() {
       const data: RawComp[] = await res.json()
       setAllComps(data)
       sessionStorage.setItem(SESSION_KEY(place.formattedAddress), JSON.stringify(data))
-      // Auto-select comps passing default filters
       const defaultPassing = data.filter(
         (c) => c.distanceMiles <= 0.5 && c.daysAgo <= 90
       )
@@ -621,9 +680,28 @@ function SFRContent() {
 
   // ── Save flow ───────────────────────────────────────────────────────────────
 
-  async function handleSave() {
+  function openSaveModal() {
+    if (!place || !analysis || !calcResults) return
+    setSaveModalOpen(true)
+    setSaveModalSearching(true)
+    setSaveModalContacts([])
+    setSaveModalSelection(null)
+    setSaveModalSellerName('')
+    fetch('/api/analyzer/search-contacts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ locationId, address: place.formattedAddress }),
+    })
+      .then((r) => r.json())
+      .then((data) => setSaveModalContacts(data.contacts ?? []))
+      .catch(() => setSaveModalContacts([]))
+      .finally(() => setSaveModalSearching(false))
+  }
+
+  async function performSave(contactId: string | null, skipGhl: boolean) {
     if (!place || !analysis || !calcResults) return
     setSaving(true)
+    setSaveModalSaving(true)
     const sqft = typeof propInfo.sqft === 'number' ? propInfo.sqft : 0
     const repairs = sqft * REPAIR_RATES[repairLevel]
     try {
@@ -643,11 +721,16 @@ function SFRContent() {
           investorPct,
           narrative: analysis.narrative,
           compsUsed: selectedCompsForPayload.length,
+          contactId,
+          skipGhl,
         }),
       })
       const data = await res.json()
+      setSaveModalOpen(false)
       if (!res.ok) {
         setSaveFeedback({ text: data.error || 'Save failed. Try again.', variant: 'error' })
+      } else if (skipGhl) {
+        setSaveFeedback({ text: 'Saved locally.', variant: 'success' })
       } else if (data.ghlSynced) {
         setSaveFeedback({ text: 'Saved and synced to CRM.', variant: 'success' })
       } else {
@@ -655,10 +738,48 @@ function SFRContent() {
       }
     } catch {
       setSaveFeedback({ text: 'Network error. Try again.', variant: 'error' })
+      setSaveModalOpen(false)
     } finally {
       setSaving(false)
+      setSaveModalSaving(false)
       setTimeout(() => setSaveFeedback(null), 4000)
     }
+  }
+
+  async function handleSaveModalConfirm() {
+    if (!saveModalSelection) return
+
+    if (saveModalSelection === 'skip') {
+      await performSave(null, true)
+      return
+    }
+
+    if (saveModalSelection === 'new') {
+      if (!saveModalSellerName.trim() || !place) return
+      setSaveModalSaving(true)
+      let newContactId: string | null = null
+      try {
+        const nameParts = saveModalSellerName.trim().split(/\s+/)
+        const firstName = nameParts[0] ?? ''
+        const lastName = nameParts.slice(1).join(' ')
+        const res = await fetch('/api/analyzer/create-contact', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ locationId, firstName, lastName, address1: place.formattedAddress }),
+        })
+        if (res.ok) {
+          const data = await res.json()
+          newContactId = data.contactId ?? null
+        }
+      } catch {
+        // proceed without contactId
+      }
+      await performSave(newContactId, false)
+      return
+    }
+
+    // Existing contact selected
+    await performSave(saveModalSelection, false)
   }
 
   // ── Step 2 validation ───────────────────────────────────────────────────────
@@ -704,6 +825,11 @@ function SFRContent() {
     setCalcResults(null)
     setSaveFeedback(null)
     setConditionUsedForAnalysis(null)
+    setSaveModalOpen(false)
+    setSaveModalContacts([])
+    setSaveModalSelection(null)
+    setSaveModalSellerName('')
+    setSaveModalSaving(false)
     gMapRef.current = null
     markersRef.current.clear()
     circleRef.current = null
@@ -713,11 +839,192 @@ function SFRContent() {
 
   const MAPS_KEY = process.env.NEXT_PUBLIC_GOOGLE_PLACES_API_KEY ?? ''
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Connection: checking ─────────────────────────────────────────────────────
+
+  if (connectionStatus === 'checking') {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <Spinner className="w-8 h-8 text-white/20" />
+      </div>
+    )
+  }
+
+  // ── Connection: disconnected → modal ─────────────────────────────────────────
+
+  if (connectionStatus === 'disconnected') {
+    const installUrl =
+      `https://marketplace.leadconnectorhq.com/v2/oauth/chooselocation` +
+      `?response_type=code` +
+      `&redirect_uri=${encodeURIComponent('https://tools.reiblast.app/api/analyzer/callback')}` +
+      `&client_id=${process.env.NEXT_PUBLIC_GHL_CLIENT_ID ?? ''}` +
+      `&scope=contacts.readonly+contacts.write+locations.readonly` +
+      `&state=${locationId ?? ''}`
+
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center px-4">
+        <div className="bg-surface border border-border-default rounded-2xl p-8 max-w-[420px] w-full text-center">
+          <div className="w-14 h-14 bg-gold/10 rounded-full flex items-center justify-center mx-auto mb-6">
+            <svg className="w-7 h-7 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+          </div>
+          <h2 className="text-xl font-bold text-white mb-3">Connect your account</h2>
+          <p className="text-white/50 text-sm leading-relaxed mb-8">
+            To use the REIblast Deal Analyzer, you need to connect your account. This only takes 30 seconds and is a one-time setup.
+          </p>
+          <button
+            onClick={() => { window.location.href = installUrl }}
+            className="w-full bg-gold text-black font-bold py-4 rounded-xl hover:bg-gold-hover transition-colors mb-4"
+          >
+            Connect now
+          </button>
+          <p className="text-white/30 text-xs">You&apos;ll be redirected back automatically.</p>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Connected: full analyzer ─────────────────────────────────────────────────
 
   return (
     <div className="min-h-screen bg-black text-white">
+
+      {/* Connected success banner */}
+      {connectedBanner && (
+        <div className="bg-green-400/10 border-b border-green-400/20 px-4 py-3 text-center">
+          <p className="text-green-400 text-sm font-medium">
+            Account connected. You&apos;re ready to analyze deals.
+          </p>
+        </div>
+      )}
+
       <MinimalHeader title="SFR Analyzer" />
+
+      {/* ── Save modal ── */}
+      {saveModalOpen && place && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 px-4">
+          <div className="bg-surface border border-border-default rounded-2xl p-6 max-w-[440px] w-full max-h-[90vh] overflow-y-auto">
+            <h2 className="text-lg font-bold text-white mb-1">Save deal to REIblast</h2>
+            <p className="text-white/40 text-sm mb-6 truncate">{place.formattedAddress}</p>
+
+            {saveModalSearching ? (
+              <div className="flex items-center justify-center gap-2 py-10 text-white/40 text-sm">
+                <Spinner className="w-4 h-4" />
+                <span>Searching your CRM...</span>
+              </div>
+            ) : (
+              <div className="space-y-1 mb-6">
+                {/* Existing contacts */}
+                {saveModalContacts.map((contact) => (
+                  <label
+                    key={contact.id}
+                    className={`flex items-start gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${
+                      saveModalSelection === contact.id
+                        ? 'border-gold bg-gold/5'
+                        : 'border-transparent hover:border-border-default'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="save-contact"
+                      value={contact.id}
+                      checked={saveModalSelection === contact.id}
+                      onChange={() => setSaveModalSelection(contact.id)}
+                      className="mt-0.5 accent-gold shrink-0"
+                    />
+                    <div className="min-w-0">
+                      <p className="text-white font-semibold text-sm">{capitalizeName(contact.name)}</p>
+                      {contact.phone && <p className="text-white/40 text-xs mt-0.5">{contact.phone}</p>}
+                      {contact.address && (
+                        <p className="text-white/30 text-xs mt-0.5 truncate">{contact.address}</p>
+                      )}
+                    </div>
+                  </label>
+                ))}
+
+                {/* Divider before "Not in CRM" */}
+                {saveModalContacts.length > 0 && (
+                  <div className="border-t border-border-default my-2" />
+                )}
+
+                {/* Not in CRM */}
+                <label
+                  className={`flex items-start gap-3 p-3 rounded-xl cursor-pointer border transition-colors ${
+                    saveModalSelection === 'new'
+                      ? 'border-gold bg-gold/5'
+                      : 'border-transparent hover:border-border-default'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="save-contact"
+                    value="new"
+                    checked={saveModalSelection === 'new'}
+                    onChange={() => setSaveModalSelection('new')}
+                    className="mt-0.5 accent-gold shrink-0"
+                  />
+                  <div className="min-w-0 w-full">
+                    <p className="text-white/60 text-sm italic">Not in CRM</p>
+                  </div>
+                </label>
+
+                {/* Seller name input — only when "Not in CRM" selected */}
+                {saveModalSelection === 'new' && (
+                  <div className="pl-7 pt-1">
+                    <input
+                      type="text"
+                      value={saveModalSellerName}
+                      onChange={(e) => setSaveModalSellerName(e.target.value)}
+                      placeholder="Full name"
+                      autoFocus
+                      className="w-full bg-surface-2 text-white rounded-lg border border-border-default focus:border-gold px-3 py-2.5 text-sm outline-none transition-colors placeholder:text-white/30"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Action buttons */}
+            <div className="flex gap-3">
+              <button
+                onClick={() => setSaveModalOpen(false)}
+                disabled={saveModalSaving}
+                className="flex-1 border border-border-default text-white/50 font-semibold py-3 rounded-xl hover:border-white/20 hover:text-white transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleSaveModalConfirm}
+                disabled={
+                  saveModalSearching ||
+                  saveModalSaving ||
+                  !saveModalSelection ||
+                  (saveModalSelection === 'new' && !saveModalSellerName.trim())
+                }
+                className="flex-1 bg-gold text-black font-bold py-3 rounded-xl hover:bg-gold-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {saveModalSaving ? (
+                  <>
+                    <Spinner className="w-4 h-4" />
+                    Saving…
+                  </>
+                ) : (
+                  'Save Deal →'
+                )}
+              </button>
+            </div>
+
+            {/* Skip link */}
+            <button
+              onClick={() => performSave(null, true)}
+              disabled={saveModalSaving}
+              className="w-full text-white/30 text-xs py-3 hover:text-white/60 transition-colors text-center mt-1 disabled:opacity-30 disabled:cursor-not-allowed"
+            >
+              Skip and save locally only
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="max-w-5xl mx-auto px-4 py-6">
         <StepProgress step={step} />
@@ -921,16 +1228,15 @@ function SFRContent() {
         {step === 3 && (
           <div className="flex flex-col gap-4">
 
-            {/* Map — top (~40vh) */}
+            {/* Map */}
             <div className="relative rounded-xl overflow-hidden border border-border-default" style={{ height: '40vh', minHeight: 240 }}>
               <div ref={mapContainerRef} className="w-full h-full" />
               {!googleMapsLoaded && <Skeleton className="absolute inset-0" />}
             </div>
 
-            {/* Filters — single row of dropdowns */}
+            {/* Filters */}
             <div className="bg-surface border border-border-default rounded-xl p-3">
               <div className="flex gap-2">
-                {/* Radius */}
                 <div className="flex flex-col gap-1 flex-1 min-w-0">
                   <label className="text-white/30 text-[10px] uppercase tracking-wider">Radius</label>
                   <select
@@ -944,7 +1250,6 @@ function SFRContent() {
                   </select>
                 </div>
 
-                {/* Sold within */}
                 <div className="flex flex-col gap-1 flex-1 min-w-0">
                   <label className="text-white/30 text-[10px] uppercase tracking-wider">Sold within</label>
                   <select
@@ -960,7 +1265,6 @@ function SFRContent() {
                   </select>
                 </div>
 
-                {/* Sqft range */}
                 <div className="flex flex-col gap-1 flex-1 min-w-0">
                   <label className="text-white/30 text-[10px] uppercase tracking-wider">Sqft ±</label>
                   <select
@@ -974,7 +1278,6 @@ function SFRContent() {
                   </select>
                 </div>
 
-                {/* Year built range */}
                 <div className="flex flex-col gap-1 flex-1 min-w-0">
                   <label className="text-white/30 text-[10px] uppercase tracking-wider">Year built</label>
                   <select
@@ -992,7 +1295,6 @@ function SFRContent() {
                   </select>
                 </div>
 
-                {/* Bedrooms */}
                 <div className="flex flex-col gap-1 flex-1 min-w-0">
                   <label className="text-white/30 text-[10px] uppercase tracking-wider">Bedrooms</label>
                   <select
@@ -1022,7 +1324,7 @@ function SFRContent() {
               </p>
             </div>
 
-            {/* Low-comp warning banner */}
+            {/* Low-comp warning */}
             {hasLowComps && (
               <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-xl px-4 py-3 flex items-start gap-2">
                 <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1072,7 +1374,6 @@ function SFRContent() {
                         selected ? 'border-gold' : 'border-border-default hover:border-white/20'
                       }`}
                     >
-                      {/* Street view thumb */}
                       {comp.latitude && comp.longitude && MAPS_KEY ? (
                         // eslint-disable-next-line @next/next/no-img-element
                         <img
@@ -1084,7 +1385,6 @@ function SFRContent() {
                         <div className="w-20 h-14 bg-surface-2 rounded-lg shrink-0" />
                       )}
 
-                      {/* Comp info */}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-start justify-between gap-2 mb-1">
                           <p className="text-white text-xs font-semibold leading-tight truncate">{comp.address}</p>
@@ -1108,7 +1408,6 @@ function SFRContent() {
                           {' · '}{comp.distanceMiles?.toFixed(2)}mi{' · '}{comp.daysAgo}d ago
                         </p>
 
-                        {/* Adjustment pills */}
                         {comp.adjustments.length > 0 && (
                           <div className="flex flex-wrap gap-1">
                             {comp.adjustments.map((a, i) => (
@@ -1135,7 +1434,6 @@ function SFRContent() {
               </div>
             )}
 
-            {/* Drawing tool stub */}
             <button
               disabled
               className="text-white/20 text-xs border border-border-default rounded-lg px-3 py-2 cursor-not-allowed w-full"
@@ -1166,10 +1464,7 @@ function SFRContent() {
             >
               {analyzing ? (
                 <>
-                  <svg className="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-                  </svg>
+                  <Spinner className="w-4 h-4" />
                   Analyzing…
                 </>
               ) : (
@@ -1247,9 +1542,7 @@ function SFRContent() {
                   </div>
                 ) : analysis ? (
                   <div className="space-y-5">
-                    {/* ARV + As-Is cards */}
                     <div className="grid grid-cols-2 gap-4">
-                      {/* ARV */}
                       <div className="bg-surface border border-gold rounded-xl p-5">
                         <p className="text-gold text-[10px] uppercase tracking-wider mb-1">After Repair Value</p>
                         <p className="text-white/40 text-xs mb-1">{fmt(analysis.arv.low)} — {fmt(analysis.arv.high)}</p>
@@ -1266,7 +1559,6 @@ function SFRContent() {
                         <p className="text-white/30 text-[11px] mt-2 italic leading-relaxed">{analysis.arv.confidence_reason}</p>
                       </div>
 
-                      {/* As-Is Value */}
                       <div className="bg-surface border border-border-default rounded-xl p-5">
                         <p className="text-white/40 text-[10px] uppercase tracking-wider mb-1">As-Is Value</p>
                         {analysis.as_is.value != null ? (
@@ -1294,7 +1586,6 @@ function SFRContent() {
                       </div>
                     </div>
 
-                    {/* Subject property chips */}
                     <div className="flex gap-2">
                       {[
                         { label: 'Beds', value: propInfo.beds },
@@ -1308,7 +1599,6 @@ function SFRContent() {
                       ))}
                     </div>
 
-                    {/* Comp breakdown */}
                     <div>
                       <p className="text-white/30 text-[11px] uppercase tracking-widest mb-3">Comp Breakdown</p>
                       <div className="space-y-2">
@@ -1316,7 +1606,6 @@ function SFRContent() {
                           const original = selectedCompsForPayload.find((c) => c.address === comp.address)
                           return (
                             <div key={i} className="bg-surface border border-border-default rounded-xl p-4 flex gap-3">
-                              {/* Street view thumb */}
                               {original?.latitude && original?.longitude && MAPS_KEY ? (
                                 // eslint-disable-next-line @next/next/no-img-element
                                 <img
@@ -1372,13 +1661,11 @@ function SFRContent() {
                       </div>
                     </div>
 
-                    {/* Narrative */}
                     <div className="bg-surface border border-border-default rounded-xl p-5">
                       <p className="text-white/30 text-[11px] uppercase tracking-widest mb-3">AI Narrative</p>
                       <p className="text-white text-sm leading-relaxed">{analysis.narrative}</p>
                     </div>
 
-                    {/* Warnings */}
                     {analysis.warnings.length > 0 && (
                       <div className="bg-yellow-400/5 border border-yellow-400/20 rounded-xl p-4">
                         <p className="text-yellow-400 text-xs font-semibold uppercase tracking-wider mb-2">Flags</p>
@@ -1393,13 +1680,11 @@ function SFRContent() {
                       </div>
                     )}
 
-                    {/* Exit strategy */}
                     <div className="bg-surface border border-border-default rounded-xl p-5">
                       <p className="text-white/30 text-[11px] uppercase tracking-widest mb-2">Exit Strategy</p>
                       <p className="text-white/70 text-sm leading-relaxed">{analysis.exit_strategy.reasoning}</p>
                     </div>
 
-                    {/* Disclosures */}
                     <div className="space-y-2 pt-2 border-t border-border-default">
                       <p className="text-white/25 text-[11px] leading-relaxed">
                         ⓘ AriAI can make mistakes. Always verify ARV estimates and comp data with your own due diligence before making an offer.
@@ -1409,7 +1694,6 @@ function SFRContent() {
                       </p>
                     </div>
 
-                    {/* CTA to Tab 2 */}
                     <button
                       onClick={() => {
                         setTab2Unlocked(true)
@@ -1427,7 +1711,6 @@ function SFRContent() {
             {/* ── TAB 2: Deal Calculator ── */}
             {activeTab === 2 && (
               <div className="space-y-6">
-                {/* Investor % */}
                 <div>
                   <div className="flex items-center justify-between mb-2">
                     <label className="text-white/40 text-xs uppercase tracking-wider">Investor percentage</label>
@@ -1448,7 +1731,6 @@ function SFRContent() {
                   </div>
                 </div>
 
-                {/* ARV read-only */}
                 {analysis && (
                   <div className="bg-surface-2 border border-border-default rounded-xl p-4">
                     <p className="text-white/40 text-xs uppercase tracking-wider mb-1">ARV (from analysis)</p>
@@ -1456,7 +1738,6 @@ function SFRContent() {
                   </div>
                 )}
 
-                {/* Repair level */}
                 <div>
                   <p className="text-white/40 text-xs uppercase tracking-wider mb-3">Repair level</p>
                   <div className="space-y-2">
@@ -1492,7 +1773,6 @@ function SFRContent() {
                   </div>
                 </div>
 
-                {/* Wholesale fee */}
                 <div>
                   <label className="block text-white/40 text-xs uppercase tracking-wider mb-1.5">Desired wholesale fee</label>
                   <div className="relative">
@@ -1519,7 +1799,6 @@ function SFRContent() {
             {/* ── TAB 3: Offer Results ── */}
             {activeTab === 3 && calcResults && analysis && (
               <div className="space-y-6">
-                {/* Breakdown table */}
                 <div className="bg-surface border border-border-default rounded-xl overflow-hidden">
                   <div className="divide-y divide-border-default">
                     {[
@@ -1556,14 +1835,13 @@ function SFRContent() {
                   </div>
                 </div>
 
-                {/* Warnings */}
-                <div className="bg-surface-2 border border-border-default rounded-xl p-4 space-y-2">
+                <div className="bg-surface-2 border border-border-default rounded-xl p-4">
                   <p className="text-white/50 text-xs leading-relaxed">
                     ⚠ Your MAO changes with your wholesale fee. Never submit an offer above end buyer max.
                   </p>
                 </div>
 
-                {/* Save feedback — auto-clears after 4s */}
+                {/* Save feedback */}
                 {saveFeedback && (
                   <div className={`rounded-xl px-4 py-3 text-xs leading-relaxed ${
                     saveFeedback.variant === 'success'
@@ -1576,7 +1854,6 @@ function SFRContent() {
                   </div>
                 )}
 
-                {/* Action buttons */}
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => {
@@ -1588,7 +1865,7 @@ function SFRContent() {
                     Start over
                   </button>
                   <button
-                    onClick={handleSave}
+                    onClick={openSaveModal}
                     disabled={saving}
                     className="bg-gold text-black font-bold py-3 rounded-xl hover:bg-gold-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >

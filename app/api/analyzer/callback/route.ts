@@ -171,6 +171,7 @@ const ERROR_HTML = `<!DOCTYPE html>
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get('code')
+  const state = req.nextUrl.searchParams.get('state')
 
   console.log('[analyzer/callback] OAuth callback received. code:', code ? `${code.slice(0, 8)}…` : 'missing')
 
@@ -222,7 +223,11 @@ export async function GET(req: NextRequest) {
       })
 
       console.log('[analyzer/callback] Token stored for locationId', locationId)
-      return htmlResponse(SUCCESS_HTML)
+      const redirectLocationId = state ?? locationId
+      console.log('[analyzer/callback] Redirecting to analyzer with locationId', redirectLocationId)
+      return NextResponse.redirect(
+        `https://tools.reiblast.app/tools/analyzer/sfr?locationId=${redirectLocationId}&connected=true`
+      )
 
     } else if (companyId) {
       // Company-level fallback — should not happen with new app

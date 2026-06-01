@@ -18,6 +18,8 @@ interface SaveBody {
   investorPct: number
   narrative: string
   compsUsed: number
+  contactId?: string | null
+  skipGhl?: boolean
 }
 
 export async function POST(req: NextRequest) {
@@ -44,6 +46,7 @@ export async function POST(req: NextRequest) {
   const {
     locationId, address, arv, endBuyerMax, repairLevel, repairs,
     wholesaleFee, mao, anchorOffer, investorPct, narrative, compsUsed,
+    contactId, skipGhl,
   } = body as SaveBody
 
   let deal: { id: string }
@@ -71,6 +74,11 @@ export async function POST(req: NextRequest) {
 
     // ── GHL sync ──────────────────────────────────────────────────────────────
 
+    if (skipGhl) {
+      console.log('[analyzer/save] skipGhl=true — skipping GHL sync')
+      return NextResponse.json({ success: true, dealUrl, ghlSynced: false, ghlError: null })
+    }
+
     console.log('[analyzer/save] Attempting GHL sync for locationId', locationId)
 
     let ghlSynced = false
@@ -91,26 +99,48 @@ export async function POST(req: NextRequest) {
         { key: 'analysis_investor_percent', field_value: investorPct.toString() },
       ]
 
-      const ghlRes = await fetch(`${GHL_BASE}/contacts/upsert`, {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          Version: '2021-07-28',
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ locationId, name: address, address1: address, customFields }),
-      })
-
-      console.log('[analyzer/save] GHL upsert response status:', ghlRes.status)
-
-      if (!ghlRes.ok) {
-        const errBody = await ghlRes.text()
-        console.error('[analyzer/save] GHL upsert failed:', errBody)
-        ghlError = errBody
+      if (contactId) {
+        console.log('[analyzer/save] Updating contact by ID:', contactId)
+        const ghlRes = await fetch(`${GHL_BASE}/contacts/${contactId}`, {
+          method: 'PUT',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Version: '2021-07-28',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ customFields }),
+        })
+        if (!ghlRes.ok) {
+          const errBody = await ghlRes.text()
+          console.error('[analyzer/save] Contact update failed:', ghlRes.status, errBody)
+          ghlError = errBody
+        } else {
+          console.log('[analyzer/save] Contact update success')
+          ghlSynced = true
+        }
       } else {
-        const ghlData = await ghlRes.json()
-        console.log('[analyzer/save] GHL upsert success. contact id:', ghlData?.contact?.id ?? ghlData?.id)
-        ghlSynced = true
+        console.log('[analyzer/save] No contactId — falling back to upsert by address')
+        const ghlRes = await fetch(`${GHL_BASE}/contacts/upsert`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            Version: '2021-07-28',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ locationId, name: address, address1: address, customFields }),
+        })
+
+        console.log('[analyzer/save] GHL upsert response status:', ghlRes.status)
+
+        if (!ghlRes.ok) {
+          const errBody = await ghlRes.text()
+          console.error('[analyzer/save] GHL upsert failed:', errBody)
+          ghlError = errBody
+        } else {
+          const ghlData = await ghlRes.json()
+          console.log('[analyzer/save] GHL upsert success. contact id:', ghlData?.contact?.id ?? ghlData?.id)
+          ghlSynced = true
+        }
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
