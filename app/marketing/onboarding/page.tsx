@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from 'next/navigation'
 import Input from '@/components/shared/Input'
 import Button from '@/components/shared/Button'
 import { Logo } from '@/components/shared/Logo'
+import { GHL_APP_URL, SUPPORT_EMAIL } from '@/lib/constants'
 
 const US_STATES = [
   'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN',
@@ -22,6 +23,8 @@ const LOADING_MESSAGES = [
   'Configuring your CRM...',
   'Almost ready...',
 ]
+
+type GateState = 'checking' | 'no_email' | 'not_found' | 'active' | 'onboarding_complete' | 'pending_onboarding'
 
 interface Step1Fields {
   email: string
@@ -78,6 +81,9 @@ function OnboardingContent() {
   const params = useSearchParams()
   const router = useRouter()
 
+  const email = params.get('email') ?? ''
+
+  const [gateState, setGateState] = useState<GateState>('checking')
   const [step, setStep] = useState(1)
   const [einError, setEinError] = useState('')
   const [submitError, setSubmitError] = useState('')
@@ -86,7 +92,7 @@ function OnboardingContent() {
   const [msgIndex, setMsgIndex] = useState(0)
 
   const [fields, setFields] = useState<Step1Fields>({
-    email: params.get('email') ?? '',
+    email,
     legalBusinessName: '',
     ein: '',
     businessType: 'LLC',
@@ -105,6 +111,24 @@ function OnboardingContent() {
     check2: false,
     check3: false,
   })
+
+  useEffect(() => {
+    if (!email) {
+      setGateState('no_email')
+      return
+    }
+    fetch(`/api/onboarding/status?email=${encodeURIComponent(email)}`)
+      .then(async (res) => {
+        if (res.status === 404) { setGateState('not_found'); return }
+        if (!res.ok) { setGateState('not_found'); return }
+        const data = await res.json()
+        const s: string = data.status
+        if (s === 'active') setGateState('active')
+        else if (s === 'onboarding_complete' || s === 'provisioning') setGateState('onboarding_complete')
+        else setGateState('pending_onboarding')
+      })
+      .catch(() => setGateState('not_found'))
+  }, [email])
 
   useEffect(() => {
     if (!loading) return
@@ -161,10 +185,7 @@ function OnboardingContent() {
       const res = await fetch('/api/onboarding/submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...fields,
-          smsComplianceAgreed: true,
-        }),
+        body: JSON.stringify({ ...fields, smsComplianceAgreed: true }),
       })
 
       if (res.ok) {
@@ -182,6 +203,95 @@ function OnboardingContent() {
 
   const inputClass = 'bg-[#1C1C1C] border-[#2A2A2A] text-white focus:border-gold'
 
+  // — Gate renders — all hooks are above this line —
+
+  if (gateState === 'checking') {
+    return (
+      <div className="min-h-screen bg-black flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  if (gateState === 'no_email') {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
+        <div className="max-w-md w-full">
+          <div className="flex justify-center mb-8"><Logo size={36} /></div>
+          <div className="bg-[#141414] border border-[#2A2A2A] rounded-2xl p-8 text-center">
+            <p className="text-white/70 text-sm leading-relaxed">
+              Missing account information. Please use the link from your welcome email or contact{' '}
+              <a href={`mailto:${SUPPORT_EMAIL}`} className="text-gold hover:underline">{SUPPORT_EMAIL}</a>
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (gateState === 'not_found') {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
+        <div className="max-w-md w-full">
+          <div className="flex justify-center mb-8"><Logo size={36} /></div>
+          <div className="bg-[#141414] border border-[#2A2A2A] rounded-2xl p-8 text-center">
+            <h2 className="text-white font-semibold text-lg mb-3">Your payment is still processing</h2>
+            <p className="text-white/60 text-sm leading-relaxed mb-6">
+              This usually takes less than a minute. Please refresh the page or check your welcome email for the setup link.
+            </p>
+            <button
+              onClick={() => window.location.reload()}
+              className="bg-gold text-black font-bold px-6 py-3 rounded-xl hover:bg-gold-hover transition-colors"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (gateState === 'active') {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
+        <div className="max-w-md w-full">
+          <div className="flex justify-center mb-8"><Logo size={36} /></div>
+          <div className="bg-[#141414] border border-[#2A2A2A] rounded-2xl p-8 text-center">
+            <div className="w-14 h-14 rounded-full bg-gold/10 border-2 border-gold flex items-center justify-center mx-auto mb-6">
+              <svg className="w-7 h-7 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <h2 className="text-white font-bold text-xl mb-6">Your account is already set up!</h2>
+            <a
+              href={GHL_APP_URL}
+              className="block w-full bg-gold text-black font-bold text-lg py-4 rounded-xl hover:bg-gold-hover transition-colors"
+            >
+              Go to My CRM →
+            </a>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  if (gateState === 'onboarding_complete') {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
+        <div className="max-w-md w-full">
+          <div className="flex justify-center mb-8"><Logo size={36} /></div>
+          <div className="bg-[#141414] border border-[#2A2A2A] rounded-2xl p-8 text-center">
+            <h2 className="text-white font-bold text-xl mb-3">Your information has been submitted</h2>
+            <p className="text-white/60 text-sm leading-relaxed">
+              Your information has been submitted and is being reviewed. You&apos;ll receive an email with your login credentials within 24 hours.
+            </p>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // gateState === 'pending_onboarding' — full form
   return (
     <div className="min-h-screen bg-black text-white py-12 px-4">
       <div className="max-w-xl mx-auto">
@@ -357,7 +467,7 @@ function OnboardingContent() {
               </div>
             ) : (
               <Button variant="primary" size="lg" className="w-full" onClick={handleSubmit}>
-                Create My Account
+                Submit My Information
               </Button>
             )}
           </div>

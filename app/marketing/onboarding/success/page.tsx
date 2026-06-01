@@ -1,19 +1,29 @@
 'use client'
 
-import Link from 'next/link'
-import { GHL_APP_URL, SUPPORT_EMAIL } from '@/lib/constants'
+import { SUPPORT_EMAIL } from '@/lib/constants'
 
 const STEPS = [
-  { n: 1, title: 'Check your email', body: 'Your login credentials are on their way to your inbox.' },
-  { n: 2, title: 'Log in at app.reiblast.app', body: 'Use the credentials from your welcome email to access your CRM.' },
-  { n: 3, title: 'Pull your first list', body: 'Have a DealMachine list ready to upload on day one.' },
+  {
+    n: 1,
+    title: "We'll review your details within 24 hours",
+    body: "Our team will verify your business information before setting up your workspace.",
+  },
+  {
+    n: 2,
+    title: "You'll receive an email with your CRM login credentials",
+    body: "Check your inbox — login details will arrive once your account is ready.",
+  },
+  {
+    n: 3,
+    title: "Get your first list ready on DealMachine while you wait",
+    body: "Have a list pulled and ready so you can blast your market on day one.",
+  },
 ]
 
 export default function OnboardingSuccessPage() {
   return (
     <div className="min-h-screen bg-black text-white flex flex-col items-center justify-center py-16 px-4">
       <div className="max-w-lg w-full text-center">
-        {/* Animated checkmark */}
         <div className="flex justify-center mb-8">
           <div
             className="w-20 h-20 rounded-full bg-gold/10 border-2 border-gold flex items-center justify-center"
@@ -31,15 +41,16 @@ export default function OnboardingSuccessPage() {
           </div>
         </div>
 
-        <h1 className="text-3xl font-bold mb-3">You&apos;re in. Welcome to REIblast.</h1>
+        <h1 className="text-3xl font-bold mb-3">
+          You&apos;re all set — we&apos;re reviewing your information
+        </h1>
         <p className="text-white/50 text-lg mb-10">
-          Your account is ready. Check your email for login credentials.
+          Your onboarding form has been received.
         </p>
 
-        {/* Steps */}
         <div className="space-y-4 mb-10 text-left">
           {STEPS.map(({ n, title, body }) => (
-            <div key={n} className="flex gap-4 bg-[#141414] border border-[#2A2A2A] rounded-xl p-5">
+            <div key={n} className="flex gap-4 bg-surface border border-border-default rounded-xl p-5">
               <div className="w-8 h-8 rounded-full bg-gold text-black font-bold text-sm flex items-center justify-center shrink-0">
                 {n}
               </div>
@@ -50,15 +61,6 @@ export default function OnboardingSuccessPage() {
             </div>
           ))}
         </div>
-
-        <Link
-          href={GHL_APP_URL}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center justify-center w-full bg-gold text-black font-bold py-4 px-8 rounded-xl text-lg hover:bg-[#e0b538] transition-colors mb-6"
-        >
-          Go to My CRM →
-        </Link>
 
         <p className="text-white/30 text-sm">
           Questions? Email{' '}

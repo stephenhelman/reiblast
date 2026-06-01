@@ -13,6 +13,13 @@ model User {
   name                String?
   passwordHash        String?
   plan                String   @default("core")
+  // Status values:
+  // pending_onboarding — paid, form not submitted
+  // onboarding_complete — form submitted, awaiting review
+  // provisioning — sub-account being created
+  // active — fully provisioned and active
+  // inactive — cancelled or deactivated
+  // suspended — payment issue or violation
   status              String   @default("pending_onboarding")
 
   // Whop

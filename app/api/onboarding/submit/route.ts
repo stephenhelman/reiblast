@@ -1,12 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import {
-  moveToStage,
-  provisionSubAccount,
-  populateA2PSite,
-  addTag,
-} from '@/lib/ghl'
-import { MEMBER_TAGS, ONBOARDING_STAGES, SUPPORT_EMAIL } from '@/lib/constants'
+import { moveToStage } from '@/lib/ghl'
+import { ONBOARDING_STAGES, SUPPORT_EMAIL } from '@/lib/constants'
 
 const REQUIRED_FIELDS = [
   'email', 'legalBusinessName', 'ein', 'businessType',
@@ -22,19 +17,16 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  // Validate required fields
   for (const field of REQUIRED_FIELDS) {
     if (!body[field] && body[field] !== false) {
       return NextResponse.json({ error: `Missing required field: ${field}` }, { status: 400 })
     }
   }
 
-  // Validate EIN format
   if (!/^\d{2}-\d{7}$/.test(body.ein as string)) {
     return NextResponse.json({ error: 'EIN must be in format XX-XXXXXXX' }, { status: 400 })
   }
 
-  // Validate SMS compliance
   if (body.smsComplianceAgreed !== true) {
     return NextResponse.json({ error: 'SMS compliance agreement is required' }, { status: 400 })
   }
@@ -47,7 +39,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Account not found. Please contact support.' }, { status: 404 })
     }
 
-    // Save business info and mark provisioning started
     await prisma.user.update({
       where: { id: user.id },
       data: {
@@ -64,50 +55,20 @@ export async function POST(req: NextRequest) {
         targetMarket: body.targetMarket as string,
         smsComplianceAgreed: true,
         onboardingComplete: true,
-        status: 'provisioning',
+        onboardingStage: ONBOARDING_STAGES.ONBOARDING_FORM_SUBMITTED,
+        status: 'onboarding_complete',
       },
     })
 
     const contactId = user.ghlContactId!
+    const contactName = user.name || email
 
-    await moveToStage(contactId, ONBOARDING_STAGES.ONBOARDING_FORM_SUBMITTED)
-
-    const { locationId, userId } = await provisionSubAccount(
-      user.name || email,
-      email,
-      body.legalBusinessName as string,
-      (body.businessPhone as string) || '',
-      contactId
-    )
-
-    await prisma.user.update({
-      where: { id: user.id },
-      data: {
-        ghlLocationId: locationId,
-        ghlUserId: userId,
-        status: 'active',
-        onboardingStage: ONBOARDING_STAGES.SUB_ACCOUNT_PROVISIONED,
-      },
-    })
-
-    await moveToStage(contactId, ONBOARDING_STAGES.SUB_ACCOUNT_PROVISIONED)
-
-    await populateA2PSite(locationId, {
-      businessName: body.legalBusinessName as string,
-      businessAddress: body.businessAddress as string,
-      businessCity: body.businessCity as string,
-      businessState: body.businessState as string,
-      businessZip: body.businessZip as string,
-      businessPhone: body.businessPhone as string,
-      businessEmail: body.businessEmail as string,
-      websiteUrl: body.websiteUrl as string | undefined,
-    })
-
-    await addTag(contactId, MEMBER_TAGS.ONBOARDING_COMPLETE)
-    await addTag(contactId, MEMBER_TAGS.ACTIVE)
-    await addTag(contactId, MEMBER_TAGS.A2P_PENDING)
-
-    await moveToStage(contactId, ONBOARDING_STAGES.ACTIVE)
+    try {
+      await moveToStage(contactId, ONBOARDING_STAGES.ONBOARDING_FORM_SUBMITTED, contactName)
+      console.log('[onboarding/submit] Stage moved successfully for', contactId)
+    } catch (stageErr) {
+      console.error('[onboarding/submit] moveToStage failed:', stageErr)
+    }
 
     return NextResponse.json({ success: true })
   } catch (err) {

@@ -8,48 +8,34 @@ import {
 } from '@/lib/ghl'
 import { MEMBER_TAGS, ONBOARDING_STAGES } from '@/lib/constants'
 
-interface ProvisionPayload {
-  contactId: string
-  email: string
-  name: string
-  phone: string
-  businessName: string
-  ein: string
-  businessAddress: string
-  businessCity: string
-  businessState: string
-  businessZip: string
-  targetMarket: string
-}
-
 export async function POST(req: NextRequest) {
   const secret = req.headers.get('x-reiblast-secret')
   if (!secret || secret !== process.env.GHL_WEBHOOK_SECRET) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  let body: ProvisionPayload
+  let body: Record<string, unknown>
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const {
-    contactId,
-    email,
-    name,
-    phone,
-    businessName,
-    businessAddress,
-    businessCity,
-    businessState,
-    businessZip,
-  } = body
+  const email = (body.email as string) || ''
+  const contactId = (body.id as string) || ''
+  const name =
+    (body.full_name as string) ||
+    `${(body.first_name as string) || ''} ${(body.last_name as string) || ''}`.trim()
+  const phone = (body.phone as string) || ''
+
+  if (!email || !contactId) {
+    console.error('[ghl-provision] Missing email or contactId', body)
+    return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+  }
 
   const normalizedEmail = email.toLowerCase()
 
-  const user = await prisma.user.findUnique({ where: { email: normalizedEmail } })
+  const user = await prisma.user.findFirst({ where: { email: normalizedEmail } })
   if (!user) {
     return NextResponse.json({ error: 'User not found' }, { status: 404 })
   }
@@ -67,13 +53,13 @@ export async function POST(req: NextRequest) {
       data: { status: 'provisioning' },
     })
 
-    await moveToStage(contactId, ONBOARDING_STAGES.SUB_ACCOUNT_PROVISIONED)
+    await moveToStage(contactId, ONBOARDING_STAGES.SUB_ACCOUNT_PROVISIONED, name)
 
     const { locationId, userId } = await provisionSubAccount(
-      name,
+      name || user.name || normalizedEmail,
       normalizedEmail,
-      businessName,
-      phone,
+      user.businessName || '',
+      user.businessPhone || phone,
       contactId,
     )
 
@@ -88,13 +74,13 @@ export async function POST(req: NextRequest) {
     })
 
     await populateA2PSite(locationId, {
-      businessName,
-      businessAddress,
-      businessCity,
-      businessState,
-      businessZip,
-      businessPhone: phone,
-      businessEmail: normalizedEmail,
+      businessName: user.businessName || '',
+      businessAddress: user.businessAddress || '',
+      businessCity: user.businessCity || '',
+      businessState: user.businessState || '',
+      businessZip: user.businessZip || '',
+      businessPhone: user.businessPhone || phone,
+      businessEmail: user.businessEmail || normalizedEmail,
     })
 
     // GHL automation detects 'Onboarding Complete' tag and sends the welcome
@@ -103,7 +89,7 @@ export async function POST(req: NextRequest) {
     await addTag(contactId, MEMBER_TAGS.ACTIVE)
     await addTag(contactId, MEMBER_TAGS.A2P_PENDING)
 
-    await moveToStage(contactId, ONBOARDING_STAGES.ACTIVE)
+    await moveToStage(contactId, ONBOARDING_STAGES.ACTIVE, name)
 
     return NextResponse.json({
       success: true,
@@ -114,7 +100,7 @@ export async function POST(req: NextRequest) {
     console.error(`[ghl-provision] error contactId=${contactId} email=${normalizedEmail}:`, err)
     await prisma.user.update({
       where: { id: user.id },
-      data: { status: 'pending_onboarding' },
+      data: { status: 'onboarding_complete' },
     })
     return NextResponse.json(
       {
