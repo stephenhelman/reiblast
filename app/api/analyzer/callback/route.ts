@@ -226,7 +226,7 @@ export async function GET(req: NextRequest) {
       const redirectLocationId = state ?? locationId
       console.log('[analyzer/callback] Redirecting to analyzer with locationId', redirectLocationId)
       return NextResponse.redirect(
-        `https://tools.reiblast.app/analyzer/sfr?locationId=${redirectLocationId}&connected=true`
+        `https://tools.reiblast.app/analyzer/sfr?token=${redirectLocationId}&connected=true`
       )
 
     } else if (companyId) {
