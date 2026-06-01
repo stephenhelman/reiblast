@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
       user.name || email,
       email,
       body.legalBusinessName as string,
+      (body.businessPhone as string) || '',
       contactId
     )
 

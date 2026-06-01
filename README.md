@@ -159,6 +159,47 @@ The widget routes (`/widget/header`, `/widget/analyzer`) render with zero chrome
 
 Widget routes bypass the session check in middleware — they are publicly accessible on the tools subdomain.
 
+## Sub-Account Provisioning
+
+Sub-account provisioning is triggered by a GHL automation webhook when the onboarding pipeline stage moves to **"Onboarding Form Submitted"**. This is a manual trigger from GHL — not Whop.
+
+### Webhook endpoint
+
+```
+POST /api/webhooks/ghl-provision
+```
+
+Secured with the `x-reiblast-secret` header (value must match `GHL_WEBHOOK_SECRET`).
+
+### Expected payload
+
+```json
+{
+  "contactId": "string",
+  "email": "string",
+  "name": "string",
+  "phone": "string",
+  "businessName": "string",
+  "ein": "string",
+  "businessAddress": "string",
+  "businessCity": "string",
+  "businessState": "string",
+  "businessZip": "string",
+  "targetMarket": "string"
+}
+```
+
+### Provisioning env vars
+
+| Variable | Description |
+|----------|-------------|
+| `GHL_AGENCY_ID` | Your GHL agency company ID |
+| `GHL_SAAS_PLAN_ID` | The 9999-day trial SaaS plan ID from the SaaS configurator |
+| `GHL_SNAPSHOT_ID` | REIblast Core v1 snapshot ID |
+| `GHL_AGENCY_API_KEY` | Agency-level PIT key |
+| `GHL_HQ_API_KEY` | HQ sub-account PIT key |
+| `GHL_WEBHOOK_SECRET` | Shared secret for webhook header verification |
+
 ## Phase 2 Roadmap
 
 - `lib/ghl.ts` — wire up real GHL API to provision sub-accounts on signup

@@ -6,7 +6,9 @@ export const metadata: Metadata = {
   title: 'Get Started — REIblast',
 }
 
-const paymentLink = process.env.NEXT_PUBLIC_GHL_PAYMENT_LINK ?? '#'
+const checkoutUrl = process.env.NEXT_PUBLIC_WHOP_CHECKOUT_URL
+if (!checkoutUrl) console.warn('NEXT_PUBLIC_WHOP_CHECKOUT_URL is not set')
+const paymentLink = checkoutUrl ?? '#'
 
 const FEATURES = [
   'Pre-built CRM pipeline + A2P-compliant SMS sequences ready on day one',

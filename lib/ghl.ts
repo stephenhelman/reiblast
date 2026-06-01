@@ -151,24 +151,34 @@ export async function provisionSubAccount(
   name: string,
   email: string,
   businessName: string,
+  phone: string,
   contactId: string
 ): Promise<{ locationId: string; userId: string; tempPassword: string }> {
+  const firstName = name.split(' ')[0]
+  const lastName = name.split(' ').slice(1).join(' ') || 'User'
   const tempPassword = `REI${Math.random().toString(36).slice(2, 8).toUpperCase()}!`
 
-  const locationRes = await fetch(`${GHL_BASE_URL}/locations/`, {
-    method: 'POST',
-    headers: agencyHeaders(),
-    body: JSON.stringify({
-      name: businessName || `${name}'s REIblast Account`,
-      email,
-      snapshotId: process.env.GHL_SNAPSHOT_ID,
-      address: '',
-      city: '',
-      state: '',
-      country: 'US',
-      timezone: 'America/Chicago',
-    }),
-  })
+  // Step 1 — Create the sub-account (location)
+  const locationRes = await fetch(
+    'https://services.leadconnectorhq.com/locations/',
+    {
+      method: 'POST',
+      headers: agencyHeaders(),
+      body: JSON.stringify({
+        companyId: process.env.GHL_AGENCY_ID,
+        name: businessName || `${name} REIblast Account`,
+        email,
+        phone: phone || '',
+        address: '123 Placeholder St',
+        city: 'Austin',
+        state: 'TX',
+        country: 'US',
+        postalCode: '78701',
+        saasPlanId: process.env.GHL_SAAS_PLAN_ID,
+        snapshotId: process.env.GHL_SNAPSHOT_ID,
+      }),
+    }
+  )
 
   if (!locationRes.ok) {
     const err = await locationRes.text()
@@ -176,22 +186,33 @@ export async function provisionSubAccount(
   }
 
   const locationData = await locationRes.json()
-  const locationId = locationData.location.id
+  const locationId = locationData.location?.id || locationData.id
 
-  const userRes = await fetch(`${GHL_BASE_URL}/users/`, {
-    method: 'POST',
-    headers: agencyHeaders(),
-    body: JSON.stringify({
-      companyId: locationId,
-      firstName: name.split(' ')[0],
-      lastName: name.split(' ').slice(1).join(' ') || '',
-      email,
-      password: tempPassword,
-      type: 'account',
-      role: 'user',
-      locationIds: [locationId],
-    }),
-  })
+  if (!locationId) {
+    throw new Error('No locationId returned from GHL')
+  }
+
+  // Step 2 — Create the user in the new sub-account
+  // Must use role: "user" not "admin" to enforce
+  // CSS restrictions set at the agency level
+  const userRes = await fetch(
+    'https://services.leadconnectorhq.com/users/',
+    {
+      method: 'POST',
+      headers: agencyHeaders(),
+      body: JSON.stringify({
+        companyId: process.env.GHL_AGENCY_ID,
+        firstName,
+        lastName,
+        email,
+        password: tempPassword,
+        phone: phone || '',
+        type: 'location',
+        role: 'user',
+        locationIds: [locationId],
+      }),
+    }
+  )
 
   if (!userRes.ok) {
     const err = await userRes.text()
@@ -199,7 +220,12 @@ export async function provisionSubAccount(
   }
 
   const userData = await userRes.json()
-  return { locationId, userId: userData.id, tempPassword }
+
+  return {
+    locationId,
+    userId: userData.id,
+    tempPassword,
+  }
 }
 
 export async function getLocationApiKey(locationId: string): Promise<string> {

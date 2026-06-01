@@ -1,6 +1,8 @@
 import { LogoStacked } from '../shared/Logo'
 
-const paymentLink = process.env.NEXT_PUBLIC_GHL_PAYMENT_LINK ?? '#'
+const checkoutUrl = process.env.NEXT_PUBLIC_WHOP_CHECKOUT_URL
+if (!checkoutUrl) console.warn('NEXT_PUBLIC_WHOP_CHECKOUT_URL is not set')
+const paymentLink = checkoutUrl ?? '#'
 
 export default function Hero() {
   return (
@@ -31,8 +33,8 @@ export default function Hero() {
         </h1>
 
         <p className="text-xl md:text-2xl mb-10 max-w-3xl leading-relaxed" style={{ color: '#888888' }}>
-          REIblast is the wholesale operating system built for investors who text. Pipeline,
-          sequences, contracts, and deal analysis — all in one place.
+          The wholesale operating system built for investors who text. Pull your list, blast
+          your market, and close deals — all from one place.
         </p>
 
         <div className="flex flex-col sm:flex-row gap-4">

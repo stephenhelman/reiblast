@@ -1,6 +1,6 @@
 const PAIN_POINTS = [
   {
-    text: 'Tired of juggling FusionREI, Discord, and spreadsheets?',
+    text: 'Tired of juggling 3-5 different resources just to get one deal done?',
   },
   {
     text: 'Spending weeks waiting for A2P approval?',
