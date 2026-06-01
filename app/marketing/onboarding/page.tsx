@@ -4,7 +4,7 @@ import { useState, useEffect, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Input from '@/components/shared/Input'
 import Button from '@/components/shared/Button'
-import { Logo } from '@/components/shared/Logo'
+import { LogoStacked } from '@/components/shared/Logo'
 import { GHL_APP_URL, SUPPORT_EMAIL } from '@/lib/constants'
 
 const US_STATES = [
@@ -24,7 +24,7 @@ const LOADING_MESSAGES = [
   'Almost ready...',
 ]
 
-type GateState = 'checking' | 'no_email' | 'not_found' | 'active' | 'onboarding_complete' | 'pending_onboarding'
+type GateState = 'checking' | 'not_found' | 'active' | 'onboarding_complete' | 'pending_onboarding'
 
 interface Step1Fields {
   email: string
@@ -77,11 +77,58 @@ function StepIndicator({ step }: { step: number }) {
   )
 }
 
+function HoldingPage() {
+  return (
+    <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
+      <div className="max-w-sm w-full text-center">
+        <div className="flex justify-center mb-10">
+          <LogoStacked size={72} />
+        </div>
+
+        <div className="flex justify-center mb-8">
+          <div className="w-20 h-20 rounded-full bg-gold/10 border-2 border-gold flex items-center justify-center animate-pulse">
+            <svg
+              className="w-9 h-9 text-gold"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+              strokeWidth={1.5}
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"
+              />
+            </svg>
+          </div>
+        </div>
+
+        <h1 className="text-2xl font-bold mb-4">Check Your Email</h1>
+        <p className="text-white/60 text-sm leading-relaxed mb-6">
+          We sent your onboarding link to the email you used at checkout. Click the link in that
+          email to complete your account setup.
+        </p>
+        <p className="text-white/30 text-xs leading-relaxed">
+          Didn&apos;t receive it? Check your spam folder or contact{' '}
+          <a
+            href={`mailto:${SUPPORT_EMAIL}`}
+            className="text-white/50 hover:text-gold transition-colors underline underline-offset-2"
+          >
+            {SUPPORT_EMAIL}
+          </a>
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function OnboardingContent() {
   const params = useSearchParams()
   const router = useRouter()
 
-  const email = params.get('email') ?? ''
+  const rawEmail = params.get('email') || ''
+  const email =
+    rawEmail.includes('{{') || !rawEmail.includes('@') ? '' : rawEmail.toLowerCase()
 
   const [gateState, setGateState] = useState<GateState>('checking')
   const [step, setStep] = useState(1)
@@ -113,10 +160,7 @@ function OnboardingContent() {
   })
 
   useEffect(() => {
-    if (!email) {
-      setGateState('no_email')
-      return
-    }
+    if (!email) return
     fetch(`/api/onboarding/status?email=${encodeURIComponent(email)}`)
       .then(async (res) => {
         if (res.status === 404) { setGateState('not_found'); return }
@@ -201,9 +245,10 @@ function OnboardingContent() {
     }
   }
 
-  const inputClass = 'bg-[#1C1C1C] border-[#2A2A2A] text-white focus:border-gold'
+  // No valid email — show holding page
+  if (!email) return <HoldingPage />
 
-  // — Gate renders — all hooks are above this line —
+  const inputClass = 'bg-[#1C1C1C] border-[#2A2A2A] text-white focus:border-gold'
 
   if (gateState === 'checking') {
     return (
@@ -213,27 +258,11 @@ function OnboardingContent() {
     )
   }
 
-  if (gateState === 'no_email') {
-    return (
-      <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
-        <div className="max-w-md w-full">
-          <div className="flex justify-center mb-8"><Logo size={36} /></div>
-          <div className="bg-[#141414] border border-[#2A2A2A] rounded-2xl p-8 text-center">
-            <p className="text-white/70 text-sm leading-relaxed">
-              Missing account information. Please use the link from your welcome email or contact{' '}
-              <a href={`mailto:${SUPPORT_EMAIL}`} className="text-gold hover:underline">{SUPPORT_EMAIL}</a>
-            </p>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
   if (gateState === 'not_found') {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
         <div className="max-w-md w-full">
-          <div className="flex justify-center mb-8"><Logo size={36} /></div>
+          <div className="flex justify-center mb-8"><LogoStacked size={72} /></div>
           <div className="bg-[#141414] border border-[#2A2A2A] rounded-2xl p-8 text-center">
             <h2 className="text-white font-semibold text-lg mb-3">Your payment is still processing</h2>
             <p className="text-white/60 text-sm leading-relaxed mb-6">
@@ -255,7 +284,7 @@ function OnboardingContent() {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
         <div className="max-w-md w-full">
-          <div className="flex justify-center mb-8"><Logo size={36} /></div>
+          <div className="flex justify-center mb-8"><LogoStacked size={72} /></div>
           <div className="bg-[#141414] border border-[#2A2A2A] rounded-2xl p-8 text-center">
             <div className="w-14 h-14 rounded-full bg-gold/10 border-2 border-gold flex items-center justify-center mx-auto mb-6">
               <svg className="w-7 h-7 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -279,7 +308,7 @@ function OnboardingContent() {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
         <div className="max-w-md w-full">
-          <div className="flex justify-center mb-8"><Logo size={36} /></div>
+          <div className="flex justify-center mb-8"><LogoStacked size={72} /></div>
           <div className="bg-[#141414] border border-[#2A2A2A] rounded-2xl p-8 text-center">
             <h2 className="text-white font-bold text-xl mb-3">Your information has been submitted</h2>
             <p className="text-white/60 text-sm leading-relaxed">
@@ -296,7 +325,7 @@ function OnboardingContent() {
     <div className="min-h-screen bg-black text-white py-12 px-4">
       <div className="max-w-xl mx-auto">
         <div className="flex justify-center mb-8">
-          <Logo size={36} />
+          <LogoStacked size={72} />
         </div>
 
         <h1 className="text-2xl font-bold text-center mb-2">Set Up Your Account</h1>
