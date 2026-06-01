@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import MinimalHeader from '@/components/tools/MinimalHeader'
 import { useLocationId } from '@/lib/hooks/use-location-id'
 import {
@@ -261,7 +261,6 @@ function Spinner({ className }: { className?: string }) {
 // ─── Main component ───────────────────────────────────────────────────────────
 
 function SFRContent() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const locationId = useLocationId()
 
@@ -373,7 +372,7 @@ function SFRContent() {
       const params = new URLSearchParams(searchParams.toString())
       params.delete('connected')
       const qs = params.toString()
-      router.replace(window.location.pathname + (qs ? '?' + qs : ''))
+      window.history.replaceState({}, '', window.location.pathname + (qs ? '?' + qs : ''))
       return
     }
     if (!locationId) {
