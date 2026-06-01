@@ -25,11 +25,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  const { event, email, name, whopMemberId } = extractWhopEvent(body)
+  const { event, email, name, whopMemberId, planId, userId } = extractWhopEvent(body)
   console.log(`[Whop webhook] event=${event} email=${email}`)
 
   try {
-    if (event === 'membership.went_valid') {
+    if (event === 'membership.activated') {
       const user = await prisma.user.upsert({
         where: { email: email.toLowerCase() },
         update: { name, whopMemberId, plan: 'core', status: 'pending_onboarding' },
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true })
     }
 
-    if (event === 'membership.went_invalid') {
+    if (event === 'membership.deactivated') {
       const user = await prisma.user.findFirst({
         where: {
           OR: [
