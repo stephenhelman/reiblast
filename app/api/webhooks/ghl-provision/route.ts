@@ -58,9 +58,13 @@ export async function POST(req: NextRequest) {
     const { locationId, userId } = await provisionSubAccount(
       name || user.name || normalizedEmail,
       normalizedEmail,
-      user.businessName || '',
+      user.businessName || name,
       user.businessPhone || phone,
       contactId,
+      user.businessAddress || '',
+      user.businessCity || '',
+      user.businessState || '',
+      user.businessZip || '',
     )
 
     await prisma.user.update({

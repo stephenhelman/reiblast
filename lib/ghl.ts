@@ -220,75 +220,140 @@ export async function provisionSubAccount(
   businessName: string,
   phone: string,
   contactId: string,
+  businessAddress?: string,
+  businessCity?: string,
+  businessState?: string,
+  businessZip?: string,
 ): Promise<{ locationId: string; userId: string; tempPassword: string }> {
   const firstName = name.split(" ")[0];
   const lastName = name.split(" ").slice(1).join(" ") || "User";
   const tempPassword = `REI${Math.random().toString(36).slice(2, 8).toUpperCase()}!`;
 
-  // Step 1 — Create the sub-account (location)
-  const locationRes = await fetch(
-    "https://services.leadconnectorhq.com/locations/",
-    {
-      method: "POST",
-      headers: agencyHeaders(),
-      body: JSON.stringify({
-        companyId: process.env.GHL_AGENCY_ID,
-        name: businessName || `${name} REIblast Account`,
-        email,
-        phone: phone || "",
-        address: "123 Placeholder St",
-        city: "Austin",
-        state: "TX",
-        country: "US",
-        postalCode: "78701",
-        snapshotId: process.env.GHL_SNAPSHOT_ID,
-      }),
-    },
-  );
+  console.log('[GHL] provisionSubAccount called:', {
+    name,
+    email,
+    businessName,
+    phone,
+    contactId,
+    businessAddress,
+    businessCity,
+    businessState,
+    businessZip,
+    snapshotId: process.env.GHL_SNAPSHOT_ID,
+    agencyId: process.env.GHL_AGENCY_ID,
+  });
 
-  if (!locationRes.ok) {
-    const err = await locationRes.text();
-    throw new Error(`Failed to create sub-account: ${err}`);
-  }
+  try {
+    // Step 1 — Create the sub-account (location)
+    const locationPayload = {
+      name: businessName || `${name} REIblast Account`,
+      phone: phone || '',
+      companyId: process.env.GHL_AGENCY_ID,
+      address: businessAddress || '123 Placeholder St',
+      city: businessCity || 'Austin',
+      state: businessState || 'TX',
+      country: 'US',
+      postalCode: businessZip || '78701',
+      timezone: 'US/Central',
+      prospectInfo: { firstName, lastName, email },
+      snapshotId: process.env.GHL_SNAPSHOT_ID,
+    };
 
-  const locationData = await locationRes.json();
-  const locationId = locationData.location?.id || locationData.id;
+    console.log('[GHL] Creating location...');
+    console.log('[GHL] Location payload:', JSON.stringify(locationPayload, null, 2));
 
-  if (!locationId) {
-    throw new Error("No locationId returned from GHL");
-  }
+    const locationRes = await fetch(
+      "https://services.leadconnectorhq.com/locations/",
+      {
+        method: "POST",
+        headers: agencyHeaders(),
+        body: JSON.stringify({
+          ...locationPayload,
+          settings: {
+            allowDuplicateContact: false,
+            allowDuplicateOpportunity: false,
+            allowFacebookNameMerge: false,
+            disableContactTimezone: false,
+          },
+        }),
+      },
+    );
 
-  // Step 2 — Create the user in the new sub-account
-  // Must use role: "user" not "admin" to enforce
-  // CSS restrictions set at the agency level
-  const userRes = await fetch("https://services.leadconnectorhq.com/users/", {
-    method: "POST",
-    headers: agencyHeaders(),
-    body: JSON.stringify({
+    const locationRawResponse = await locationRes.text();
+    console.log('[GHL] Location creation status:', locationRes.status);
+    console.log('[GHL] Location creation response:', locationRawResponse);
+
+    if (!locationRes.ok) {
+      throw new Error(`Failed to create sub-account: ${locationRawResponse}`);
+    }
+
+    const locationData = JSON.parse(locationRawResponse);
+    const locationId = locationData.location?.id || locationData.id;
+
+    if (!locationId) {
+      throw new Error("No locationId returned from GHL");
+    }
+
+    console.log('[GHL] Location created successfully:', locationId);
+
+    // Step 2 — Create the user in the new sub-account
+    // Must use role: "user" not "admin" to enforce
+    // CSS restrictions set at the agency level
+    const userPayload = {
       companyId: process.env.GHL_AGENCY_ID,
       firstName,
       lastName,
       email,
-      password: tempPassword,
-      phone: phone || "",
-      type: "account",
-      role: "user",
+      type: 'account',
+      role: 'user',
       locationIds: [locationId],
-    }),
-  });
+    };
 
-  if (!userRes.ok) {
-    const err = await userRes.text();
-    throw new Error(`Failed to create GHL user: ${err}`);
+    console.log('[GHL] Creating user for location:', locationId);
+    console.log('[GHL] User payload:', JSON.stringify(userPayload, null, 2));
+
+    const userRes = await fetch("https://services.leadconnectorhq.com/users/", {
+      method: "POST",
+      headers: agencyHeaders(),
+      body: JSON.stringify({
+        ...userPayload,
+        password: tempPassword,
+        phone: phone || "",
+      }),
+    });
+
+    const userRawResponse = await userRes.text();
+    console.log('[GHL] User creation status:', userRes.status);
+    console.log('[GHL] User creation response:', userRawResponse);
+
+    if (!userRes.ok) {
+      throw new Error(`Failed to create GHL user: ${userRawResponse}`);
+    }
+
+    const userData = JSON.parse(userRawResponse);
+
+    console.log('[GHL] Provisioning complete:', {
+      locationId,
+      userId: userData.id,
+      email,
+    });
+
+    return {
+      locationId,
+      userId: userData.id,
+      tempPassword,
+    };
+  } catch (err) {
+    console.error('[GHL] provisionSubAccount failed:', {
+      error: err,
+      name,
+      email,
+      businessName,
+      snapshotId: process.env.GHL_SNAPSHOT_ID,
+      agencyId: process.env.GHL_AGENCY_ID,
+    });
+    throw err;
   }
-
-  const userData = await userRes.json();
-
-  return {
-    locationId,
-    userId: userData.id,
-    tempPassword,
-  };
 }
 
 export async function getLocationApiKey(locationId: string): Promise<string> {
