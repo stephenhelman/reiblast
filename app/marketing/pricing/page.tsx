@@ -5,8 +5,8 @@ export const metadata: Metadata = {
   title: 'Pricing — REIblast',
 }
 
-const checkoutUrl = process.env.NEXT_PUBLIC_WHOP_CHECKOUT_URL
-if (!checkoutUrl) console.warn('NEXT_PUBLIC_WHOP_CHECKOUT_URL is not set')
+const checkoutUrl = process.env.NEXT_PUBLIC_CHECKOUT_URL
+if (!checkoutUrl) console.warn('NEXT_PUBLIC_CHECKOUT_URL is not set')
 const paymentLink = checkoutUrl ?? '#'
 
 const INCLUDED = [

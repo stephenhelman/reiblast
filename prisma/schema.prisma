@@ -22,9 +22,6 @@ model User {
   // suspended — payment issue or violation
   status              String   @default("pending_onboarding")
 
-  // Whop
-  whopMemberId        String?
-
   // Business / A2P info
   businessName        String?
   ein                 String?
