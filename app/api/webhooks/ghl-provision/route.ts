@@ -90,11 +90,15 @@ export async function POST(req: NextRequest) {
       owner_name: name,
     })
 
-    console.log('[Provision] Updating HQ contact tags and pipeline:', contactId)
-    await addTag(contactId, MEMBER_TAGS.ONBOARDING_COMPLETE)
-    await addTag(contactId, MEMBER_TAGS.ACTIVE)
-    await addTag(contactId, MEMBER_TAGS.A2P_PENDING)
-    await moveToStage(contactId, ONBOARDING_STAGES.ACTIVE, name)
+    if (!contactId || contactId.startsWith('test_')) {
+      console.log('[Provision] Skipping GHL contact updates — test contactId detected')
+    } else {
+      console.log('[Provision] Updating HQ contact tags and pipeline:', contactId)
+      await addTag(contactId, MEMBER_TAGS.ONBOARDING_COMPLETE)
+      await addTag(contactId, MEMBER_TAGS.ACTIVE)
+      await addTag(contactId, MEMBER_TAGS.A2P_PENDING)
+      await moveToStage(contactId, ONBOARDING_STAGES.ACTIVE, name)
+    }
 
     console.log('[Provision] Complete:', locationId)
     return NextResponse.json({

@@ -477,15 +477,25 @@ export async function sendOTPEmail(
 export async function findSubAccountByName(businessName: string): Promise<string | null> {
   if (!businessName) return null
   const res = await fetch(
-    `${GHL_BASE_URL}/locations/search?name=${encodeURIComponent(businessName)}&companyId=${process.env.GHL_COMPANY_ID}`,
+    `${GHL_BASE_URL}/locations/search?companyId=${process.env.GHL_AGENCY_ID}&limit=100`,
     { headers: agencyHeaders() },
   )
   if (!res.ok) {
-    console.error('[GHL] findSubAccountByName failed:', res.status, await res.text())
+    const err = await res.text()
+    console.error('[GHL] findSubAccountByName failed:', res.status, err)
     return null
   }
-  const data = await res.json()
-  return data?.locations?.[0]?.id ?? null
+  const data = JSON.parse(await res.text())
+  const locations: Array<{ id: string; name?: string }> = data.locations || []
+  const match = locations.find(
+    (loc) => loc.name?.toLowerCase().trim() === businessName.toLowerCase().trim(),
+  )
+  if (match) {
+    console.log('[GHL] Found sub-account by name:', match.id)
+    return match.id
+  }
+  console.log('[GHL] No sub-account found for name:', businessName)
+  return null
 }
 
 export async function findSubAccountByEmail(email: string): Promise<string | null> {
