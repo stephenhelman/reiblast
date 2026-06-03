@@ -474,6 +474,64 @@ export async function sendOTPEmail(
   return res.ok;
 }
 
+export async function findSubAccountByName(businessName: string): Promise<string | null> {
+  if (!businessName) return null
+  const res = await fetch(
+    `${GHL_BASE_URL}/locations/search?name=${encodeURIComponent(businessName)}&companyId=${process.env.GHL_COMPANY_ID}`,
+    { headers: agencyHeaders() },
+  )
+  if (!res.ok) {
+    console.error('[GHL] findSubAccountByName failed:', res.status, await res.text())
+    return null
+  }
+  const data = await res.json()
+  return data?.locations?.[0]?.id ?? null
+}
+
+export async function findSubAccountByEmail(email: string): Promise<string | null> {
+  if (!email) return null
+  const res = await fetch(
+    `${GHL_BASE_URL}/locations/search?email=${encodeURIComponent(email)}&companyId=${process.env.GHL_COMPANY_ID}`,
+    { headers: agencyHeaders() },
+  )
+  if (!res.ok) {
+    console.error('[GHL] findSubAccountByEmail failed:', res.status, await res.text())
+    return null
+  }
+  const data = await res.json()
+  return data?.locations?.[0]?.id ?? null
+}
+
+export async function populateSubAccountCustomValues(
+  locationId: string,
+  values: Record<string, string>,
+): Promise<void> {
+  const listRes = await fetch(`${GHL_BASE_URL}/locations/${locationId}/customValues`, {
+    headers: agencyHeaders(),
+  })
+  const listData = listRes.ok ? await listRes.json() : { customValues: [] }
+  const existing: Array<{ id: string; name: string }> = listData?.customValues ?? []
+
+  for (const [key, value] of Object.entries(values)) {
+    const match = existing.find(
+      (cv) => cv.name.toLowerCase().replace(/\s+/g, '_') === key.toLowerCase(),
+    )
+    if (match) {
+      await fetch(`${GHL_BASE_URL}/locations/${locationId}/customValues/${match.id}`, {
+        method: 'PUT',
+        headers: agencyHeaders(),
+        body: JSON.stringify({ name: match.name, value }),
+      })
+    } else {
+      await fetch(`${GHL_BASE_URL}/locations/${locationId}/customValues`, {
+        method: 'POST',
+        headers: agencyHeaders(),
+        body: JSON.stringify({ name: key, value }),
+      })
+    }
+  }
+}
+
 export async function populateA2PSite(
   locationId: string,
   businessData: {
