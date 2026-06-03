@@ -1,5 +1,5 @@
-import Link from 'next/link'
-import { LogoFull } from '../shared/Logo'
+import Link from "next/link";
+import { LogoFull } from "../shared/Logo";
 
 export default function Footer() {
   return (
@@ -7,18 +7,28 @@ export default function Footer() {
       <div className="max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-6">
         <div className="flex flex-col items-center md:items-start gap-2">
           <LogoFull size={28} />
-          <p className="text-white/30 text-sm">Built for wholesalers who blast</p>
+          <p className="text-white/30 text-sm">
+            Built for wholesalers who blast
+          </p>
         </div>
 
         <div className="flex items-center gap-8 text-sm">
-          <Link href="/pricing" className="text-white/50 hover:text-white transition-colors">
+          <Link
+            href="/pricing"
+            className="text-white/50 hover:text-white transition-colors"
+          >
             Pricing
           </Link>
-          <a href="https://app.reiblast.app" target="_blank" rel="noreferrer" className="text-white/50 hover:text-white transition-colors">
+          <a
+            href="https://app.reiblast.app"
+            target="_blank"
+            rel="noreferrer"
+            className="text-white/50 hover:text-white transition-colors"
+          >
             Login
           </a>
           <a
-            href="mailto:support@reiblast.app"
+            href="mailto:support@mail.reiblast.app"
             className="text-white/50 hover:text-white transition-colors"
           >
             Support
@@ -32,5 +42,5 @@ export default function Footer() {
         </p>
       </div>
     </footer>
-  )
+  );
 }

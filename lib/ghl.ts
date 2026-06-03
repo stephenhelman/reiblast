@@ -95,7 +95,25 @@ export async function createHQContact(
   email: string,
   phone?: string,
 ): Promise<{ contactId: string }> {
-  const res = await fetch(`${GHL_BASE_URL}/contacts/`, {
+  // Step 1 — Search for existing contact by email
+  const searchRes = await fetch(
+    `${GHL_BASE_URL}/contacts/?locationId=${process.env.GHL_HQ_LOCATION_ID}&email=${encodeURIComponent(email)}&limit=1`,
+    { headers: hqHeaders() },
+  );
+
+  const searchText = await searchRes.text();
+  const searchData = JSON.parse(searchText);
+
+  console.log("[GHL] Contact search status:", searchRes.status);
+
+  const existingContact = searchData?.contacts?.[0];
+  if (existingContact?.id) {
+    console.log("[GHL] Found existing contact:", existingContact.id);
+    return { contactId: existingContact.id };
+  }
+
+  // Step 2 — No existing contact, create new one
+  const createRes = await fetch(`${GHL_BASE_URL}/contacts/`, {
     method: "POST",
     headers: hqHeaders(),
     body: JSON.stringify({
@@ -105,9 +123,27 @@ export async function createHQContact(
       phone: phone || "",
     }),
   });
-  if (!res.ok) throw new Error("Failed to create HQ contact");
-  const data = await res.json();
-  return { contactId: data.contact.id };
+
+  const createText = await createRes.text();
+  const createData = JSON.parse(createText);
+
+  console.log("[GHL] createHQContact status:", createRes.status);
+
+  // Handle duplicate gracefully as fallback
+  if (createRes.status === 400 && createData?.meta?.contactId) {
+    console.log(
+      "[GHL] Duplicate contact, using existing:",
+      createData.meta.contactId,
+    );
+    return { contactId: createData.meta.contactId };
+  }
+
+  if (!createRes.ok) {
+    throw new Error(`Failed to create HQ contact: ${createText}`);
+  }
+
+  console.log("[GHL] New contact created:", createData.contact.id);
+  return { contactId: createData.contact.id };
 }
 
 export async function updateHQContact(
@@ -160,7 +196,6 @@ export async function moveToStage(
   contactName?: string,
 ): Promise<boolean> {
   const stageId = ONBOARDING_STAGE_IDS[stage];
-  console.log("[Stage Id]", stageId);
 
   if (!stageId) {
     console.error(`[GHL] No stage ID found for stage: ${stage}`);

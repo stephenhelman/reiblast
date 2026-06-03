@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import { useSearchParams, useRouter } from 'next/navigation'
 import Input from '@/components/shared/Input'
 import Button from '@/components/shared/Button'
@@ -91,7 +91,8 @@ function VerificationFlow() {
   const [contacts, setContacts] = useState<Contact[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [maskedEmail, setMaskedEmail] = useState('')
-  const [otpValue, setOtpValue] = useState('')
+  const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', ''])
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([null, null, null, null, null, null])
   const [otpError, setOtpError] = useState('')
   const [findLoading, setFindLoading] = useState(false)
   const [findEmpty, setFindEmpty] = useState(false)
@@ -107,6 +108,12 @@ function VerificationFlow() {
     const t = setTimeout(() => setCooldown((c) => c - 1), 1000)
     return () => clearTimeout(t)
   }, [cooldown])
+
+  useEffect(() => {
+    if (state === 'otp') {
+      setTimeout(() => inputRefs.current[0]?.focus(), 50)
+    }
+  }, [state])
 
   async function findAccounts() {
     setFindLoading(true)
@@ -166,15 +173,43 @@ function VerificationFlow() {
     } catch {}
   }
 
+  function handleOtpChange(index: number, value: string) {
+    const digit = value.replace(/\D/g, '').slice(-1)
+    const next = [...otpDigits]
+    next[index] = digit
+    setOtpDigits(next)
+    setOtpError('')
+    if (digit && index < 5) {
+      inputRefs.current[index + 1]?.focus()
+    }
+  }
+
+  function handleOtpKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Backspace' && !otpDigits[index] && index > 0) {
+      inputRefs.current[index - 1]?.focus()
+    }
+    if (e.key === 'Enter') verifyOtp()
+  }
+
+  function handleOtpPaste(e: React.ClipboardEvent<HTMLInputElement>) {
+    e.preventDefault()
+    const text = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
+    const next: string[] = ['', '', '', '', '', '']
+    for (let i = 0; i < text.length; i++) next[i] = text[i]
+    setOtpDigits(next)
+    inputRefs.current[Math.min(text.length, 5)]?.focus()
+  }
+
   async function verifyOtp() {
-    if (!otpValue || verifyLoading || failCount >= 3) return
+    const otp = otpDigits.join('')
+    if (otp.length < 6 || verifyLoading || failCount >= 3) return
     setVerifyLoading(true)
     setOtpError('')
     try {
       const res = await fetch('/api/onboarding/verify-otp', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ contactId: selectedId, otp: otpValue }),
+        body: JSON.stringify({ contactId: selectedId, otp }),
       })
       const data = await res.json()
       if (res.ok) {
@@ -185,7 +220,8 @@ function VerificationFlow() {
         if (next < 3) setOtpError(data.error || 'Invalid code. Try again.')
         setShake(true)
         setTimeout(() => setShake(false), 600)
-        setOtpValue('')
+        setOtpDigits(['', '', '', '', '', ''])
+        setTimeout(() => inputRefs.current[0]?.focus(), 50)
       }
     } catch {
       setOtpError('Something went wrong. Try again.')
@@ -324,48 +360,43 @@ function VerificationFlow() {
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 text-red-400 text-sm leading-relaxed">
                 Too many attempts. Contact{' '}
                 <a
-                  href="mailto:support@reiblast.app"
+                  href="mailto:support@mail.reiblast.app"
                   className="underline hover:text-red-300"
                 >
-                  support@reiblast.app
+                  support@mail.reiblast.app
                 </a>
               </div>
             ) : (
               <>
-                <input
-                  type="text"
-                  inputMode="numeric"
-                  maxLength={6}
-                  pattern="[0-9]*"
-                  value={otpValue}
-                  onChange={(e) => {
-                    const v = e.target.value.replace(/\D/g, '').slice(0, 6)
-                    setOtpValue(v)
-                    setOtpError('')
-                  }}
-                  onFocus={(e) => e.target.select()}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') verifyOtp()
-                  }}
-                  className={`w-full text-center text-4xl font-bold bg-[#1C1C1C] border-2 rounded-xl px-4 py-5 outline-none transition-colors mb-2 ${
-                    shake ? 'otp-shake' : ''
-                  } ${
-                    otpError
-                      ? 'border-red-500 text-red-400'
-                      : 'border-[#2A2A2A] focus:border-gold text-white'
-                  }`}
-                  style={{ letterSpacing: '0.5em' }}
-                  placeholder="——————"
-                  disabled={verifyLoading}
-                  autoFocus
-                />
+                <div className={`flex gap-2 justify-center mb-2 ${shake ? 'otp-shake' : ''}`}>
+                  {otpDigits.map((digit, i) => (
+                    <input
+                      key={i}
+                      ref={(el) => { inputRefs.current[i] = el }}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
+                      maxLength={1}
+                      value={digit}
+                      onChange={(e) => handleOtpChange(i, e.target.value)}
+                      onKeyDown={(e) => handleOtpKeyDown(i, e)}
+                      onPaste={handleOtpPaste}
+                      disabled={verifyLoading}
+                      className={`w-12 h-14 text-center text-2xl font-bold bg-[#1C1C1C] border-2 rounded-lg outline-none transition-all ${
+                        otpError
+                          ? 'border-red-500 text-red-400'
+                          : 'border-gold/50 text-white focus:border-gold focus:shadow-[0_0_0_3px_rgba(245,200,66,0.15)]'
+                      }`}
+                    />
+                  ))}
+                </div>
                 {otpError && (
                   <p className="text-red-400 text-sm mb-2">{otpError}</p>
                 )}
 
                 <button
                   onClick={verifyOtp}
-                  disabled={otpValue.length < 6 || verifyLoading}
+                  disabled={otpDigits.some((d) => !d) || verifyLoading}
                   className="w-full bg-gold text-black font-bold py-4 rounded-xl hover:bg-gold-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 mt-3"
                 >
                   {verifyLoading ? (
@@ -389,7 +420,7 @@ function VerificationFlow() {
                   <button
                     onClick={() => {
                       setState('find')
-                      setOtpValue('')
+                      setOtpDigits(['', '', '', '', '', ''])
                       setOtpError('')
                       setFailCount(0)
                       setContacts([])
@@ -409,12 +440,16 @@ function VerificationFlow() {
 }
 
 function OnboardingContent() {
-  const params = useSearchParams()
+  const searchParams = useSearchParams()
   const router = useRouter()
 
-  const rawEmail = params.get('email') || ''
-  const email =
-    rawEmail.includes('{{') || !rawEmail.includes('@') ? '' : rawEmail.toLowerCase()
+  const emailParam = searchParams.get('email') || ''
+  const isValidEmail = (
+    emailParam.length > 0 &&
+    emailParam.includes('@') &&
+    !emailParam.includes('{{')
+  )
+  const email = isValidEmail ? emailParam.toLowerCase() : ''
 
   const [gateState, setGateState] = useState<GateState>('checking')
   const [step, setStep] = useState(1)
@@ -484,6 +519,12 @@ function OnboardingContent() {
       'businessEmail', 'targetMarket',
     ]
     return required.every((k) => fields[k].trim() !== '')
+  }
+
+  function formatEIN(value: string): string {
+    const digits = value.replace(/\D/g, '')
+    if (digits.length <= 2) return digits
+    return `${digits.slice(0, 2)}-${digits.slice(2, 9)}`
   }
 
   function handleEinBlur() {
@@ -624,12 +665,31 @@ function OnboardingContent() {
           <div className="space-y-4">
             <div>
               <label className="text-sm text-white/60 mb-1 block">Email</label>
-              <input
-                type="email"
-                value={fields.email}
-                readOnly
-                className={`w-full rounded-lg border px-4 py-3 outline-none opacity-50 cursor-not-allowed ${inputClass}`}
-              />
+              <div className="relative">
+                <input
+                  type="email"
+                  value={fields.email}
+                  readOnly={isValidEmail}
+                  onChange={isValidEmail ? undefined : setField('email')}
+                  className={`w-full rounded-lg border px-4 py-3 outline-none transition-colors pr-10 ${
+                    isValidEmail
+                      ? 'bg-[#1C1C1C]/50 border-gold/30 text-white opacity-75 cursor-not-allowed'
+                      : inputClass
+                  }`}
+                />
+                {isValidEmail && (
+                  <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
+                    <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    </svg>
+                  </div>
+                )}
+              </div>
+              {isValidEmail && (
+                <p className="flex items-center gap-1 mt-1 text-xs text-green-400">
+                  Verified from checkout
+                </p>
+              )}
             </div>
             <Input label="Legal Business Name" type="text" required placeholder="Acme Properties LLC" value={fields.legalBusinessName} onChange={setField('legalBusinessName')} />
             <div>
@@ -637,9 +697,14 @@ function OnboardingContent() {
                 label="EIN"
                 type="text"
                 required
-                placeholder="XX-XXXXXXX"
+                placeholder="12-3456789"
+                inputMode="numeric"
+                maxLength={10}
                 value={fields.ein}
-                onChange={setField('ein')}
+                onChange={(e) => {
+                  const formatted = formatEIN(e.target.value)
+                  setFields((prev) => ({ ...prev, ein: formatted }))
+                }}
                 onBlur={handleEinBlur}
                 error={einError}
               />
