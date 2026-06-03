@@ -25,6 +25,14 @@ const LOADING_MESSAGES = [
 ]
 
 type GateState = 'checking' | 'not_found' | 'active' | 'onboarding_complete' | 'pending_onboarding'
+type VerifyState = 'find' | 'select' | 'authorizing' | 'otp'
+
+interface Contact {
+  contactId: string
+  displayName: string
+  maskedEmail: string
+  createdAt: string
+}
 
 interface Step1Fields {
   email: string
@@ -77,46 +85,324 @@ function StepIndicator({ step }: { step: number }) {
   )
 }
 
-function HoldingPage() {
+function VerificationFlow() {
+  const router = useRouter()
+  const [state, setState] = useState<VerifyState>('find')
+  const [contacts, setContacts] = useState<Contact[]>([])
+  const [selectedId, setSelectedId] = useState('')
+  const [maskedEmail, setMaskedEmail] = useState('')
+  const [otpValue, setOtpValue] = useState('')
+  const [otpError, setOtpError] = useState('')
+  const [findLoading, setFindLoading] = useState(false)
+  const [findEmpty, setFindEmpty] = useState(false)
+  const [sendError, setSendError] = useState(false)
+  const [showNotSeen, setShowNotSeen] = useState(false)
+  const [verifyLoading, setVerifyLoading] = useState(false)
+  const [failCount, setFailCount] = useState(0)
+  const [cooldown, setCooldown] = useState(0)
+  const [shake, setShake] = useState(false)
+
+  useEffect(() => {
+    if (cooldown <= 0) return
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000)
+    return () => clearTimeout(t)
+  }, [cooldown])
+
+  async function findAccounts() {
+    setFindLoading(true)
+    setFindEmpty(false)
+    try {
+      const res = await fetch('/api/onboarding/recent-contacts')
+      const data = await res.json()
+      if (!data.contacts || data.contacts.length === 0) {
+        setFindEmpty(true)
+      } else {
+        setContacts(data.contacts)
+        setState('select')
+      }
+    } catch {
+      setFindEmpty(true)
+    } finally {
+      setFindLoading(false)
+    }
+  }
+
+  async function selectContact(contactId: string) {
+    setSelectedId(contactId)
+    setState('authorizing')
+    setSendError(false)
+    try {
+      const res = await fetch('/api/onboarding/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactId }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        setMaskedEmail(data.maskedEmail)
+        setCooldown(60)
+        setState('otp')
+      } else {
+        setSendError(true)
+        setState('select')
+      }
+    } catch {
+      setSendError(true)
+      setState('select')
+    }
+  }
+
+  async function resendOtp() {
+    if (cooldown > 0) return
+    setCooldown(60)
+    try {
+      const res = await fetch('/api/onboarding/send-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactId: selectedId }),
+      })
+      const data = await res.json()
+      if (res.ok) setMaskedEmail(data.maskedEmail)
+    } catch {}
+  }
+
+  async function verifyOtp() {
+    if (!otpValue || verifyLoading || failCount >= 3) return
+    setVerifyLoading(true)
+    setOtpError('')
+    try {
+      const res = await fetch('/api/onboarding/verify-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ contactId: selectedId, otp: otpValue }),
+      })
+      const data = await res.json()
+      if (res.ok) {
+        router.push(`/onboarding?email=${encodeURIComponent(data.email)}`)
+      } else {
+        const next = failCount + 1
+        setFailCount(next)
+        if (next < 3) setOtpError(data.error || 'Invalid code. Try again.')
+        setShake(true)
+        setTimeout(() => setShake(false), 600)
+        setOtpValue('')
+      }
+    } catch {
+      setOtpError('Something went wrong. Try again.')
+    } finally {
+      setVerifyLoading(false)
+    }
+  }
+
   return (
     <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
-      <div className="max-w-sm w-full text-center">
+      <style>{`
+        @keyframes otp-shake {
+          0%, 100% { transform: translateX(0); }
+          20% { transform: translateX(-8px); }
+          40% { transform: translateX(8px); }
+          60% { transform: translateX(-8px); }
+          80% { transform: translateX(8px); }
+        }
+        .otp-shake { animation: otp-shake 0.5s ease-in-out; }
+      `}</style>
+
+      <div className="max-w-sm w-full">
         <div className="flex justify-center mb-10">
           <LogoStacked size={72} />
         </div>
 
-        <div className="flex justify-center mb-8">
-          <div className="w-20 h-20 rounded-full bg-gold/10 border-2 border-gold flex items-center justify-center animate-pulse">
-            <svg
-              className="w-9 h-9 text-gold"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-              strokeWidth={1.5}
+        {/* STATE 1 — Find Account */}
+        {state === 'find' && (
+          <div className="text-center">
+            <h1 className="text-2xl font-bold mb-3">Welcome to REIblast</h1>
+            <p className="text-white/50 text-sm leading-relaxed mb-8">
+              Just purchased? Let&apos;s find your account to get you started.
+            </p>
+            {findEmpty && (
+              <div className="bg-[#1C1C1C] border border-[#2A2A2A] rounded-xl p-4 text-sm text-white/60 mb-6 text-left leading-relaxed">
+                No recent accounts found. It may take a moment to process your
+                payment. Try again in 30 seconds.
+              </div>
+            )}
+            <button
+              onClick={findAccounts}
+              disabled={findLoading}
+              className="w-full bg-gold text-black font-bold py-4 rounded-xl hover:bg-gold-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                d="M21.75 6.75v10.5a2.25 2.25 0 01-2.25 2.25h-15a2.25 2.25 0 01-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0019.5 4.5h-15a2.25 2.25 0 00-2.25 2.25m19.5 0v.243a2.25 2.25 0 01-1.07 1.916l-7.5 4.615a2.25 2.25 0 01-2.36 0L3.32 8.91a2.25 2.25 0 01-1.07-1.916V6.75"
-              />
-            </svg>
+              {findLoading ? (
+                <>
+                  <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                  Searching...
+                </>
+              ) : findEmpty ? (
+                'Try Again'
+              ) : (
+                'Find My Account →'
+              )}
+            </button>
           </div>
-        </div>
+        )}
 
-        <h1 className="text-2xl font-bold mb-4">Check Your Email</h1>
-        <p className="text-white/60 text-sm leading-relaxed mb-6">
-          We sent your onboarding link to the email you used at checkout. Click the link in that
-          email to complete your account setup.
-        </p>
-        <p className="text-white/30 text-xs leading-relaxed">
-          Didn&apos;t receive it? Check your spam folder or contact{' '}
-          <a
-            href={`mailto:${SUPPORT_EMAIL}`}
-            className="text-white/50 hover:text-gold transition-colors underline underline-offset-2"
-          >
-            {SUPPORT_EMAIL}
-          </a>
-        </p>
+        {/* STATE 2 — Select Account */}
+        {state === 'select' && (
+          <div>
+            <h1 className="text-xl font-bold mb-1">Is this you?</h1>
+            <p className="text-white/50 text-sm mb-6">Select your account to continue.</p>
+            {sendError && (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-red-400 text-sm mb-4">
+                Failed to send code. Please try again.
+              </div>
+            )}
+            <div className="space-y-3 mb-6">
+              {contacts.map((c) => (
+                <div
+                  key={c.contactId}
+                  className="bg-[#141414] border border-[#2A2A2A] hover:border-gold rounded-xl p-4 flex items-center justify-between gap-4 transition-colors"
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold text-white truncate">{c.displayName}</p>
+                    <p className="text-white/40 text-sm truncate">{c.maskedEmail}</p>
+                  </div>
+                  <button
+                    onClick={() => selectContact(c.contactId)}
+                    className="bg-gold text-black font-bold text-sm px-4 py-2 rounded-lg hover:bg-gold-hover transition-colors whitespace-nowrap shrink-0"
+                  >
+                    That&apos;s me →
+                  </button>
+                </div>
+              ))}
+            </div>
+            {!showNotSeen ? (
+              <button
+                onClick={() => setShowNotSeen(true)}
+                className="text-white/40 text-sm hover:text-white/70 transition-colors underline underline-offset-2 w-full text-center"
+              >
+                Don&apos;t see yourself?
+              </button>
+            ) : (
+              <div className="bg-[#1C1C1C] border border-[#2A2A2A] rounded-xl p-4 text-sm text-white/60 text-center">
+                <p className="mb-3 leading-relaxed">
+                  Your account may still be processing. Wait 60 seconds and try
+                  again, or check your email for a welcome message.
+                </p>
+                <button
+                  onClick={() => {
+                    setState('find')
+                    setShowNotSeen(false)
+                    setContacts([])
+                    setFindEmpty(false)
+                  }}
+                  className="text-gold text-sm font-semibold hover:underline"
+                >
+                  Try Again
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* STATE 3 — Authorizing */}
+        {state === 'authorizing' && (
+          <div className="text-center">
+            <div className="w-16 h-16 border-2 border-gold border-t-transparent rounded-full animate-spin mx-auto mb-6" />
+            <h2 className="text-xl font-bold mb-2">Authorizing...</h2>
+            <p className="text-white/50 text-sm">Sending your verification code</p>
+          </div>
+        )}
+
+        {/* STATE 4 — OTP Entry */}
+        {state === 'otp' && (
+          <div className="text-center">
+            <h2 className="text-xl font-bold mb-2">Check your email</h2>
+            <p className="text-white/50 text-sm mb-8">
+              We sent a 6-digit code to{' '}
+              <span className="text-white font-medium">{maskedEmail}</span>
+            </p>
+
+            {failCount >= 3 ? (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 text-red-400 text-sm leading-relaxed">
+                Too many attempts. Contact{' '}
+                <a
+                  href="mailto:support@reiblast.app"
+                  className="underline hover:text-red-300"
+                >
+                  support@reiblast.app
+                </a>
+              </div>
+            ) : (
+              <>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  maxLength={6}
+                  pattern="[0-9]*"
+                  value={otpValue}
+                  onChange={(e) => {
+                    const v = e.target.value.replace(/\D/g, '').slice(0, 6)
+                    setOtpValue(v)
+                    setOtpError('')
+                  }}
+                  onFocus={(e) => e.target.select()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') verifyOtp()
+                  }}
+                  className={`w-full text-center text-4xl font-bold bg-[#1C1C1C] border-2 rounded-xl px-4 py-5 outline-none transition-colors mb-2 ${
+                    shake ? 'otp-shake' : ''
+                  } ${
+                    otpError
+                      ? 'border-red-500 text-red-400'
+                      : 'border-[#2A2A2A] focus:border-gold text-white'
+                  }`}
+                  style={{ letterSpacing: '0.5em' }}
+                  placeholder="——————"
+                  disabled={verifyLoading}
+                  autoFocus
+                />
+                {otpError && (
+                  <p className="text-red-400 text-sm mb-2">{otpError}</p>
+                )}
+
+                <button
+                  onClick={verifyOtp}
+                  disabled={otpValue.length < 6 || verifyLoading}
+                  className="w-full bg-gold text-black font-bold py-4 rounded-xl hover:bg-gold-hover transition-colors disabled:opacity-60 flex items-center justify-center gap-2 mt-3"
+                >
+                  {verifyLoading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-black border-t-transparent rounded-full animate-spin" />
+                      Verifying...
+                    </>
+                  ) : (
+                    'Verify →'
+                  )}
+                </button>
+
+                <div className="mt-6 flex flex-col gap-3">
+                  <button
+                    onClick={resendOtp}
+                    disabled={cooldown > 0}
+                    className="text-sm text-white/40 hover:text-white/70 transition-colors disabled:hover:text-white/40 disabled:cursor-default"
+                  >
+                    {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      setState('find')
+                      setOtpValue('')
+                      setOtpError('')
+                      setFailCount(0)
+                      setContacts([])
+                    }}
+                    className="text-sm text-white/30 hover:text-white/50 transition-colors"
+                  >
+                    Wrong account?
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -245,8 +531,8 @@ function OnboardingContent() {
     }
   }
 
-  // No valid email — show holding page
-  if (!email) return <HoldingPage />
+  // No valid email — show verification flow
+  if (!email) return <VerificationFlow />
 
   const inputClass = 'bg-[#1C1C1C] border-[#2A2A2A] text-white focus:border-gold'
 

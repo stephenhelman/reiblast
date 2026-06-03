@@ -19,9 +19,9 @@ export default function Nav() {
           <Link href="/pricing" className="text-white/70 hover:text-white text-sm transition-colors">
             Pricing
           </Link>
-          <Link href="/login" className="text-white/70 hover:text-white text-sm transition-colors">
+          <a href="https://app.reiblast.app" target="_blank" rel="noreferrer" className="text-white/70 hover:text-white text-sm transition-colors">
             Login
-          </Link>
+          </a>
           <a
             href={paymentLink}
             className="bg-gold text-black font-semibold text-sm px-5 py-2 rounded-lg hover:bg-gold-hover transition-colors"

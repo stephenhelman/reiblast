@@ -117,20 +117,20 @@ export async function updateHQContact(
   const customFields = Object.entries(fields).map(([key, value]) => ({
     key,
     field_value: String(value),
-  }))
+  }));
 
   const res = await fetch(`${GHL_BASE_URL}/contacts/${contactId}`, {
-    method: 'PUT',
+    method: "PUT",
     headers: hqHeaders(),
     body: JSON.stringify({ customFields }),
-  })
+  });
 
   if (!res.ok) {
-    const err = await res.text()
-    console.error('[GHL] updateHQContact failed:', err)
+    const err = await res.text();
+    console.error("[GHL] updateHQContact failed:", err);
   }
 
-  return res.ok
+  return res.ok;
 }
 
 export async function addTag(contactId: string, tag: string): Promise<boolean> {
@@ -229,7 +229,7 @@ export async function provisionSubAccount(
   const lastName = name.split(" ").slice(1).join(" ") || "User";
   const tempPassword = `REI${Math.random().toString(36).slice(2, 8).toUpperCase()}!`;
 
-  console.log('[GHL] provisionSubAccount called:', {
+  console.log("[GHL] provisionSubAccount called:", {
     name,
     email,
     businessName,
@@ -247,20 +247,23 @@ export async function provisionSubAccount(
     // Step 1 — Create the sub-account (location)
     const locationPayload = {
       name: businessName || `${name} REIblast Account`,
-      phone: phone || '',
+      phone: phone || "",
       companyId: process.env.GHL_AGENCY_ID,
-      address: businessAddress || '123 Placeholder St',
-      city: businessCity || 'Austin',
-      state: businessState || 'TX',
-      country: 'US',
-      postalCode: businessZip || '78701',
-      timezone: 'US/Central',
+      address: businessAddress || "123 Placeholder St",
+      city: businessCity || "Austin",
+      state: businessState || "TX",
+      country: "US",
+      postalCode: businessZip || "78701",
+      timezone: "US/Central",
       prospectInfo: { firstName, lastName, email },
       snapshotId: process.env.GHL_SNAPSHOT_ID,
     };
 
-    console.log('[GHL] Creating location...');
-    console.log('[GHL] Location payload:', JSON.stringify(locationPayload, null, 2));
+    console.log("[GHL] Creating location...");
+    console.log(
+      "[GHL] Location payload:",
+      JSON.stringify(locationPayload, null, 2),
+    );
 
     const locationRes = await fetch(
       "https://services.leadconnectorhq.com/locations/",
@@ -280,8 +283,8 @@ export async function provisionSubAccount(
     );
 
     const locationRawResponse = await locationRes.text();
-    console.log('[GHL] Location creation status:', locationRes.status);
-    console.log('[GHL] Location creation response:', locationRawResponse);
+    console.log("[GHL] Location creation status:", locationRes.status);
+    console.log("[GHL] Location creation response:", locationRawResponse);
 
     if (!locationRes.ok) {
       throw new Error(`Failed to create sub-account: ${locationRawResponse}`);
@@ -294,7 +297,7 @@ export async function provisionSubAccount(
       throw new Error("No locationId returned from GHL");
     }
 
-    console.log('[GHL] Location created successfully:', locationId);
+    console.log("[GHL] Location created successfully:", locationId);
 
     // Step 2 — Create the user in the new sub-account
     // Must use role: "user" not "admin" to enforce
@@ -304,13 +307,13 @@ export async function provisionSubAccount(
       firstName,
       lastName,
       email,
-      type: 'account',
-      role: 'user',
+      type: "account",
+      role: "user",
       locationIds: [locationId],
     };
 
-    console.log('[GHL] Creating user for location:', locationId);
-    console.log('[GHL] User payload:', JSON.stringify(userPayload, null, 2));
+    console.log("[GHL] Creating user for location:", locationId);
+    console.log("[GHL] User payload:", JSON.stringify(userPayload, null, 2));
 
     const userRes = await fetch("https://services.leadconnectorhq.com/users/", {
       method: "POST",
@@ -323,8 +326,8 @@ export async function provisionSubAccount(
     });
 
     const userRawResponse = await userRes.text();
-    console.log('[GHL] User creation status:', userRes.status);
-    console.log('[GHL] User creation response:', userRawResponse);
+    console.log("[GHL] User creation status:", userRes.status);
+    console.log("[GHL] User creation response:", userRawResponse);
 
     if (!userRes.ok) {
       throw new Error(`Failed to create GHL user: ${userRawResponse}`);
@@ -332,7 +335,7 @@ export async function provisionSubAccount(
 
     const userData = JSON.parse(userRawResponse);
 
-    console.log('[GHL] Provisioning complete:', {
+    console.log("[GHL] Provisioning complete:", {
       locationId,
       userId: userData.id,
       email,
@@ -344,7 +347,7 @@ export async function provisionSubAccount(
       tempPassword,
     };
   } catch (err) {
-    console.error('[GHL] provisionSubAccount failed:', {
+    console.error("[GHL] provisionSubAccount failed:", {
       error: err,
       name,
       email,
@@ -379,6 +382,60 @@ export async function suspendSubAccount(locationId: string): Promise<boolean> {
     headers: agencyHeaders(),
     body: JSON.stringify({ suspended: true }),
   });
+  return res.ok;
+}
+
+export async function sendOTPEmail(
+  contactId: string,
+  email: string,
+  otp: string,
+  name: string,
+): Promise<boolean> {
+  const res = await fetch(`${GHL_BASE_URL}/conversations/messages`, {
+    method: "POST",
+    headers: hqHeaders(),
+    body: JSON.stringify({
+      type: "Email",
+      contactId,
+      emailTo: email,
+      emailFrom: process.env.GHL_FROM_EMAIL,
+      subject: "Your REIblast verification code",
+      html: `
+<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;background:#ffffff;padding:32px;">
+  <div style="text-align:center;margin-bottom:24px;">
+    <img src="https://reiblast.app/full-lockup.png" alt="REIblast" height="32"/>
+  </div>
+  <h2 style="color:#0A0A0A;margin-bottom:8px;">Verify your account</h2>
+  <p style="color:#444;margin-bottom:24px;">
+    Hey ${name}, enter this code to complete your REIblast account setup:
+  </p>
+  <div style="background:#0A0A0A;color:#F5C842;font-size:40px;font-weight:bold;text-align:center;padding:28px;border-radius:12px;letter-spacing:10px;margin-bottom:24px;">
+    ${otp}
+  </div>
+  <p style="color:#888;font-size:13px;text-align:center;">
+    This code expires in 10 minutes.
+  </p>
+  <div style="text-align:center;margin:28px 0;">
+    <a href="https://reiblast.app/onboarding"
+       style="background:#F5C842;color:#000000;font-weight:bold;padding:14px 32px;border-radius:8px;text-decoration:none;font-size:15px;">
+      Complete My Setup →
+    </a>
+  </div>
+  <p style="color:#ccc;font-size:11px;text-align:center;">
+    If you didn't purchase REIblast, ignore this email.
+  </p>
+</div>
+      `,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    console.error("[GHL] sendOTPEmail failed:", res.status, err);
+  } else {
+    console.log("[GHL] OTP email sent to:", email);
+  }
+
   return res.ok;
 }
 

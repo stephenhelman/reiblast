@@ -41,10 +41,14 @@ export async function POST(req: NextRequest) {
 
     const { contactId } = await createHQContact(name, email, phone)
 
+    const otp = Math.floor(100000 + Math.random() * 900000).toString()
+    const otpExpiry = new Date(Date.now() + 10 * 60 * 1000)
+
     await prisma.user.update({
       where: { id: user.id },
-      data: { ghlContactId: contactId },
+      data: { ghlContactId: contactId, otpCode: otp, otpExpiry },
     })
+    console.log(`[GHL webhook] OTP stored for ${email}`)
 
     await addTag(contactId, MEMBER_TAGS.PAYMENT_RECEIVED)
     await addTag(contactId, MEMBER_TAGS.CORE)

@@ -14,9 +14,9 @@ export default function Footer() {
           <Link href="/pricing" className="text-white/50 hover:text-white transition-colors">
             Pricing
           </Link>
-          <Link href="/login" className="text-white/50 hover:text-white transition-colors">
+          <a href="https://app.reiblast.app" target="_blank" rel="noreferrer" className="text-white/50 hover:text-white transition-colors">
             Login
-          </Link>
+          </a>
           <a
             href="mailto:support@reiblast.app"
             className="text-white/50 hover:text-white transition-colors"

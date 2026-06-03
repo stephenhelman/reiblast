@@ -37,6 +37,10 @@ model User {
   smsComplianceAgreed Boolean  @default(false)
   onboardingComplete  Boolean  @default(false)
 
+  // OTP verification
+  otpCode                   String?
+  otpExpiry                 DateTime?
+
   // GHL
   ghlContactId              String?
   ghlLocationId             String?
