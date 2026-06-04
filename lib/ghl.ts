@@ -555,6 +555,48 @@ export async function findSubAccountByEmail(email: string): Promise<string | nul
   return data?.locations?.[0]?.id ?? null
 }
 
+export async function updateSubAccountProfile(
+  locationId: string,
+  profile: {
+    name: string
+    address: string
+    city: string
+    state: string
+    zip: string
+    email: string
+    phone: string
+    authorizedRepFirstName: string
+    authorizedRepLastName: string
+  },
+): Promise<void> {
+  const res = await fetch(`${GHL_BASE_URL}/locations/${locationId}`, {
+    method: "PUT",
+    headers: agencyHeaders(),
+    body: JSON.stringify({
+      name: profile.name,
+      phone: profile.phone,
+      address: profile.address,
+      city: profile.city,
+      state: profile.state,
+      postalCode: profile.zip,
+      country: "US",
+      timezone: "US/Central",
+      prospectInfo: {
+        firstName: profile.authorizedRepFirstName,
+        lastName: profile.authorizedRepLastName,
+        email: profile.email,
+      },
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    console.error("[GHL] updateSubAccountProfile failed:", res.status, err)
+  } else {
+    console.log("[GHL] Sub-account profile updated:", locationId)
+  }
+}
+
 export type SubAccountCustomValues = {
   business_name: string
   business_address: string

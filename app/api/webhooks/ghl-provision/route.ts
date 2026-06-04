@@ -6,6 +6,7 @@ import {
   findSubAccountByName,
   findSubAccountByEmail,
   populateSubAccountCustomValues,
+  updateSubAccountProfile,
 } from "@/lib/ghl";
 import { MEMBER_TAGS, ONBOARDING_STAGES } from "@/lib/constants";
 
@@ -101,6 +102,20 @@ export async function POST(req: NextRequest) {
       effective_date: new Date().toLocaleDateString("en-US", { month: "long", day: "2-digit", year: "numeric" }),
     });
 
+    const [firstName, ...rest] = name.trim().split(" ");
+    console.log("[Provision] Updating sub-account business profile:", locationId);
+    await updateSubAccountProfile(locationId, {
+      name: user.businessName || name,
+      address: street,
+      city,
+      state,
+      zip,
+      email: user.businessEmail || normalizedEmail,
+      phone: user.businessPhone || "",
+      authorizedRepFirstName: firstName || "",
+      authorizedRepLastName: rest.join(" ") || "",
+    });
+
     if (!contactId || contactId.startsWith("test_")) {
       console.log(
         "[Provision] Skipping GHL contact updates — test contactId detected",
@@ -113,7 +128,7 @@ export async function POST(req: NextRequest) {
       await addTag(contactId, MEMBER_TAGS.ONBOARDING_COMPLETE);
       await addTag(contactId, MEMBER_TAGS.ACTIVE);
       await addTag(contactId, MEMBER_TAGS.A2P_PENDING);
-      await moveToStage(contactId, ONBOARDING_STAGES.ACTIVE, name);
+      await moveToStage(contactId, ONBOARDING_STAGES.SUB_ACCOUNT_PROVISIONED, name);
     }
 
     console.log("[Provision] Complete:", locationId);
