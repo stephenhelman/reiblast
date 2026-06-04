@@ -76,6 +76,29 @@ interface Filters {
   bedsRange: 0 | 1 | 2 | null
 }
 
+interface MelissaResult {
+  found: boolean
+  beds?: number | null
+  baths?: number | null
+  sqft?: number | null
+  yearBuilt?: number | null
+  garage?: boolean | null
+  garageSpaces?: number | null
+  carport?: boolean | null
+  pool?: boolean | null
+  ownerName?: string | null
+  ownerOccupied?: boolean | null
+  ownerType?: string | null
+  mortgageAmount?: number | null
+  assessedValue?: number | null
+  taxDelinquentYear?: string | null
+  estimatedValue?: number | null
+  estimatedValueMin?: number | null
+  estimatedValueMax?: number | null
+  lastSaleDate?: string | null
+  lastSalePrice?: number | null
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function capitalizeName(name: string): string {
@@ -323,6 +346,10 @@ function SFRContent() {
   })
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
 
+  // Melissa
+  const [melissaData, setMelissaData] = useState<MelissaResult | null>(null)
+  const [melissaLoading, setMelissaLoading] = useState(false)
+
   // Step 3
   const [rawComps, setRawComps] = useState<RawComp[]>([])
   const [allComps, setAllComps] = useState<RawComp[]>([])
@@ -569,7 +596,44 @@ function SFRContent() {
         }
         setPlace(newPlace)
         setAddressInput(p.formatted_address)
+        setMelissaData(null)
         setStep(2)
+
+        // Fire Melissa lookup in background — do not block step transition
+        setMelissaLoading(true)
+        fetch('/api/analyzer/property', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ formattedAddress: p.formatted_address, locationId }),
+        })
+          .then((r) => (r.ok ? r.json() : { found: false }))
+          .then((data: MelissaResult) => {
+            setMelissaData(data)
+            if (data.found) {
+              const parking: PropertyInfo['parking'] =
+                data.garage && data.carport
+                  ? 'both'
+                  : data.garage
+                  ? 'garage'
+                  : data.carport
+                  ? 'carport'
+                  : 'none'
+              setPropInfo((prev) => ({
+                ...prev,
+                beds: prev.beds === '' && data.beds ? data.beds : prev.beds,
+                baths: prev.baths === '' && data.baths ? data.baths : prev.baths,
+                sqft: prev.sqft === '' && data.sqft ? data.sqft : prev.sqft,
+                parking,
+                garageSpaces: data.garageSpaces ?? prev.garageSpaces,
+                features: [
+                  ...(data.pool ? ['Pool'] : []),
+                  ...prev.features.filter((f) => f !== 'Pool'),
+                ],
+              }))
+            }
+          })
+          .catch(() => setMelissaData({ found: false }))
+          .finally(() => setMelissaLoading(false))
       }
     )
   }
@@ -757,6 +821,8 @@ function SFRContent() {
           lng: place.lng,
           formattedAddress: place.formattedAddress,
           locationId,
+          beds: typeof propInfo.beds === 'number' ? propInfo.beds : 0,
+          sqft: typeof propInfo.sqft === 'number' ? propInfo.sqft : 0,
         }),
       })
       if (!res.ok) {
@@ -1050,6 +1116,8 @@ function SFRContent() {
     setSaveModalSelection(null)
     setSaveModalSellerName('')
     setSaveModalSaving(false)
+    setMelissaData(null)
+    setMelissaLoading(false)
     gMapRef.current = null
     markersRef.current.clear()
     circleRef.current = null
@@ -1287,9 +1355,16 @@ function SFRContent() {
         {step === 2 && place && (
           <div className="max-w-2xl mx-auto">
             <h2 className="text-lg font-bold mb-1">Confirm property details</h2>
-            <p className="text-white/40 text-sm mb-6">
-              We couldn&apos;t pull details automatically in this flow — enter them below.
-            </p>
+            {melissaLoading ? (
+              <div className="flex items-center gap-2 text-white/30 text-xs mb-6">
+                <Spinner className="w-3 h-3" />
+                Looking up property data…
+              </div>
+            ) : (
+              <p className="text-white/40 text-sm mb-6">
+                Verify the details below and make any corrections before pulling comps.
+              </p>
+            )}
 
             {/* Street View + Satellite */}
             <div className="grid grid-cols-2 gap-3 mb-6">
@@ -1326,6 +1401,57 @@ function SFRContent() {
                 </p>
               </div>
             </div>
+
+            {/* Property intel card */}
+            {melissaData?.found && !melissaLoading && (
+              <div className="bg-surface-2 border border-border-default rounded-xl p-4 mb-6">
+                <p className="text-white/30 text-[10px] uppercase tracking-wider mb-3">Property intel</p>
+                <div className="grid grid-cols-2 gap-x-6 gap-y-2.5">
+                  {melissaData.ownerName && (
+                    <div>
+                      <p className="text-white/25 text-[10px] mb-0.5">Owner</p>
+                      <p className="text-white/60 text-xs">{melissaData.ownerName} — {melissaData.ownerOccupied ? 'Owner occupied' : 'Absentee owner'}</p>
+                    </div>
+                  )}
+                  {melissaData.lastSalePrice ? (
+                    <div>
+                      <p className="text-white/25 text-[10px] mb-0.5">Last sale</p>
+                      <p className="text-white/60 text-xs">
+                        {fmt(melissaData.lastSalePrice)}
+                        {melissaData.lastSaleDate ? ` on ${new Date(melissaData.lastSaleDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : ''}
+                      </p>
+                    </div>
+                  ) : null}
+                  {melissaData.assessedValue ? (
+                    <div>
+                      <p className="text-white/25 text-[10px] mb-0.5">Assessed value</p>
+                      <p className="text-white/60 text-xs">{fmt(melissaData.assessedValue)}</p>
+                    </div>
+                  ) : null}
+                  {melissaData.estimatedValue ? (
+                    <div>
+                      <p className="text-white/25 text-[10px] mb-0.5">Estimated value</p>
+                      <p className="text-white/60 text-xs">
+                        {fmt(melissaData.estimatedValue)}
+                        {melissaData.estimatedValueMin && melissaData.estimatedValueMax
+                          ? ` (${fmt(melissaData.estimatedValueMin)} – ${fmt(melissaData.estimatedValueMax)})`
+                          : ''}
+                      </p>
+                    </div>
+                  ) : null}
+                  {melissaData.mortgageAmount ? (
+                    <div>
+                      <p className="text-white/25 text-[10px] mb-0.5">Mortgage</p>
+                      <p className="text-white/60 text-xs">{fmt(melissaData.mortgageAmount)}</p>
+                    </div>
+                  ) : null}
+                  <div>
+                    <p className="text-white/25 text-[10px] mb-0.5">Tax delinquent</p>
+                    <p className="text-white/60 text-xs">{melissaData.taxDelinquentYear || 'No'}</p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Beds / Baths / Sqft */}
             <div className="grid grid-cols-3 gap-4 mb-6">

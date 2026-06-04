@@ -114,14 +114,73 @@ model Deal {
   @@unique([locationId, address])
 }
 
-model RentcastPull {
+model PropertyRecord {
+  id                String    @id @default(cuid())
+
+  // Identity
+  address           String
+  formattedAddress  String    @unique
+  lat               Float?
+  lng               Float?
+
+  // Property details
+  propertyType      String?
+  beds              Int?
+  baths             Float?
+  sqft              Int?
+  lotSizeSqft       Int?
+  lotSizeAcres      Float?
+  yearBuilt         Int?
+  zoning            String?
+  subdivision       String?
+
+  // Features
+  garage            Boolean?
+  garageSpaces      Int?
+  carport           Boolean?
+  pool              Boolean?
+
+  // Sale data
+  lastSalePrice     Int?
+  lastSaleDate      DateTime?
+
+  // Tax data
+  assessedValue     Int?
+  taxDelinquentYear String?
+
+  // Owner data (Melissa only)
+  ownerName         String?
+  ownerOccupied     Boolean?
+  ownerType         String?
+  mortgageAmount    Int?
+  estimatedValue    Int?
+  estimatedValueMin Int?
+  estimatedValueMax Int?
+
+  // Source tracking
+  source            String
+  lastVerified      DateTime  @default(now())
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([lat, lng])
+  @@index([source])
+  @@index([lastSaleDate])
+  @@index([lastSalePrice])
+  @@index([beds, baths, sqft])
+}
+
+model ApiCall {
   id          String   @id @default(cuid())
   locationId  String
-  address     String
-  lat         Float
-  lng         Float
-  radius      Float
-  resultCount Int
-  rawJson     String   @db.Text
+  resource    String
+  endpoint    String
+  statusCode  Int
+  resultCount Int?
+  durationMs  Int?
   createdAt   DateTime @default(now())
+
+  @@index([locationId])
+  @@index([resource])
+  @@index([createdAt])
 }
