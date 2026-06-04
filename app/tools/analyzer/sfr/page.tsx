@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import MinimalHeader from '@/components/tools/MinimalHeader'
-import { useLocationId } from '@/lib/hooks/use-location-id'
 import {
   type AdjustmentPill,
   type SFRAnalysisResult,
@@ -296,7 +295,7 @@ function Spinner({ className }: { className?: string }) {
 
 function SFRContent() {
   const searchParams = useSearchParams()
-  const locationId = useLocationId()
+  const locationId = searchParams.get('locationId') ?? searchParams.get('token') ?? ''
 
   // ── Connection gate ─────────────────────────────────────────────────────────
 
@@ -382,7 +381,7 @@ function SFRContent() {
   const filteredComps = useMemo<ProcessedComp[]>(() => {
     const sqft = typeof propInfo.sqft === 'number' ? propInfo.sqft : null
     const subBeds = typeof propInfo.beds === 'number' ? propInfo.beds : null
-    return processedComps.filter((c) => {
+    const result = processedComps.filter((c) => {
       if (c.distanceMiles > filters.radius) return false
       if (c.daysAgo > filters.days) return false
       if (sqft && c.sqft && Math.abs(c.sqft - sqft) > filters.sqftRange) return false
@@ -392,6 +391,15 @@ function SFRContent() {
       }
       return true
     })
+    console.log('[comps] After filtering:', result.length, 'comps visible')
+    console.log('[comps] Filter state:', {
+      radius: filters.radius,
+      soldWithin: filters.days,
+      sqftRange: filters.sqftRange,
+      yearRange: filters.yearRange,
+      bedsRange: filters.bedsRange,
+    })
+    return result
   }, [processedComps, filters, propInfo])
 
   const { tableComps, filteredIdsSet } = useMemo(() => {
@@ -738,6 +746,7 @@ function SFRContent() {
     setFetchingComps(true)
     setCompsError('')
     try {
+      console.log('[comps] Calling Rentcast API...')
       const res = await fetch('/api/analyzer/comps', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -754,8 +763,11 @@ function SFRContent() {
         return
       }
       const data: RawComp[] = await res.json()
+      console.log('[comps] Rentcast returned:', data.length, 'comps')
+      console.log('[comps] First comp sample:', JSON.stringify(data[0]))
       setRawComps(data)
       sessionStorage.setItem(SESSION_KEY(place.formattedAddress), JSON.stringify(data))
+      console.log('[comps] Written to sessionStorage:', `reiblast_comps_${place.formattedAddress}`, 'count:', data.length)
       const withFreshDays = data.map((c) => ({ ...c, daysAgo: calcDaysSinceSold(c.saleDate) }))
       setAllComps(withFreshDays)
       const defaultPassing = withFreshDays.filter(
@@ -771,7 +783,9 @@ function SFRContent() {
 
   useEffect(() => {
     if (step !== 3 || !place) return
+    console.log('[comps] Checking sessionStorage for key:', `reiblast_comps_${place.formattedAddress}`)
     const cached = sessionStorage.getItem(SESSION_KEY(place.formattedAddress))
+    console.log('[comps] sessionStorage result:', cached ? `Found ${JSON.parse(cached).length} comps` : 'Not found')
     if (cached) {
       try {
         const data: RawComp[] = JSON.parse(cached)
@@ -2242,7 +2256,7 @@ function SFRContent() {
 
 export default function SFRPage() {
   return (
-    <Suspense>
+    <Suspense fallback={null}>
       <SFRContent />
     </Suspense>
   )

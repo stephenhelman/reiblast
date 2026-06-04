@@ -6,6 +6,55 @@ const GHL_BASE_URL = "https://services.leadconnectorhq.com";
 // Buffer: refresh the token if it expires within 10 minutes
 const TOKEN_REFRESH_BUFFER_MS = 10 * 60 * 1000;
 
+/**
+ * Returns a valid company-level access token for the platform app.
+ * Reads from GhlToken("company"), refreshing via refresh_token if expired.
+ * Requires the agency OAuth callback to have run at least once to seed the record.
+ */
+export async function getCompanyToken(): Promise<string> {
+  const record = await prisma.ghlToken.findUnique({ where: { locationId: "company" } });
+
+  if (!record) {
+    throw new Error("No company token on file — reinstall the agency OAuth app to seed it");
+  }
+
+  if (record.expiresAt.getTime() - Date.now() > TOKEN_REFRESH_BUFFER_MS) {
+    return record.accessToken;
+  }
+
+  console.log("[ghl/getCompanyToken] Refreshing company token");
+
+  const res = await fetch(`${GHL_BASE_URL}/oauth/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: process.env.GHL_PLATFORM_CLIENT_ID!,
+      client_secret: process.env.GHL_PLATFORM_CLIENT_SECRET!,
+      grant_type: "refresh_token",
+      refresh_token: record.refreshToken,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`GHL company token refresh failed (${res.status}): ${err}`);
+  }
+
+  const data = await res.json();
+  const expiresAt = new Date(Date.now() + (data.expires_in ?? 86400) * 1000);
+
+  await prisma.ghlToken.update({
+    where: { locationId: "company" },
+    data: {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token ?? record.refreshToken,
+      expiresAt,
+    },
+  });
+
+  return data.access_token;
+}
+
 export async function getLocationToken(locationId: string): Promise<string> {
   // 1. Check cache
   const user = await prisma.user.findFirst({
@@ -20,50 +69,44 @@ export async function getLocationToken(locationId: string): Promise<string> {
   if (
     user?.ghlLocationToken &&
     user.ghlLocationTokenExpiresAt &&
-    user.ghlLocationTokenExpiresAt.getTime() - Date.now() >
-      TOKEN_REFRESH_BUFFER_MS
+    user.ghlLocationTokenExpiresAt.getTime() - Date.now() > TOKEN_REFRESH_BUFFER_MS
   ) {
-    console.log(
-      "[ghl/getLocationToken] Using cached token for location:",
-      locationId,
-    );
+    console.log("[ghl/getLocationToken] Using cached token for location:", locationId);
     return user.ghlLocationToken;
   }
 
-  // 2. Fetch a fresh token
-  console.log(
-    "[ghl/getLocationToken] Refreshing token for location:",
-    locationId,
-  );
-  const res = await fetch(`${GHL_BASE_URL}/oauth/locationToken`, {
+  console.log("[ghl/getLocationToken] Refreshing token for location:", locationId);
+
+  // 2. Get a valid company token (cached + auto-refreshed)
+  const companyToken = await getCompanyToken();
+
+  // 3. Exchange company token for a location-scoped token
+  const locationTokenRes = await fetch(`${GHL_BASE_URL}/oauth/locationToken`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${process.env.GHL_AGENCY_API_KEY}`,
+      Authorization: `Bearer ${companyToken}`,
       "Content-Type": "application/json",
       Version: "2021-07-28",
     },
     body: JSON.stringify({
-      companyId: process.env.GHL_COMPANY_ID,
+      companyId: process.env.GHL_AGENCY_ID,
       locationId,
     }),
   });
 
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`GHL location token fetch failed (${res.status}): ${err}`);
+  if (!locationTokenRes.ok) {
+    const err = await locationTokenRes.text();
+    throw new Error(`GHL location token exchange failed (${locationTokenRes.status}): ${err}`);
   }
 
-  const data = await res.json();
-  console.log("[ghl/getLocationToken] Token response:", JSON.stringify(data));
-
-  const token: string = data.access_token ?? data.token;
-  const expiresIn: number = data.expires_in ?? 86400; // default 24h if not returned
+  const locationData = await locationTokenRes.json();
+  const token: string = locationData.access_token ?? locationData.token;
+  const expiresIn: number = locationData.expires_in ?? 86400;
   const expiresAt = new Date(Date.now() + expiresIn * 1000);
 
-  if (!token)
-    throw new Error("GHL returned no access_token in location token response");
+  if (!token) throw new Error("GHL returned no access_token in location token response");
 
-  // 3. Cache in DB
+  // 4. Cache in DB
   if (user) {
     await prisma.user.update({
       where: { id: user.id },
@@ -512,34 +555,58 @@ export async function findSubAccountByEmail(email: string): Promise<string | nul
   return data?.locations?.[0]?.id ?? null
 }
 
+export type SubAccountCustomValues = {
+  business_name: string
+  business_address: string
+  business_city: string
+  business_state: string
+  business_zip: string
+  copyright_year: string
+  service_area: string
+  effective_date: string
+}
+
 export async function populateSubAccountCustomValues(
   locationId: string,
-  values: Record<string, string>,
+  values: Partial<SubAccountCustomValues>,
 ): Promise<void> {
+  const token = await getLocationToken(locationId)
+  const locationHeaders = {
+    Authorization: `Bearer ${token}`,
+    "Content-Type": "application/json",
+    Version: "2021-07-28",
+  }
+
   const listRes = await fetch(`${GHL_BASE_URL}/locations/${locationId}/customValues`, {
-    headers: agencyHeaders(),
+    headers: locationHeaders,
   })
-  const listData = listRes.ok ? await listRes.json() : { customValues: [] }
+  if (!listRes.ok) {
+    console.error('[GHL] Failed to list custom values for location:', locationId, await listRes.text())
+    return
+  }
+  const listData = await listRes.json()
   const existing: Array<{ id: string; name: string }> = listData?.customValues ?? []
 
-  for (const [key, value] of Object.entries(values)) {
-    const match = existing.find(
-      (cv) => cv.name.toLowerCase().replace(/\s+/g, '_') === key.toLowerCase(),
-    )
-    if (match) {
-      await fetch(`${GHL_BASE_URL}/locations/${locationId}/customValues/${match.id}`, {
-        method: 'PUT',
-        headers: agencyHeaders(),
-        body: JSON.stringify({ name: match.name, value }),
-      })
-    } else {
-      await fetch(`${GHL_BASE_URL}/locations/${locationId}/customValues`, {
-        method: 'POST',
-        headers: agencyHeaders(),
-        body: JSON.stringify({ name: key, value }),
-      })
-    }
+  // Build name→{id, name} lookup using the same normalization GHL uses
+  const cvByKey: Record<string, { id: string; name: string }> = {}
+  for (const cv of existing) {
+    cvByKey[cv.name.toLowerCase().replace(/\s+/g, '_')] = cv
   }
+
+  await Promise.all(
+    Object.entries(values).map(([key, value]) => {
+      const cv = cvByKey[key]
+      if (!cv) {
+        console.warn(`[GHL] Custom value "${key}" not found in sub-account — check snapshot`)
+        return Promise.resolve()
+      }
+      return fetch(`${GHL_BASE_URL}/locations/${locationId}/customValues/${cv.id}`, {
+        method: 'PUT',
+        headers: locationHeaders,
+        body: JSON.stringify({ name: cv.name, value }),
+      })
+    }),
+  )
 }
 
 export async function populateA2PSite(

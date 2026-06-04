@@ -26,7 +26,6 @@ export async function POST(req: NextRequest) {
   const contactId =
     (body.contact_id as string) || (body.contactId as string) || "";
   const name = (body.full_name as string) || "";
-  const phone = (body.phone as string) || "";
 
   if (!email || !contactId) {
     console.error("[Provision] Missing email or contactId", body);
@@ -85,23 +84,21 @@ export async function POST(req: NextRequest) {
       "[Provision] Populating sub-account custom values:",
       locationId,
     );
+    const street = user.businessAddress || "";
+    const city = user.businessCity || "";
+    const state = user.businessState || "";
+    const zip = user.businessZip || "";
+    const fullAddress = [street, city, state, zip].filter(Boolean).join(", ");
+
     await populateSubAccountCustomValues(locationId, {
       business_name: user.businessName || name,
-      business_phone: user.businessPhone || phone,
-      business_email: user.businessEmail || normalizedEmail,
-      business_address: user.businessAddress || "",
-      business_city: user.businessCity || "",
-      business_state: user.businessState || "",
-      business_zip: user.businessZip || "",
-      website_url: user.websiteUrl || "",
-      target_market: user.targetMarket || "",
-      effective_date: new Date().toLocaleDateString("en-US", {
-        month: "long",
-        day: "numeric",
-        year: "numeric",
-      }),
-      year: new Date().getFullYear().toString(),
-      owner_name: name,
+      business_address: fullAddress,
+      business_city: city,
+      business_state: state,
+      business_zip: zip,
+      copyright_year: new Date().getFullYear().toString(),
+      service_area: user.targetMarket || "",
+      effective_date: new Date().toLocaleDateString("en-US", { month: "long", day: "2-digit", year: "numeric" }),
     });
 
     if (!contactId || contactId.startsWith("test_")) {
