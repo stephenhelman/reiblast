@@ -70,8 +70,8 @@ interface CalcResults {
 
 interface Filters {
   radius: 0.25 | 0.5 | 1 | 2
-  days: 30 | 60 | 90 | 180 | 365 | 730 | 1095
-  sqftRange: 100 | 250 | 500 | 750
+  days: 30 | 60 | 90 | 180 | 365 | 730 | 1095 | null
+  sqftRange: 100 | 250 | 500 | 750 | null
   yearRange: 5 | 10 | 20 | null
   bedsRange: 0 | 1 | 2 | null
 }
@@ -328,7 +328,7 @@ function SFRContent() {
   const [allComps, setAllComps] = useState<RawComp[]>([])
   const [fetchingComps, setFetchingComps] = useState(false)
   const [compsError, setCompsError] = useState('')
-  const [filters, setFilters] = useState<Filters>({ radius: 0.5, days: 90, sqftRange: 250, yearRange: 10, bedsRange: 1 })
+  const [filters, setFilters] = useState<Filters>({ radius: 1, days: null, sqftRange: null, yearRange: null, bedsRange: null })
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [manuallySelected, setManuallySelected] = useState<Set<string>>(new Set())
   const [googleMapsLoaded, setGoogleMapsLoaded] = useState(false)
@@ -383,8 +383,8 @@ function SFRContent() {
     const subBeds = typeof propInfo.beds === 'number' ? propInfo.beds : null
     const result = processedComps.filter((c) => {
       if (c.distanceMiles > filters.radius) return false
-      if (c.daysAgo > filters.days) return false
-      if (sqft && c.sqft && Math.abs(c.sqft - sqft) > filters.sqftRange) return false
+      if (filters.days !== null && c.daysAgo > filters.days) return false
+      if (filters.sqftRange !== null && sqft && c.sqft && Math.abs(c.sqft - sqft) > filters.sqftRange) return false
       if (filters.bedsRange !== null && subBeds !== null && c.beds != null) {
         if (filters.bedsRange === 0 && c.beds !== subBeds) return false
         if (filters.bedsRange > 0 && Math.abs(c.beds - subBeds) > filters.bedsRange) return false
@@ -745,6 +745,8 @@ function SFRContent() {
     if (!place) return
     setFetchingComps(true)
     setCompsError('')
+    const storageKey = SESSION_KEY(place.formattedAddress)
+    console.log('[comps] Storage key:', storageKey)
     try {
       console.log('[comps] Calling Rentcast API...')
       const res = await fetch('/api/analyzer/comps', {
@@ -753,8 +755,8 @@ function SFRContent() {
         body: JSON.stringify({
           lat: place.lat,
           lng: place.lng,
-          beds: typeof propInfo.beds === 'number' ? propInfo.beds : 0,
-          sqft: typeof propInfo.sqft === 'number' ? propInfo.sqft : 0,
+          formattedAddress: place.formattedAddress,
+          locationId,
         }),
       })
       if (!res.ok) {
@@ -764,16 +766,11 @@ function SFRContent() {
       }
       const data: RawComp[] = await res.json()
       console.log('[comps] Rentcast returned:', data.length, 'comps')
-      console.log('[comps] First comp sample:', JSON.stringify(data[0]))
       setRawComps(data)
-      sessionStorage.setItem(SESSION_KEY(place.formattedAddress), JSON.stringify(data))
-      console.log('[comps] Written to sessionStorage:', `reiblast_comps_${place.formattedAddress}`, 'count:', data.length)
+      sessionStorage.setItem(storageKey, JSON.stringify(data))
+      console.log('[comps] Writing to storage, count:', data.length)
       const withFreshDays = data.map((c) => ({ ...c, daysAgo: calcDaysSinceSold(c.saleDate) }))
       setAllComps(withFreshDays)
-      const defaultPassing = withFreshDays.filter(
-        (c) => c.distanceMiles <= 0.5 && c.daysAgo <= 90
-      )
-      setSelectedIds(new Set(defaultPassing.map((c) => c.id)))
     } catch {
       setCompsError('Network error fetching comps. Try again.')
     } finally {
@@ -783,21 +780,16 @@ function SFRContent() {
 
   useEffect(() => {
     if (step !== 3 || !place) return
-    console.log('[comps] Checking sessionStorage for key:', `reiblast_comps_${place.formattedAddress}`)
-    const cached = sessionStorage.getItem(SESSION_KEY(place.formattedAddress))
-    console.log('[comps] sessionStorage result:', cached ? `Found ${JSON.parse(cached).length} comps` : 'Not found')
-    if (cached) {
+    const storageKey = SESSION_KEY(place.formattedAddress)
+    console.log('[comps] Storage key:', storageKey)
+    const stored = sessionStorage.getItem(storageKey)
+    console.log('[comps] Reading from storage:', stored ? `found ${JSON.parse(stored).length}` : 'not found')
+    if (stored) {
       try {
-        const data: RawComp[] = JSON.parse(cached)
+        const data: RawComp[] = JSON.parse(stored)
         setRawComps(data)
         const withFreshDays = data.map((c) => ({ ...c, daysAgo: calcDaysSinceSold(c.saleDate) }))
         setAllComps(withFreshDays)
-        if (selectedIds.size === 0) {
-          const defaultPassing = withFreshDays.filter(
-            (c) => c.distanceMiles <= 0.5 && c.daysAgo <= 90
-          )
-          setSelectedIds(new Set(defaultPassing.map((c) => c.id)))
-        }
         return
       } catch {
         // corrupted cache — fall through to fetch
@@ -809,7 +801,7 @@ function SFRContent() {
   // ── Analysis ────────────────────────────────────────────────────────────────
 
   async function runAnalysis() {
-    if (!place || selectedCompsForPayload.length < 1) return
+    if (!place) return
     setAnalyzing(true)
     setAnalysisError('')
     setTab2Unlocked(false)
@@ -1041,7 +1033,7 @@ function SFRContent() {
     setAllComps([])
     setSelectedIds(new Set())
     setManuallySelected(new Set())
-    setFilters({ radius: 0.5, days: 90, sqftRange: 250, yearRange: 10, bedsRange: 1 })
+    setFilters({ radius: 1, days: null, sqftRange: null, yearRange: null, bedsRange: null })
     setSortCol(null)
     setSortDir(null)
     setShowAdjModal(false)
@@ -1547,10 +1539,14 @@ function SFRContent() {
                 <div className="flex flex-col gap-1">
                   <label className="text-white/30 text-[11px] uppercase tracking-wider">Sold within</label>
                   <select
-                    value={filters.days}
-                    onChange={(e) => setFilters((f) => ({ ...f, days: Number(e.target.value) as Filters['days'] }))}
+                    value={filters.days ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setFilters((f) => ({ ...f, days: v === '' ? null : (Number(v) as Filters['days'] & number) }))
+                    }}
                     className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
                   >
+                    <option value="">Any</option>
                     <option value={30}>30 days</option>
                     <option value={60}>60 days</option>
                     <option value={90}>90 days</option>
@@ -1563,10 +1559,14 @@ function SFRContent() {
                 <div className="flex flex-col gap-1">
                   <label className="text-white/30 text-[11px] uppercase tracking-wider">Sqft range</label>
                   <select
-                    value={filters.sqftRange}
-                    onChange={(e) => setFilters((f) => ({ ...f, sqftRange: Number(e.target.value) as Filters['sqftRange'] }))}
+                    value={filters.sqftRange ?? ''}
+                    onChange={(e) => {
+                      const v = e.target.value
+                      setFilters((f) => ({ ...f, sqftRange: v === '' ? null : (Number(v) as Filters['sqftRange'] & number) }))
+                    }}
                     className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
                   >
+                    <option value="">Any</option>
                     <option value={100}>±100</option>
                     <option value={250}>±250</option>
                     <option value={500}>±500</option>
@@ -1583,10 +1583,10 @@ function SFRContent() {
                     }}
                     className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
                   >
+                    <option value="">Any</option>
                     <option value={5}>±5 yrs</option>
                     <option value={10}>±10 yrs</option>
                     <option value={20}>±20 yrs</option>
-                    <option value="">Any</option>
                   </select>
                 </div>
                 <div className="flex flex-col gap-1">
@@ -1599,21 +1599,33 @@ function SFRContent() {
                     }}
                     className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
                   >
+                    <option value="">Any</option>
                     <option value={0}>Exact match</option>
                     <option value={1}>±1</option>
                     <option value={2}>±2</option>
-                    <option value="">Any</option>
                   </select>
                 </div>
               </div>
             </div>
 
-            {/* 3. Comp count row */}
+            {/* 3. Comp count row + warning banners */}
             <div className="flex items-center justify-between px-1">
               <p className="text-white/50 text-sm">
-                {selectedCount} of {sortedTableComps.length} selected
+                {allComps.length} properties loaded · {sortedTableComps.length} shown · {selectedCount} selected
               </p>
             </div>
+
+            {!fetchingComps && selectedCount === 0 && (
+              <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-xl px-4 py-3 text-yellow-400 text-sm">
+                No comps selected. Analysis will use limited data and confidence will be low.
+              </div>
+            )}
+
+            {!fetchingComps && selectedCount > 0 && selectedCount < 3 && (
+              <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-xl px-4 py-3 text-yellow-400 text-sm">
+                Only {selectedCount} comp{selectedCount === 1 ? '' : 's'} selected. Consider adding more for a more accurate analysis.
+              </div>
+            )}
 
             {/* 4. Comp table */}
             {fetchingComps ? (
@@ -1786,21 +1798,19 @@ function SFRContent() {
               <div>
                 {analyzing ? (
                   <p className="text-white/50 text-sm">Analyzing… this takes 10–20 seconds</p>
-                ) : selectedCount === 0 ? (
-                  <p className="text-yellow-400 text-sm">Select at least 3 comps to run analysis</p>
-                ) : selectedCount < 3 ? (
-                  <p className="text-yellow-400 text-sm">{selectedCount} comps selected · need {3 - selectedCount} more</p>
                 ) : (
                   <p className="text-white/50 text-sm">{selectedCount} comps selected</p>
                 )}
               </div>
               <button
                 onClick={runAnalysis}
-                disabled={selectedCount < 3 || analyzing}
+                disabled={analyzing}
                 className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-colors shrink-0 ${
-                  selectedCount >= 3 && !analyzing
-                    ? 'bg-[#DABD59] text-black hover:bg-gold-hover'
-                    : 'bg-surface border border-border-default text-white/20 cursor-not-allowed'
+                  analyzing
+                    ? 'bg-surface border border-border-default text-white/20 cursor-not-allowed'
+                    : selectedCount === 0
+                    ? 'bg-yellow-400/80 text-black hover:bg-yellow-400'
+                    : 'bg-[#DABD59] text-black hover:bg-gold-hover'
                 }`}
               >
                 {analyzing ? (
@@ -1814,7 +1824,7 @@ function SFRContent() {
                       <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
                       <path d="M20 3v4M22 5h-4M4 17v2M5 18H3" />
                     </svg>
-                    Run analysis
+                    {selectedCount === 0 ? 'Run analysis (limited data)' : 'Run analysis'}
                   </>
                 )}
               </button>

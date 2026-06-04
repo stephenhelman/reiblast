@@ -113,3 +113,15 @@ model Deal {
 
   @@unique([locationId, address])
 }
+
+model RentcastPull {
+  id          String   @id @default(cuid())
+  locationId  String
+  address     String
+  lat         Float
+  lng         Float
+  radius      Float
+  resultCount Int
+  rawJson     String   @db.Text
+  createdAt   DateTime @default(now())
+}

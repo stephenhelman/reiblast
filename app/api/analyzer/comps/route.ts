@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSalesComps } from '@/lib/rentcast'
+import { prisma } from '@/lib/prisma'
 
 function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 3958.8 // Earth radius in miles
+  const R = 3958.8
   const dLat = (lat2 - lat1) * (Math.PI / 180)
   const dLng = (lng2 - lng1) * (Math.PI / 180)
   const a =
@@ -13,71 +14,128 @@ function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number):
   return Math.round(2 * R * Math.asin(Math.sqrt(a)) * 100) / 100
 }
 
+function hasHistoryPrice(rec: Record<string, unknown>): boolean {
+  const history = rec.history
+  if (!history || typeof history !== 'object') return false
+  return Object.values(history as Record<string, unknown>).some((entry) => {
+    const e = entry as Record<string, unknown>
+    return e != null && typeof e === 'object' && (e.price as number) > 0
+  })
+}
+
+function filterAndMap(
+  raw: unknown[],
+  lat: number,
+  lng: number
+): ReturnType<typeof mapComp>[] {
+  const now = Date.now()
+  const filtered = raw.filter((r) => {
+    const rec = r as Record<string, unknown>
+    const price = rec.lastSalePrice as number | null | undefined
+    const noPrice = price == null || price === 0
+    return !(noPrice && !hasHistoryPrice(rec))
+  })
+  console.log('[comps] After null-price filter:', filtered.length)
+  return filtered.map((r) => mapComp(r, lat, lng, now))
+}
+
+function mapComp(r: unknown, lat: number, lng: number, now: number) {
+  const rec = r as Record<string, unknown>
+  const features = rec.features as Record<string, unknown> | null | undefined
+  const saleDate = rec.lastSaleDate ? new Date(rec.lastSaleDate as string) : null
+  const daysAgo = saleDate ? Math.round((now - saleDate.getTime()) / 86400000) : 0
+  const sqft = rec.squareFootage as number
+  const price = rec.lastSalePrice as number
+  const pricePerSqft = sqft && price ? Math.round(price / sqft) : null
+  const compLat = rec.latitude as number
+  const compLng = rec.longitude as number
+  return {
+    id: (rec.id as string) || `${rec.formattedAddress}-${rec.lastSaleDate}`,
+    address: rec.formattedAddress as string,
+    city: rec.city as string,
+    state: rec.state as string,
+    zip: rec.zipCode as string,
+    beds: rec.bedrooms as number,
+    baths: rec.bathrooms as number,
+    sqft,
+    yearBuilt: rec.yearBuilt as number,
+    salePrice: price,
+    saleDate: rec.lastSaleDate as string,
+    daysAgo,
+    pricePerSqft,
+    latitude: compLat,
+    longitude: compLng,
+    distanceMiles: haversineMiles(lat, lng, compLat, compLng),
+    garage: (features?.garage as boolean) ?? false,
+    garageSpaces: (features?.garageSpaces as number) ?? 0,
+    pool: (features?.pool as boolean) ?? false,
+  }
+}
+
 export async function POST(req: NextRequest) {
-  let body: { lat?: number; lng?: number; beds?: number; baths?: number; sqft?: number }
+  let body: { lat?: number; lng?: number; formattedAddress?: string; locationId?: string }
   try {
     body = await req.json()
   } catch {
     return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
   }
 
-  if (body.lat == null || body.lng == null || body.beds == null || body.sqft == null) {
-    return NextResponse.json(
-      { error: 'lat, lng, beds, and sqft are required' },
-      { status: 400 }
-    )
+  const { lat, lng, formattedAddress = '', locationId = '' } = body
+
+  if (lat == null || lng == null) {
+    return NextResponse.json({ error: 'lat and lng are required' }, { status: 400 })
   }
 
   try {
-    const records = await getSalesComps(body.lat, body.lng, body.sqft)
-    console.log('[analyzer/comps] records before filter:', records.length)
+    // Check DB cache
+    const cached = await prisma.rentcastPull.findFirst({
+      where: {
+        lat: { gte: lat - 0.005, lte: lat + 0.005 },
+        lng: { gte: lng - 0.005, lte: lng + 0.005 },
+        resultCount: { gt: 0 },
+        createdAt: {
+          gte: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000),
+        },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
 
-    if (records.length === 0) {
+    if (cached) {
+      console.log('[comps] Cache hit — id:', cached.id, 'pulled on:', cached.createdAt)
+      const rawRecords = JSON.parse(cached.rawJson) as unknown[]
+      console.log('[comps] Rentcast returned raw count:', rawRecords.length)
+      const mappedComps = filterAndMap(rawRecords, lat, lng)
+      return NextResponse.json(mappedComps)
+    }
+
+    // Call Rentcast
+    const rawRecords = await getSalesComps(lat, lng)
+    console.log('[comps] Rentcast returned raw count:', rawRecords.length)
+
+    if (rawRecords.length === 0) {
       return NextResponse.json([])
     }
 
-    const now = Date.now()
+    const mappedComps = filterAndMap(rawRecords, lat, lng)
 
-    const mapped = records
-      .filter((r: unknown) => {
-        const rec = r as Record<string, unknown>
-        const price = rec.lastSalePrice as number | null | undefined
-        return price != null && price > 0
+    // Store in DB (non-blocking)
+    try {
+      await prisma.rentcastPull.create({
+        data: {
+          locationId,
+          address: formattedAddress,
+          lat,
+          lng,
+          radius: 1,
+          resultCount: mappedComps.length,
+          rawJson: JSON.stringify(rawRecords),
+        },
       })
-      .map((r: unknown) => {
-        const rec = r as Record<string, unknown>
-        const features = rec.features as Record<string, unknown> | null | undefined
-        const saleDate = rec.lastSaleDate ? new Date(rec.lastSaleDate as string) : null
-        const daysAgo = saleDate ? Math.round((now - saleDate.getTime()) / 86400000) : 0
-        const sqft = rec.squareFootage as number
-        const price = rec.lastSalePrice as number
-        const pricePerSqft = sqft && price ? Math.round(price / sqft) : null
-        const compLat = rec.latitude as number
-        const compLng = rec.longitude as number
-        return {
-          id: (rec.id as string) || `${rec.formattedAddress}-${rec.lastSaleDate}`,
-          address: rec.formattedAddress as string,
-          city: rec.city as string,
-          state: rec.state as string,
-          zip: rec.zipCode as string,
-          beds: rec.bedrooms as number,
-          baths: rec.bathrooms as number,
-          sqft,
-          yearBuilt: rec.yearBuilt as number,
-          salePrice: price,
-          saleDate: rec.lastSaleDate as string,
-          daysAgo,
-          pricePerSqft,
-          latitude: compLat,
-          longitude: compLng,
-          distanceMiles: haversineMiles(body.lat!, body.lng!, compLat, compLng),
-          garage: (features?.garage as boolean) ?? false,
-          garageSpaces: (features?.garageSpaces as number) ?? 0,
-          pool: (features?.pool as boolean) ?? false,
-        }
-      })
+    } catch (dbErr) {
+      console.error('[comps] DB write failed (non-fatal):', dbErr)
+    }
 
-    return NextResponse.json(mapped)
+    return NextResponse.json(mappedComps)
   } catch (err) {
     console.error('[analyzer/comps] error:', err)
     return NextResponse.json({ error: 'Failed to fetch comps' }, { status: 500 })

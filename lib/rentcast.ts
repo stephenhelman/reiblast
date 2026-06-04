@@ -19,16 +19,13 @@ export async function getPropertyDetails(address: string) {
 export async function getSalesComps(
   latitude: number,
   longitude: number,
-  sqft: number
 ) {
   const params = new URLSearchParams({
     latitude: String(latitude),
     longitude: String(longitude),
     radius: '1',
     propertyType: 'Single Family',
-    squareFootage: `${sqft - 750}:${sqft + 750}`,
-    saleDateRange: '365',
-    limit: '50',
+    limit: '500',
   })
   const url = `${RENTCAST_BASE}/properties?${params}`
   console.log('[rentcast/getSalesComps] URL:', url)
