@@ -87,6 +87,8 @@ OUTPUT — return only valid JSON, no markdown, no preamble:
   "warnings": ["string"]
 }`
 
+// daysSinceSold is calculated client-side at request time using current Date.now()
+// Never trust stored daysSinceSold values — always recalculate from saleDate before sending
 export async function POST(req: NextRequest) {
   let body: { subject?: unknown; comps?: unknown[] }
   try {

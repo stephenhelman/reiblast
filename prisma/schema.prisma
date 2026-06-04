@@ -105,6 +105,9 @@ model Deal {
   exitStrategy  String?
   warnings      String[]
   compsJson     String?
+  compsRawJson  String?  @db.Text
+  lat           Float?
+  lng           Float?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

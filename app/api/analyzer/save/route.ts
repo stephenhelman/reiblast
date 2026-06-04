@@ -33,6 +33,9 @@ interface SaveBody {
   exitStrategy?: string | null
   warnings?: string[]
   compsJson?: string | null
+  compsRawJson?: string | null
+  lat?: number | null
+  lng?: number | null
 }
 
 export async function POST(req: NextRequest) {
@@ -64,6 +67,7 @@ export async function POST(req: NextRequest) {
     asIsValue, asIsLow, asIsHigh,
     arvLow, arvHigh, arvConfidence,
     exitStrategy, warnings, compsJson,
+    compsRawJson, lat, lng,
   } = body as SaveBody
 
   let deal: { id: string }
@@ -84,6 +88,9 @@ export async function POST(req: NextRequest) {
       exitStrategy: exitStrategy ?? null,
       warnings: Array.isArray(warnings) ? warnings : [],
       compsJson: compsJson ?? null,
+      compsRawJson: compsRawJson ?? null,
+      lat: lat ?? null,
+      lng: lng ?? null,
     }
 
     deal = await prisma.deal.upsert({

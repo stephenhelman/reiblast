@@ -70,9 +70,9 @@ interface CalcResults {
 }
 
 interface Filters {
-  radius: 0.25 | 0.5 | 1
-  days: 30 | 60 | 90 | 180 | 365
-  sqftRange: 250 | 500 | 750
+  radius: 0.25 | 0.5 | 1 | 2
+  days: 30 | 60 | 90 | 180 | 365 | 730 | 1095
+  sqftRange: 100 | 250 | 500 | 750
   yearRange: 5 | 10 | 20 | null
   bedsRange: 0 | 1 | 2 | null
 }
@@ -131,6 +131,40 @@ function computeAdjustments(comp: RawComp, info: PropertyInfo): { adjustments: A
   }
 
   return { adjustments: pills, adjustedPrice: Math.max(0, comp.salePrice + delta) }
+}
+
+function calcDaysSinceSold(saleDate: string | null | undefined): number {
+  if (!saleDate) return 0
+  return Math.floor((Date.now() - new Date(saleDate).getTime()) / 86400000)
+}
+
+function relativeDate(daysAgo: number | null): string {
+  if (daysAgo == null) return 'Unknown'
+  if (daysAgo <= 90) return `${daysAgo} days ago`
+  if (daysAgo <= 365) return `${Math.round(daysAgo / 30)} mo ago`
+  return `${Math.round(daysAgo / 365)} yr ago`
+}
+
+function SortIndicator({ col, sortCol, sortDir }: { col: string; sortCol: string | null; sortDir: 'asc' | 'desc' | null }) {
+  if (sortCol !== col) {
+    return (
+      <svg className="w-3 h-3 text-white/20 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+        <path d="M8 9l4-4 4 4M8 15l4 4 4-4" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )
+  }
+  if (sortDir === 'asc') {
+    return (
+      <svg className="w-3 h-3 text-[#DABD59] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+        <path d="M12 19V5M5 12l7-7 7 7" strokeLinecap="round" strokeLinejoin="round" />
+      </svg>
+    )
+  }
+  return (
+    <svg className="w-3 h-3 text-[#DABD59] shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+      <path d="M12 5v14M5 12l7 7 7-7" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  )
 }
 
 const SESSION_KEY = (addr: string) => `reiblast_comps_${addr}`
@@ -268,6 +302,7 @@ function SFRContent() {
 
   const [connectionStatus, setConnectionStatus] = useState<'checking' | 'connected' | 'disconnected'>('checking')
   const [connectedBanner, setConnectedBanner] = useState(false)
+  const [loadingDeal, setLoadingDeal] = useState(false)
 
   // ── Step state ──────────────────────────────────────────────────────────────
 
@@ -290,12 +325,17 @@ function SFRContent() {
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
 
   // Step 3
+  const [rawComps, setRawComps] = useState<RawComp[]>([])
   const [allComps, setAllComps] = useState<RawComp[]>([])
   const [fetchingComps, setFetchingComps] = useState(false)
   const [compsError, setCompsError] = useState('')
-  const [filters, setFilters] = useState<Filters>({ radius: 0.5, days: 90, sqftRange: 750, yearRange: 10, bedsRange: 1 })
+  const [filters, setFilters] = useState<Filters>({ radius: 0.5, days: 90, sqftRange: 250, yearRange: 10, bedsRange: 1 })
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [manuallySelected, setManuallySelected] = useState<Set<string>>(new Set())
   const [googleMapsLoaded, setGoogleMapsLoaded] = useState(false)
+  const [sortCol, setSortCol] = useState<string | null>(null)
+  const [sortDir, setSortDir] = useState<'asc' | 'desc' | null>(null)
+  const [showAdjModal, setShowAdjModal] = useState(false)
 
   // Step 4
   const [analysis, setAnalysis] = useState<SFRAnalysisResult | null>(null)
@@ -354,9 +394,36 @@ function SFRContent() {
     })
   }, [processedComps, filters, propInfo])
 
+  const { tableComps, filteredIdsSet } = useMemo(() => {
+    const filteredIdsSet = new Set(filteredComps.map((c) => c.id))
+    const outsideFilter = processedComps.filter(
+      (c) => manuallySelected.has(c.id) && selectedIds.has(c.id) && !filteredIdsSet.has(c.id)
+    )
+    return { tableComps: [...filteredComps, ...outsideFilter], filteredIdsSet }
+  }, [filteredComps, processedComps, manuallySelected, selectedIds])
+
+  const sortedTableComps = useMemo(() => {
+    if (!sortCol || !sortDir) return tableComps
+    const dir = sortDir === 'asc' ? 1 : -1
+    return [...tableComps].sort((a, b) => {
+      switch (sortCol) {
+        case 'address': return dir * a.address.localeCompare(b.address)
+        case 'beds': return dir * ((a.beds ?? 0) - (b.beds ?? 0))
+        case 'baths': return dir * ((a.baths ?? 0) - (b.baths ?? 0))
+        case 'sqft': return dir * ((a.sqft ?? 0) - (b.sqft ?? 0))
+        case 'built': return dir * ((a.yearBuilt ?? 0) - (b.yearBuilt ?? 0))
+        case 'sold': return dir * (a.daysAgo - b.daysAgo)
+        case 'dist': return dir * (a.distanceMiles - b.distanceMiles)
+        case 'price': return dir * (a.adjustedPrice - b.adjustedPrice)
+        default: return 0
+      }
+    })
+  }, [tableComps, sortCol, sortDir])
+
+  const allVisibleSelected = sortedTableComps.length > 0 && sortedTableComps.every((c) => selectedIds.has(c.id))
+  const someVisibleSelected = sortedTableComps.some((c) => selectedIds.has(c.id))
+
   const selectedCount = selectedIds.size
-  const canAnalyze = selectedCount >= 1
-  const hasLowComps = selectedCount >= 1 && selectedCount < 3
 
   const selectedCompsForPayload = useMemo(() => {
     return processedComps.filter((c) => selectedIds.has(c.id))
@@ -384,6 +451,92 @@ function SFRContent() {
       .then((data) => setConnectionStatus(data.connected ? 'connected' : 'disconnected'))
       .catch(() => setConnectionStatus('disconnected'))
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Deal reload via dealId URL param ────────────────────────────────────────
+
+  useEffect(() => {
+    if (connectionStatus !== 'connected') return
+    const dealId = searchParams.get('dealId')
+    if (!dealId || !locationId) return
+
+    setLoadingDeal(true)
+    fetch(`/api/analyzer/deal?dealId=${encodeURIComponent(dealId)}&locationId=${encodeURIComponent(locationId)}`)
+      .then((r) => r.json())
+      .then((deal) => {
+        if (deal.error) return
+
+        setPlace({ formattedAddress: deal.address, lat: deal.lat ?? 0, lng: deal.lng ?? 0 })
+        setAddressInput(deal.address)
+        setPropInfo({
+          beds: deal.beds ?? '',
+          baths: deal.baths ?? '',
+          sqft: deal.sqft ?? '',
+          parking: 'none',
+          garageSpaces: 1,
+          features: [],
+          condition: (deal.repairLevel as 'light' | 'full' | 'heavy') ?? 'light',
+        })
+
+        if (deal.compsRawJson) {
+          try {
+            const rawCompsData: RawComp[] = JSON.parse(deal.compsRawJson)
+            setRawComps(rawCompsData)
+            const withFreshDays = rawCompsData.map((c) => ({ ...c, daysAgo: calcDaysSinceSold(c.saleDate) }))
+            setAllComps(withFreshDays)
+            sessionStorage.setItem(SESSION_KEY(deal.address), JSON.stringify(rawCompsData))
+            if (deal.compsJson) {
+              const selectedComps: { id: string }[] = JSON.parse(deal.compsJson)
+              setSelectedIds(new Set(selectedComps.map((c) => c.id)))
+            }
+          } catch { /* corrupted */ }
+        }
+
+        const reconstructed: SFRAnalysisResult = {
+          comps: [],
+          arv: {
+            estimate: deal.arv,
+            low: deal.arvLow ?? 0,
+            high: deal.arvHigh ?? 0,
+            confidence: (deal.arvConfidence as 'high' | 'medium' | 'low') ?? 'medium',
+            confidence_reason: '',
+          },
+          as_is: {
+            value: deal.asIsValue ?? null,
+            low: deal.asIsLow ?? null,
+            high: deal.asIsHigh ?? null,
+            note: '',
+          },
+          exit_strategy: {
+            recommendation: (deal.exitStrategy as 'WHOLESALE' | 'FIX_AND_FLIP' | 'SUBJECT_TO' | 'PASS') ?? 'WHOLESALE',
+            reasoning: '',
+          },
+          narrative: deal.narrative ?? '',
+          warnings: deal.warnings ?? [],
+        }
+        setAnalysis(reconstructed)
+        setConditionUsedForAnalysis(deal.repairLevel)
+
+        setInvestorPct(deal.investorPct ?? 70)
+        setRepairLevel((deal.repairLevel as 'light' | 'full' | 'heavy') ?? 'full')
+        setWholesaleFee(deal.wholesaleFee ?? 10000)
+
+        if (deal.endBuyerMax != null && deal.mao != null && deal.anchorOffer != null) {
+          setCalcResults({
+            pctAmount: deal.arv * ((deal.investorPct ?? 70) / 100),
+            endBuyerMax: deal.endBuyerMax,
+            mao: deal.mao,
+            anchorOffer: deal.anchorOffer,
+          })
+          setTab2Unlocked(true)
+          setTab3Unlocked(true)
+        }
+
+        setStep(4)
+        setActiveTab(1)
+      })
+      .catch(() => { /* ignore network errors */ })
+      .finally(() => setLoadingDeal(false))
+  }, [connectionStatus]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Google Maps loading ─────────────────────────────────────────────────────
 
@@ -451,6 +604,7 @@ function SFRContent() {
     if (!gMapRef.current || !window.google?.maps) return
     const g = window.google.maps
     const currentIds = new Set(processedComps.map((c) => c.id))
+    const filteredIds = new Set(filteredComps.map((c) => c.id))
 
     markersRef.current.forEach((marker, id) => {
       if (!currentIds.has(id)) {
@@ -461,20 +615,36 @@ function SFRContent() {
 
     processedComps.forEach((comp) => {
       if (!comp.latitude || !comp.longitude) return
+      const isFiltered = filteredIds.has(comp.id)
       const isSelected = selectedIds.has(comp.id)
-      const icon = {
-        path: g.SymbolPath.CIRCLE,
-        scale: 7,
-        fillColor: isSelected ? '#F5C842' : '#555555',
-        fillOpacity: 1,
-        strokeColor: isSelected ? '#000000' : '#333333',
-        strokeWeight: 1,
-      }
 
       if (markersRef.current.has(comp.id)) {
-        const m = markersRef.current.get(comp.id) as { setIcon: (i: unknown) => void }
-        m.setIcon(icon)
-      } else {
+        const m = markersRef.current.get(comp.id) as {
+          setIcon: (i: unknown) => void
+          setMap: (m: unknown) => void
+        }
+        if (!isFiltered) {
+          m.setMap(null)
+        } else {
+          m.setMap(gMapRef.current)
+          m.setIcon({
+            path: g.SymbolPath.CIRCLE,
+            scale: 7,
+            fillColor: isSelected ? '#22c55e' : '#eab308',
+            fillOpacity: 1,
+            strokeColor: '#000000',
+            strokeWeight: 1,
+          })
+        }
+      } else if (isFiltered) {
+        const icon = {
+          path: g.SymbolPath.CIRCLE,
+          scale: 7,
+          fillColor: isSelected ? '#22c55e' : '#eab308',
+          fillOpacity: 1,
+          strokeColor: '#000000',
+          strokeWeight: 1,
+        }
         const marker = new g.Marker({
           position: { lat: comp.latitude, lng: comp.longitude },
           map: gMapRef.current,
@@ -482,20 +652,23 @@ function SFRContent() {
           title: comp.address,
         })
         marker.addListener('click', () => {
+          const compId = comp.id
           setSelectedIds((prev) => {
             const next = new Set(prev)
-            if (next.has(comp.id)) {
-              next.delete(comp.id)
-            } else {
-              next.add(comp.id)
-            }
+            if (next.has(compId)) next.delete(compId)
+            else next.add(compId)
+            return next
+          })
+          setManuallySelected((prev) => {
+            const next = new Set(prev)
+            next.add(comp.id)
             return next
           })
         })
         markersRef.current.set(comp.id, marker)
       }
     })
-  }, [processedComps, selectedIds])
+  }, [processedComps, filteredComps, selectedIds])
 
   useEffect(() => {
     if (step !== 3 || !googleMapsLoaded || !place || !mapContainerRef.current || gMapRef.current) return
@@ -581,9 +754,11 @@ function SFRContent() {
         return
       }
       const data: RawComp[] = await res.json()
-      setAllComps(data)
+      setRawComps(data)
       sessionStorage.setItem(SESSION_KEY(place.formattedAddress), JSON.stringify(data))
-      const defaultPassing = data.filter(
+      const withFreshDays = data.map((c) => ({ ...c, daysAgo: calcDaysSinceSold(c.saleDate) }))
+      setAllComps(withFreshDays)
+      const defaultPassing = withFreshDays.filter(
         (c) => c.distanceMiles <= 0.5 && c.daysAgo <= 90
       )
       setSelectedIds(new Set(defaultPassing.map((c) => c.id)))
@@ -600,9 +775,11 @@ function SFRContent() {
     if (cached) {
       try {
         const data: RawComp[] = JSON.parse(cached)
-        setAllComps(data)
+        setRawComps(data)
+        const withFreshDays = data.map((c) => ({ ...c, daysAgo: calcDaysSinceSold(c.saleDate) }))
+        setAllComps(withFreshDays)
         if (selectedIds.size === 0) {
-          const defaultPassing = data.filter(
+          const defaultPassing = withFreshDays.filter(
             (c) => c.distanceMiles <= 0.5 && c.daysAgo <= 90
           )
           setSelectedIds(new Set(defaultPassing.map((c) => c.id)))
@@ -733,6 +910,9 @@ function SFRContent() {
         exitStrategy: analysis.exit_strategy.recommendation,
         warnings: analysis.warnings,
         compsJson: JSON.stringify(selectedCompsForPayload),
+        compsRawJson: JSON.stringify(rawComps),
+        lat: place?.lat ?? null,
+        lng: place?.lng ?? null,
       }
       console.log('[save] Payload being sent:', JSON.stringify(payload))
       const res = await fetch('/api/analyzer/save', {
@@ -816,12 +996,26 @@ function SFRContent() {
   }
 
   function toggleComp(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+    const isCurrentlySelected = selectedIds.has(id)
+    if (isCurrentlySelected) {
+      setSelectedIds((prev) => { const n = new Set(prev); n.delete(id); return n })
+      setManuallySelected((prev) => { const n = new Set(prev); n.delete(id); return n })
+    } else {
+      setSelectedIds((prev) => { const n = new Set(prev); n.add(id); return n })
+      setManuallySelected((prev) => { const n = new Set(prev); n.add(id); return n })
+    }
+  }
+
+  function handleSort(col: string) {
+    if (sortCol !== col) {
+      setSortCol(col)
+      setSortDir('asc')
+    } else if (sortDir === 'asc') {
+      setSortDir('desc')
+    } else {
+      setSortCol(null)
+      setSortDir(null)
+    }
   }
 
   function resetAll() {
@@ -829,9 +1023,14 @@ function SFRContent() {
     setPlace(null)
     setAddressInput('')
     setPropInfo({ beds: '', baths: '', sqft: '', parking: 'none', garageSpaces: 1, features: [], condition: 'light' })
+    setRawComps([])
     setAllComps([])
     setSelectedIds(new Set())
-    setFilters({ radius: 0.5, days: 90, sqftRange: 750, yearRange: 10, bedsRange: 1 })
+    setManuallySelected(new Set())
+    setFilters({ radius: 0.5, days: 90, sqftRange: 250, yearRange: 10, bedsRange: 1 })
+    setSortCol(null)
+    setSortDir(null)
+    setShowAdjModal(false)
     setAnalysis(null)
     setAnalysisError('')
     setActiveTab(1)
@@ -894,6 +1093,21 @@ function SFRContent() {
             Connect now
           </button>
           <p className="text-white/30 text-xs">You&apos;ll be redirected back automatically.</p>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Deal loading skeleton ────────────────────────────────────────────────────
+
+  if (loadingDeal) {
+    return (
+      <div className="min-h-screen bg-black text-white">
+        <MinimalHeader title="SFR Analyzer" />
+        <div className="max-w-5xl mx-auto px-4 py-6">
+          <div className="max-w-3xl mx-auto">
+            <AnalysisSkeleton />
+          </div>
         </div>
       </div>
     )
@@ -1241,35 +1455,86 @@ function SFRContent() {
 
         {/* ── STEP 3: Comp Selection ── */}
         {step === 3 && (
-          <div className="flex flex-col gap-4">
+          <div className="relative flex flex-col gap-4">
 
-            {/* Map */}
+            {/* Adjustment modal — in-flow overlay */}
+            {showAdjModal && (
+              <div
+                className="absolute inset-0 bg-black/80 z-20 flex items-center justify-center rounded-xl"
+                style={{ minHeight: 320 }}
+              >
+                <div className="bg-surface border border-border-default rounded-xl p-6 max-w-md w-full mx-4">
+                  <h3 className="text-[15px] font-medium text-white mb-3">How sale prices are adjusted</h3>
+                  <p className="text-white/50 text-sm leading-relaxed mb-4">
+                    To make fair comparisons, each comp&apos;s sale price is adjusted based on how its features differ from your subject property. This gives you a normalized price that reflects what the comp would have sold for if it matched your property.
+                  </p>
+                  <table className="w-full mb-4">
+                    <thead>
+                      <tr>
+                        <th className="text-left text-white/40 text-[11px] uppercase tracking-wider pb-2">Feature</th>
+                        <th className="text-right text-white/40 text-[11px] uppercase tracking-wider pb-2">Adjustment</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {[
+                        ['Extra bedroom on comp', '−$10,000'],
+                        ['Missing bedroom vs subject', '+$10,000'],
+                        ['Extra bathroom on comp', '−$5,000'],
+                        ['Missing bathroom vs subject', '+$5,000'],
+                        ['Garage on comp, not on subject', '−$10,000'],
+                        ['No garage on comp, subject has one', '+$10,000'],
+                        ['Garage spaces difference', '±$5,000/space'],
+                        ['Carport difference', '±$5,000'],
+                        ['Pool on comp, not on subject', '−$10,000'],
+                        ['No pool on comp, subject has one', '+$10,000'],
+                      ].map(([feature, adj]) => (
+                        <tr key={feature} className="border-t border-border-default">
+                          <td className="py-2 text-white/60 text-xs pr-4">{feature}</td>
+                          <td className="py-2 text-white text-xs text-right font-medium">{adj}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="text-white/30 text-xs italic leading-relaxed mb-4">
+                    The adjusted price is what the AI uses to calculate ARV and as-is value. Original prices are shown for reference.
+                  </p>
+                  <button
+                    onClick={() => setShowAdjModal(false)}
+                    className="w-full bg-surface-2 border border-border-default text-white/60 font-semibold py-2.5 rounded-lg hover:text-white hover:border-white/20 transition-colors text-sm"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* 1. Map */}
             <div className="relative rounded-xl overflow-hidden border border-border-default" style={{ height: '40vh', minHeight: 240 }}>
               <div ref={mapContainerRef} className="w-full h-full" />
               {!googleMapsLoaded && <Skeleton className="absolute inset-0" />}
             </div>
 
-            {/* Filters */}
+            {/* 2. Filter bar */}
             <div className="bg-surface border border-border-default rounded-xl p-3">
-              <div className="flex gap-2">
-                <div className="flex flex-col gap-1 flex-1 min-w-0">
-                  <label className="text-white/30 text-[10px] uppercase tracking-wider">Radius</label>
+              <div className="grid grid-cols-5 gap-2">
+                <div className="flex flex-col gap-1">
+                  <label className="text-white/30 text-[11px] uppercase tracking-wider">Radius</label>
                   <select
                     value={filters.radius}
-                    onChange={(e) => setFilters((f) => ({ ...f, radius: Number(e.target.value) as 0.25 | 0.5 | 1 }))}
+                    onChange={(e) => setFilters((f) => ({ ...f, radius: Number(e.target.value) as Filters['radius'] }))}
                     className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
                   >
                     <option value={0.25}>0.25 mi</option>
                     <option value={0.5}>0.5 mi</option>
                     <option value={1}>1 mi</option>
+                    <option value={2}>2 mi</option>
                   </select>
                 </div>
-
-                <div className="flex flex-col gap-1 flex-1 min-w-0">
-                  <label className="text-white/30 text-[10px] uppercase tracking-wider">Sold within</label>
+                <div className="flex flex-col gap-1">
+                  <label className="text-white/30 text-[11px] uppercase tracking-wider">Sold within</label>
                   <select
                     value={filters.days}
-                    onChange={(e) => setFilters((f) => ({ ...f, days: Number(e.target.value) as 30 | 60 | 90 | 180 | 365 }))}
+                    onChange={(e) => setFilters((f) => ({ ...f, days: Number(e.target.value) as Filters['days'] }))}
                     className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
                   >
                     <option value={30}>30 days</option>
@@ -1277,24 +1542,25 @@ function SFRContent() {
                     <option value={90}>90 days</option>
                     <option value={180}>180 days</option>
                     <option value={365}>1 year</option>
+                    <option value={730}>2 years</option>
+                    <option value={1095}>3 years</option>
                   </select>
                 </div>
-
-                <div className="flex flex-col gap-1 flex-1 min-w-0">
-                  <label className="text-white/30 text-[10px] uppercase tracking-wider">Sqft ±</label>
+                <div className="flex flex-col gap-1">
+                  <label className="text-white/30 text-[11px] uppercase tracking-wider">Sqft range</label>
                   <select
                     value={filters.sqftRange}
-                    onChange={(e) => setFilters((f) => ({ ...f, sqftRange: Number(e.target.value) as 250 | 500 | 750 }))}
+                    onChange={(e) => setFilters((f) => ({ ...f, sqftRange: Number(e.target.value) as Filters['sqftRange'] }))}
                     className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
                   >
+                    <option value={100}>±100</option>
                     <option value={250}>±250</option>
                     <option value={500}>±500</option>
                     <option value={750}>±750</option>
                   </select>
                 </div>
-
-                <div className="flex flex-col gap-1 flex-1 min-w-0">
-                  <label className="text-white/30 text-[10px] uppercase tracking-wider">Year built</label>
+                <div className="flex flex-col gap-1">
+                  <label className="text-white/30 text-[11px] uppercase tracking-wider">Year built</label>
                   <select
                     value={filters.yearRange ?? ''}
                     onChange={(e) => {
@@ -1303,15 +1569,14 @@ function SFRContent() {
                     }}
                     className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
                   >
-                    <option value={5}>±5 yr</option>
-                    <option value={10}>±10 yr</option>
-                    <option value={20}>±20 yr</option>
+                    <option value={5}>±5 yrs</option>
+                    <option value={10}>±10 yrs</option>
+                    <option value={20}>±20 yrs</option>
                     <option value="">Any</option>
                   </select>
                 </div>
-
-                <div className="flex flex-col gap-1 flex-1 min-w-0">
-                  <label className="text-white/30 text-[10px] uppercase tracking-wider">Bedrooms</label>
+                <div className="flex flex-col gap-1">
+                  <label className="text-white/30 text-[11px] uppercase tracking-wider">Bedrooms</label>
                   <select
                     value={filters.bedsRange ?? ''}
                     onChange={(e) => {
@@ -1320,7 +1585,7 @@ function SFRContent() {
                     }}
                     className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
                   >
-                    <option value={0}>Exact</option>
+                    <option value={0}>Exact match</option>
                     <option value={1}>±1</option>
                     <option value={2}>±2</option>
                     <option value="">Any</option>
@@ -1329,31 +1594,16 @@ function SFRContent() {
               </div>
             </div>
 
-            {/* Comp count */}
-            <div className="flex items-center justify-between">
-              <p className="text-white/40 text-sm">
-                {filteredComps.length} comp{filteredComps.length !== 1 ? 's' : ''} visible
-              </p>
-              <p className={`text-sm font-semibold ${selectedCount > 0 ? 'text-gold' : 'text-white/30'}`}>
-                {selectedCount} selected
+            {/* 3. Comp count row */}
+            <div className="flex items-center justify-between px-1">
+              <p className="text-white/50 text-sm">
+                {selectedCount} of {sortedTableComps.length} selected
               </p>
             </div>
 
-            {/* Low-comp warning */}
-            {hasLowComps && (
-              <div className="bg-yellow-400/10 border border-yellow-400/30 rounded-xl px-4 py-3 flex items-start gap-2">
-                <svg className="w-4 h-4 text-yellow-400 shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                </svg>
-                <p className="text-yellow-400/90 text-xs leading-relaxed">
-                  Only {selectedCount} comp{selectedCount === 1 ? '' : 's'} found in this area. The AI analysis will note limited data — treat results as directional only.
-                </p>
-              </div>
-            )}
-
-            {/* Comp list */}
+            {/* 4. Comp table */}
             {fetchingComps ? (
-              <div className="space-y-3 pb-24">
+              <div className="space-y-3">
                 {[1, 2, 3, 4].map((k) => (
                   <div key={k} className="bg-surface border border-border-default rounded-xl p-4 flex gap-3">
                     <Skeleton className="w-20 h-14 shrink-0 rounded" />
@@ -1372,120 +1622,189 @@ function SFRContent() {
                   Try again
                 </button>
               </div>
-            ) : filteredComps.length === 0 ? (
+            ) : sortedTableComps.length === 0 ? (
               <p className="text-white/30 text-sm text-center py-10">
                 No comparable sales found in this area. Try expanding your filters.
               </p>
             ) : (
-              <div className="space-y-2 pb-24">
-                {filteredComps.map((comp) => {
-                  const selected = selectedIds.has(comp.id)
-                  const totalAdj = comp.adjustments.reduce((s, a) => s + a.amount, 0)
-                  return (
-                    <div
-                      key={comp.id}
-                      onClick={() => toggleComp(comp.id)}
-                      className={`bg-surface rounded-xl p-3 cursor-pointer transition-all flex gap-3 border ${
-                        selected ? 'border-gold' : 'border-border-default hover:border-white/20'
-                      }`}
-                    >
-                      {comp.latitude && comp.longitude && MAPS_KEY ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={`https://maps.googleapis.com/maps/api/streetview?size=160x120&location=${comp.latitude},${comp.longitude}&key=${MAPS_KEY}`}
-                          alt=""
-                          className="w-20 h-14 object-cover rounded-lg shrink-0"
+              <div className="overflow-x-auto rounded-xl border border-border-default">
+                <table style={{ tableLayout: 'fixed', width: '100%', minWidth: 692 }}>
+                  <colgroup>
+                    <col style={{ width: 36 }} />
+                    <col style={{ width: 170 }} />
+                    <col style={{ width: 52 }} />
+                    <col style={{ width: 52 }} />
+                    <col style={{ width: 64 }} />
+                    <col style={{ width: 56 }} />
+                    <col style={{ width: 90 }} />
+                    <col style={{ width: 62 }} />
+                    <col style={{ width: 110 }} />
+                  </colgroup>
+                  <thead>
+                    <tr className="border-b border-border-default bg-surface">
+                      <th className="p-2 text-center">
+                        <input
+                          type="checkbox"
+                          checked={allVisibleSelected}
+                          ref={(el) => { if (el) el.indeterminate = someVisibleSelected && !allVisibleSelected }}
+                          onChange={(e) => {
+                            const ids = sortedTableComps.map((c) => c.id)
+                            if (e.target.checked) {
+                              setSelectedIds((prev) => { const n = new Set(prev); ids.forEach((id) => n.add(id)); return n })
+                              setManuallySelected((prev) => { const n = new Set(prev); ids.forEach((id) => n.add(id)); return n })
+                            } else {
+                              const toRemove = new Set(ids)
+                              setSelectedIds((prev) => { const n = new Set(prev); toRemove.forEach((id) => n.delete(id)); return n })
+                              setManuallySelected((prev) => { const n = new Set(prev); toRemove.forEach((id) => n.delete(id)); return n })
+                            }
+                          }}
+                          style={{ accentColor: '#DABD59' }}
+                          className="cursor-pointer"
                         />
-                      ) : (
-                        <div className="w-20 h-14 bg-surface-2 rounded-lg shrink-0" />
-                      )}
-
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-start justify-between gap-2 mb-1">
-                          <p className="text-white text-xs font-semibold leading-tight truncate">{comp.address}</p>
-                          <div className={`w-4 h-4 rounded border-2 shrink-0 flex items-center justify-center ${selected ? 'bg-gold border-gold' : 'border-white/20'}`}>
-                            {selected && (
-                              <svg className="w-2.5 h-2.5 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                              </svg>
-                            )}
-                          </div>
-                        </div>
-
-                        <div className="flex items-baseline gap-1.5 mb-1">
-                          <span className="text-white/50 text-xs line-through">{fmt(comp.salePrice)}</span>
-                          <span className="text-gold text-sm font-bold">{fmt(comp.adjustedPrice)}</span>
-                        </div>
-
-                        <p className="text-white/30 text-[11px] mb-1.5">
-                          {comp.beds}bd · {comp.baths}ba · {comp.sqft?.toLocaleString()} sqft
-                          {comp.pricePerSqft ? ` · $${comp.pricePerSqft}/sf` : ''}
-                          {' · '}{comp.distanceMiles?.toFixed(2)}mi{' · '}{comp.daysAgo}d ago
-                        </p>
-
-                        {comp.adjustments.length > 0 && (
-                          <div className="flex flex-wrap gap-1">
-                            {comp.adjustments.map((a, i) => (
-                              <span
-                                key={i}
-                                className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${
-                                  a.amount > 0 ? 'bg-green-400/10 text-green-400' : 'bg-red-400/10 text-red-400'
-                                }`}
+                      </th>
+                      {(
+                        [
+                          { key: 'address', label: 'Address', align: 'left' as const },
+                          { key: 'beds', label: 'Beds', align: 'right' as const },
+                          { key: 'baths', label: 'Baths', align: 'right' as const },
+                          { key: 'sqft', label: 'Sqft', align: 'right' as const },
+                          { key: 'built', label: 'Built', align: 'right' as const },
+                          { key: 'sold', label: 'Sold', align: 'left' as const },
+                          { key: 'dist', label: 'Dist', align: 'right' as const },
+                        ]
+                      ).map(({ key, label, align }) => (
+                        <th
+                          key={key}
+                          onClick={() => handleSort(key)}
+                          className={`p-2 text-[11px] font-medium uppercase tracking-wider cursor-pointer select-none ${
+                            sortCol === key ? 'text-white' : 'text-white/40'
+                          } ${align === 'right' ? 'text-right' : 'text-left'}`}
+                        >
+                          <span className={`inline-flex items-center gap-0.5 ${align === 'right' ? 'justify-end' : ''}`}>
+                            {label}
+                            <SortIndicator col={key} sortCol={sortCol} sortDir={sortDir} />
+                          </span>
+                        </th>
+                      ))}
+                      <th className="p-2 text-right">
+                        <span className="inline-flex items-center gap-0.5 justify-end">
+                          <button
+                            onClick={() => handleSort('price')}
+                            className={`text-[11px] font-medium uppercase tracking-wider cursor-pointer ${
+                              sortCol === 'price' ? 'text-white' : 'text-white/40'
+                            }`}
+                          >
+                            Sale price
+                          </button>
+                          <SortIndicator col="price" sortCol={sortCol} sortDir={sortDir} />
+                          <div className="relative group ml-0.5">
+                            <button
+                              onClick={(e) => { e.stopPropagation(); setShowAdjModal(true) }}
+                              className="w-[15px] h-[15px] rounded-full border border-white/30 text-white/40 hover:text-white hover:border-white/60 transition-colors flex items-center justify-center text-[10px] font-bold"
+                            >
+                              i
+                            </button>
+                            <div className="absolute right-0 bottom-full mb-2 w-60 bg-surface border border-border-default rounded-lg p-3 text-xs text-white/60 leading-relaxed z-30 hidden group-hover:block shadow-lg">
+                              Prices adjusted for differences in beds, baths, garage, carport, and pool vs your subject property.{' '}
+                              <button
+                                onClick={() => setShowAdjModal(true)}
+                                className="text-gold underline"
                               >
-                                {a.label} ({a.amount > 0 ? '+' : ''}{fmt(a.amount)})
-                              </span>
-                            ))}
-                            {totalAdj !== 0 && (
-                              <span className="text-[10px] px-1.5 py-0.5 rounded font-bold bg-white/5 text-white/50">
-                                net {totalAdj > 0 ? '+' : ''}{fmt(totalAdj)}
-                              </span>
-                            )}
+                                Learn more
+                              </button>
+                            </div>
                           </div>
-                        )}
-                      </div>
-                    </div>
-                  )
-                })}
+                        </span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-border-default">
+                    {sortedTableComps.map((comp) => {
+                      const selected = selectedIds.has(comp.id)
+                      const isOutsideFilter = !filteredIdsSet.has(comp.id)
+                      const totalAdj = comp.adjustments.reduce((s, a) => s + a.amount, 0)
+                      return (
+                        <tr
+                          key={comp.id}
+                          onClick={() => toggleComp(comp.id)}
+                          className={`cursor-pointer transition-colors hover:bg-surface-2 ${isOutsideFilter ? 'opacity-70' : ''}`}
+                        >
+                          <td className="p-2 text-center" onClick={(e) => e.stopPropagation()}>
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={() => toggleComp(comp.id)}
+                              style={{ accentColor: '#DABD59' }}
+                              className="cursor-pointer"
+                            />
+                          </td>
+                          <td className="p-2">
+                            <p className="text-[13px] text-white truncate leading-tight">{comp.address}</p>
+                            <p className="text-[11px] text-white/40 truncate">
+                              {comp.city}, {comp.state} {comp.zip}
+                              {isOutsideFilter && (
+                                <span className="ml-1.5 text-[10px] px-1 py-0.5 rounded bg-yellow-400/10 text-yellow-400 font-medium">outside filter</span>
+                              )}
+                            </p>
+                          </td>
+                          <td className="p-2 text-right text-[13px] text-white/80">{comp.beds}</td>
+                          <td className="p-2 text-right text-[13px] text-white/80">{comp.baths}</td>
+                          <td className="p-2 text-right text-[13px] text-white/80">{comp.sqft?.toLocaleString()}</td>
+                          <td className="p-2 text-right text-[13px] text-white/80">{comp.yearBuilt}</td>
+                          <td className="p-2 text-[13px] text-white/80">{relativeDate(comp.daysAgo)}</td>
+                          <td className="p-2 text-right text-[13px] text-white/80">{comp.distanceMiles.toFixed(2)} mi</td>
+                          <td className="p-2 text-right">
+                            <p className="text-[13px] font-medium text-white">{fmt(comp.adjustedPrice)}</p>
+                            {totalAdj !== 0 && (
+                              <p className="text-[11px] text-white/40">(orig {fmt(comp.salePrice)})</p>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
 
-            <button
-              disabled
-              className="text-white/20 text-xs border border-border-default rounded-lg px-3 py-2 cursor-not-allowed w-full"
-            >
-              Draw custom area (coming soon)
-            </button>
-          </div>
-        )}
-
-        {/* Sticky analyze bar for step 3 */}
-        {step === 3 && (
-          <div className="fixed bottom-0 left-0 right-0 bg-black border-t border-border-default px-4 py-4 flex items-center justify-between gap-4 z-20">
-            <div>
-              <p className={`text-sm font-semibold ${canAnalyze ? 'text-white' : 'text-white/30'}`}>
-                {analyzing ? 'Running analysis…' : `${selectedCount} comp${selectedCount !== 1 ? 's' : ''} selected`}
-              </p>
-              {!analyzing && selectedCount === 0 && (
-                <p className="text-white/30 text-xs">Select comps to run analysis</p>
-              )}
-              {analyzing && (
-                <p className="text-white/30 text-xs">This takes 10–20 seconds — hang tight</p>
-              )}
+            {/* 5. Sticky run analysis bar */}
+            <div className="sticky bottom-0 bg-surface-2 flex items-center justify-between gap-4 z-10" style={{ borderTop: '0.5px solid #2A2A2A', padding: '10px 14px' }}>
+              <div>
+                {analyzing ? (
+                  <p className="text-white/50 text-sm">Analyzing… this takes 10–20 seconds</p>
+                ) : selectedCount === 0 ? (
+                  <p className="text-yellow-400 text-sm">Select at least 3 comps to run analysis</p>
+                ) : selectedCount < 3 ? (
+                  <p className="text-yellow-400 text-sm">{selectedCount} comps selected · need {3 - selectedCount} more</p>
+                ) : (
+                  <p className="text-white/50 text-sm">{selectedCount} comps selected</p>
+                )}
+              </div>
+              <button
+                onClick={runAnalysis}
+                disabled={selectedCount < 3 || analyzing}
+                className={`flex items-center gap-2 px-5 py-2.5 rounded-xl font-bold text-sm transition-colors shrink-0 ${
+                  selectedCount >= 3 && !analyzing
+                    ? 'bg-[#DABD59] text-black hover:bg-gold-hover'
+                    : 'bg-surface border border-border-default text-white/20 cursor-not-allowed'
+                }`}
+              >
+                {analyzing ? (
+                  <>
+                    <Spinner className="w-4 h-4" />
+                    Analyzing…
+                  </>
+                ) : (
+                  <>
+                    <svg className="w-4 h-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.5} strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
+                      <path d="M20 3v4M22 5h-4M4 17v2M5 18H3" />
+                    </svg>
+                    Run analysis
+                  </>
+                )}
+              </button>
             </div>
-            <button
-              onClick={runAnalysis}
-              disabled={!canAnalyze || analyzing}
-              className="bg-gold text-black font-bold px-6 py-3 rounded-xl hover:bg-gold-hover transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 min-w-[160px] justify-center"
-            >
-              {analyzing ? (
-                <>
-                  <Spinner className="w-4 h-4" />
-                  Analyzing…
-                </>
-              ) : (
-                'Run analysis →'
-              )}
-            </button>
           </div>
         )}
 
@@ -1557,6 +1876,24 @@ function SFRContent() {
                   </div>
                 ) : analysis ? (
                   <div className="space-y-5">
+                    <div className="flex justify-end">
+                      <button
+                        onClick={() => {
+                          gMapRef.current = null
+                          markersRef.current.clear()
+                          circleRef.current = null
+                          subjectMarkerRef.current = null
+                          setStep(3)
+                        }}
+                        disabled={allComps.length === 0}
+                        className="flex items-center gap-1.5 text-sm text-white/40 border border-border-default rounded-lg px-3 py-1.5 hover:text-white hover:border-white/20 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                      >
+                        <svg className="w-3.5 h-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M21 2v6h-6M3 12a9 9 0 0 1 15-6.7L21 8M3 22v-6h6M21 12a9 9 0 0 1-15 6.7L3 16" />
+                        </svg>
+                        Re-run with different comps
+                      </button>
+                    </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="bg-surface border border-gold rounded-xl p-5">
                         <p className="text-gold text-[10px] uppercase tracking-wider mb-1">After Repair Value</p>

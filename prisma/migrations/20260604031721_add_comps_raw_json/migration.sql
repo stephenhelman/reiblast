@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "Deal" ADD COLUMN     "compsRawJson" TEXT,
+ADD COLUMN     "lat" DOUBLE PRECISION,
+ADD COLUMN     "lng" DOUBLE PRECISION;
