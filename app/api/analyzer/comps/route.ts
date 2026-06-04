@@ -231,18 +231,17 @@ export async function POST(req: NextRequest) {
     )
     console.log('[comps] Stored', storedCount, 'records in PropertyRecord')
 
-    // Step 4 — Filter and return
+    // Step 4 — Filter and return (only exclude the subject property itself)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const comps = (rawRecords as any[])
+    const filteredComps = (rawRecords as any[])
       .filter((r) => {
         if (!r.formattedAddress) return false
         if (r.formattedAddress === formattedAddress) return false
-        const price = extractPrice(r)
-        return price != null && price > 0
+        return true
       })
       .map((r) => {
         const { city, state, zip } = parseCityStateZip(r.formattedAddress)
-        const price = extractPrice(r) as number
+        const price = extractPrice(r) as number | null
         const sqftVal = r.squareFootage as number
         const compLat = r.latitude as number
         const compLng = r.longitude as number
@@ -257,7 +256,7 @@ export async function POST(req: NextRequest) {
           baths: r.bathrooms ?? 0,
           sqft: sqftVal ?? 0,
           yearBuilt: r.yearBuilt ?? 0,
-          salePrice: price,
+          salePrice: price ?? 0,
           saleDate: r.lastSaleDate ?? '',
           daysAgo: saleDate ? Math.floor((Date.now() - saleDate.getTime()) / 86400000) : 0,
           pricePerSqft: sqftVal && price ? Math.round(price / sqftVal) : null,
@@ -270,8 +269,10 @@ export async function POST(req: NextRequest) {
         }
       })
 
-    console.log('[comps] Final comp count returned:', comps.length)
-    return NextResponse.json(comps)
+    console.log('[comps] Returning comp count:', filteredComps.length)
+    const withPrice = filteredComps.filter((c) => c.salePrice).length
+    console.log('[comps] Comps with sale price:', withPrice, 'of', filteredComps.length)
+    return NextResponse.json(filteredComps)
   } catch (err) {
     console.error('[analyzer/comps] error:', err)
     return NextResponse.json({ error: 'Failed to fetch comps' }, { status: 500 })
