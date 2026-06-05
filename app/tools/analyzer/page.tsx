@@ -13,6 +13,10 @@ function AnalyzerContent() {
     router.push(toolUrl('/analyzer/sfr', locationId))
   }
 
+  function goToLand() {
+    router.push(toolUrl('/tools/analyzer/land', locationId))
+  }
+
   return (
     <div className="min-h-screen bg-black text-white">
       <MinimalHeader title="Deal Analyzer" />
@@ -45,13 +49,13 @@ function AnalyzerContent() {
             </span>
           </button>
 
-          {/* Land — disabled / coming soon */}
-          <div className="relative bg-surface border border-border-default rounded-2xl p-8 opacity-50 cursor-not-allowed select-none">
-            <span className="absolute top-4 right-4 bg-white/10 text-white/50 text-xs font-semibold px-2.5 py-1 rounded-full">
-              Coming soon
-            </span>
-            <div className="w-12 h-12 rounded-xl bg-white/5 flex items-center justify-center mb-5">
-              <svg className="w-6 h-6 text-white/30" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          {/* Land */}
+          <button
+            onClick={goToLand}
+            className="group bg-surface border border-border-default hover:border-gold rounded-2xl p-8 text-left transition-all duration-200 hover:bg-surface-2"
+          >
+            <div className="w-12 h-12 rounded-xl bg-gold/10 flex items-center justify-center mb-5 group-hover:bg-gold/20 transition-colors">
+              <svg className="w-6 h-6 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 6h16M4 10h16M4 14h8m-8 4h4" />
               </svg>
             </div>
@@ -59,10 +63,13 @@ function AnalyzerContent() {
             <p className="text-white/40 text-sm mb-6 leading-relaxed">
               Comparable land sales, price per acre, zoning analysis
             </p>
-            <span className="inline-flex items-center gap-1.5 bg-white/10 text-white/30 text-sm font-bold px-4 py-2 rounded-lg">
-              Coming soon
+            <span className="inline-flex items-center gap-1.5 bg-gold text-black text-sm font-bold px-4 py-2 rounded-lg group-hover:bg-gold-hover transition-colors">
+              Start analysis
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+              </svg>
             </span>
-          </div>
+          </button>
         </div>
       </div>
     </div>
