@@ -5,6 +5,8 @@ import { prisma } from '@/lib/prisma'
 // 1 mile ≈ 0.0145 degrees
 const RADIUS_DEG = 0.0145
 
+type PriceSource = 'sale' | 'history' | 'assessment' | 'none'
+
 function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 3958.8
   const dLat = (lat2 - lat1) * (Math.PI / 180)
@@ -29,16 +31,42 @@ function parseCityStateZip(formattedAddress: string): { city: string; state: str
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function extractPrice(record: any): number | null {
-  if (record.lastSalePrice) return record.lastSalePrice
-  if (!record.history) return null
-  const sales = Object.values(record.history)
+function extractPriceFromHistory(history: Record<string, any> | null | undefined): number | null {
+  if (!history) return null
+  const sales = Object.values(history)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    .filter((h: any) => h.price)
+    .filter((h: any) => h.price && h.price > 0)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     .sort((a: any, b: any) => new Date(b.date).getTime() - new Date(a.date).getTime())
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (sales[0] as any)?.price ?? null
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getMostRecentTaxAssessment(taxAssessments: Record<string, any> | null | undefined): number | null {
+  if (!taxAssessments) return null
+  const years = Object.keys(taxAssessments).sort().reverse()
+  for (const year of years) {
+    const val = taxAssessments[year]?.value
+    if (val && val > 0) return val
+  }
+  return null
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function computePriceAndSource(record: any): { salePrice: number | null; priceSource: PriceSource } {
+  if (record.lastSalePrice && record.lastSalePrice > 0) {
+    return { salePrice: record.lastSalePrice, priceSource: 'sale' }
+  }
+  const historyPrice = extractPriceFromHistory(record.history)
+  if (historyPrice) {
+    return { salePrice: historyPrice, priceSource: 'history' }
+  }
+  const assessedPrice = getMostRecentTaxAssessment(record.taxAssessments)
+  if (assessedPrice) {
+    return { salePrice: assessedPrice, priceSource: 'assessment' }
+  }
+  return { salePrice: null, priceSource: 'none' }
 }
 
 function mapDbCompToComp(
@@ -57,6 +85,7 @@ function mapDbCompToComp(
     pool: boolean | null
     lastSalePrice: number | null
     lastSaleDate: Date | null
+    priceSource: string | null
     source: string
   },
   subjectLat: number,
@@ -95,6 +124,7 @@ function mapDbCompToComp(
     garage: record.garage ?? false,
     garageSpaces: record.garageSpaces ?? 0,
     pool: record.pool ?? false,
+    priceSource: (record.priceSource ?? 'sale') as PriceSource,
   }
 }
 
@@ -191,7 +221,7 @@ export async function POST(req: NextRequest) {
         if (!record.formattedAddress) return
         if (record.formattedAddress === formattedAddress) return
 
-        const price = extractPrice(record)
+        const { salePrice, priceSource } = computePriceAndSource(record)
 
         try {
           await prisma.propertyRecord.upsert({
@@ -212,14 +242,16 @@ export async function POST(req: NextRequest) {
               garage: record.features?.garage ?? null,
               garageSpaces: record.features?.garageSpaces ?? null,
               pool: record.features?.pool ?? null,
-              lastSalePrice: price != null ? Math.round(price) : null,
+              lastSalePrice: salePrice != null ? Math.round(salePrice) : null,
               lastSaleDate: record.lastSaleDate ? new Date(record.lastSaleDate) : null,
+              priceSource,
               source: 'rentcast',
               lastVerified: new Date(),
             },
             update: {
-              lastSalePrice: price != null ? Math.round(price) : null,
+              lastSalePrice: salePrice != null ? Math.round(salePrice) : null,
               lastSaleDate: record.lastSaleDate ? new Date(record.lastSaleDate) : null,
+              priceSource,
               lastVerified: new Date(),
             },
           })
@@ -241,7 +273,7 @@ export async function POST(req: NextRequest) {
       })
       .map((r) => {
         const { city, state, zip } = parseCityStateZip(r.formattedAddress)
-        const price = extractPrice(r) as number | null
+        const { salePrice, priceSource } = computePriceAndSource(r)
         const sqftVal = r.squareFootage as number
         const compLat = r.latitude as number
         const compLng = r.longitude as number
@@ -256,16 +288,17 @@ export async function POST(req: NextRequest) {
           baths: r.bathrooms ?? 0,
           sqft: sqftVal ?? 0,
           yearBuilt: r.yearBuilt ?? 0,
-          salePrice: price ?? 0,
+          salePrice: salePrice ?? 0,
           saleDate: r.lastSaleDate ?? '',
           daysAgo: saleDate ? Math.floor((Date.now() - saleDate.getTime()) / 86400000) : 0,
-          pricePerSqft: sqftVal && price ? Math.round(price / sqftVal) : null,
+          pricePerSqft: sqftVal && salePrice ? Math.round(salePrice / sqftVal) : null,
           distanceMiles: compLat != null && compLng != null ? haversineMiles(lat, lng, compLat, compLng) : 0,
           latitude: compLat ?? 0,
           longitude: compLng ?? 0,
           garage: r.features?.garage ?? false,
           garageSpaces: r.features?.garageSpaces ?? 0,
           pool: r.features?.pool ?? false,
+          priceSource,
         }
       })
 

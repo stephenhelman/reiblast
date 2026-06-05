@@ -54,6 +54,7 @@ interface RawComp {
   garage: boolean
   garageSpaces: number
   pool: boolean
+  priceSource: 'sale' | 'history' | 'assessment' | 'none'
 }
 
 interface ProcessedComp extends RawComp {
@@ -1906,9 +1907,20 @@ function SFRContent() {
                           <td className="p-2 text-[13px] text-white/80">{relativeDate(comp.daysAgo)}</td>
                           <td className="p-2 text-right text-[13px] text-white/80">{comp.distanceMiles.toFixed(2)} mi</td>
                           <td className="p-2 text-right">
-                            <p className="text-[13px] font-medium text-white">{fmt(comp.adjustedPrice)}</p>
-                            {totalAdj !== 0 && (
-                              <p className="text-[11px] text-white/40">(orig {fmt(comp.salePrice)})</p>
+                            {comp.priceSource === 'none' ? (
+                              <p className="text-[13px] text-white/30 italic">No data</p>
+                            ) : (
+                              <>
+                                <p className="text-[13px] font-medium text-white">
+                                  {fmt(comp.adjustedPrice)}
+                                  {comp.priceSource === 'assessment' && (
+                                    <span className="ml-1 text-[10px] font-normal text-white/30 not-italic">Assessed</span>
+                                  )}
+                                </p>
+                                {totalAdj !== 0 && (
+                                  <p className="text-[11px] text-white/40">(orig {fmt(comp.salePrice)})</p>
+                                )}
+                              </>
                             )}
                           </td>
                         </tr>

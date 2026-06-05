@@ -143,6 +143,7 @@ model PropertyRecord {
   // Sale data
   lastSalePrice     Int?
   lastSaleDate      DateTime?
+  priceSource       String?
 
   // Tax data
   assessedValue     Int?
