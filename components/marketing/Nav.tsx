@@ -9,11 +9,14 @@ export default function Nav() {
           <LogoFull size={32} />
         </Link>
         <div className="hidden md:flex items-center gap-8">
-          <Link href="/#features" className="text-white/70 hover:text-white text-sm transition-colors">
+          <Link href="/features" className="text-white/70 hover:text-white text-sm transition-colors">
             Features
           </Link>
           <Link href="/pricing" className="text-white/70 hover:text-white text-sm transition-colors">
             Pricing
+          </Link>
+          <Link href="/about" className="text-white/70 hover:text-white text-sm transition-colors">
+            About
           </Link>
           <a href="https://app.reiblast.app" target="_blank" rel="noreferrer" className="text-white/70 hover:text-white text-sm transition-colors">
             Login

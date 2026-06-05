@@ -42,12 +42,12 @@ export default function Hero() {
           >
             Get Started — $79/mo
           </Link>
-          <a
-            href="#features"
+          <Link
+            href="/features"
             className="border border-gold text-gold font-semibold text-lg px-8 py-4 rounded-xl hover:bg-gold/10 transition-colors"
           >
             See How It Works
-          </a>
+          </Link>
         </div>
 
         <p className="mt-8 text-sm" style={{ color: '#888888' }}>
