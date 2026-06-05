@@ -14,7 +14,7 @@ const CORE_FEATURES = [
   "Locked SMS sequences",
   "Universal wholesale contracts",
   "Built-in e-signature",
-  "Deal analyzer with real comps",
+  "Deal analyzer with real comps (BETA)",
   "Lead cleaner (mobile-only import)",
 ];
 

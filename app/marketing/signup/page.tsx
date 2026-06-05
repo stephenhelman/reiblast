@@ -1,20 +1,20 @@
-import type { Metadata } from 'next'
-import Link from 'next/link'
-import { LogoStacked } from '@/components/shared/Logo'
+import type { Metadata } from "next";
+import Link from "next/link";
+import { LogoStacked } from "@/components/shared/Logo";
 
 export const metadata: Metadata = {
-  title: 'Get Started — REIblast',
-}
+  title: "Get Started — REIblast",
+};
 
-const checkoutUrl = process.env.NEXT_PUBLIC_CHECKOUT_URL
-if (!checkoutUrl) console.warn('NEXT_PUBLIC_CHECKOUT_URL is not set')
-const paymentLink = checkoutUrl ?? '#'
+const checkoutUrl = process.env.NEXT_PUBLIC_CHECKOUT_URL;
+if (!checkoutUrl) console.warn("NEXT_PUBLIC_CHECKOUT_URL is not set");
+const paymentLink = checkoutUrl ?? "#";
 
 const FEATURES = [
-  'Pre-built CRM pipeline + A2P-compliant SMS sequences ready on day one',
-  'Universal wholesale contract with built-in e-signature — no extra tools',
-  'Deal analyzer, JV network, and lead sourcing all in one portal',
-]
+  "Pre-built CRM pipeline + A2P-compliant SMS sequences ready on day one",
+  "Universal wholesale contract with built-in e-signature — no extra tools",
+  "Deal analyzer (BETA), JV network, and lead sourcing all in one portal",
+];
 
 export default function SignupPage() {
   return (
@@ -27,20 +27,33 @@ export default function SignupPage() {
         </div>
 
         <div className="bg-surface border border-gold/30 rounded-2xl p-8 text-center">
-          <h1 className="text-3xl font-bold text-white mb-3">Ready to get started?</h1>
+          <h1 className="text-3xl font-bold text-white mb-3">
+            Ready to get started?
+          </h1>
           <p className="text-white/50 mb-8">
-            Everything you need to run your wholesale operation — one flat monthly price.
+            Everything you need to run your wholesale operation — one flat
+            monthly price.
           </p>
 
           <ul className="space-y-4 text-left mb-10">
             {FEATURES.map((f) => (
               <li key={f} className="flex items-start gap-3">
                 <div className="w-5 h-5 rounded-full bg-gold/20 flex items-center justify-center shrink-0 mt-0.5">
-                  <svg className="w-3 h-3 text-gold" fill="currentColor" viewBox="0 0 20 20">
-                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  <svg
+                    className="w-3 h-3 text-gold"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z"
+                      clipRule="evenodd"
+                    />
                   </svg>
                 </div>
-                <span className="text-white/80 text-sm leading-relaxed">{f}</span>
+                <span className="text-white/80 text-sm leading-relaxed">
+                  {f}
+                </span>
               </li>
             ))}
           </ul>
@@ -58,14 +71,14 @@ export default function SignupPage() {
         </div>
 
         <p className="text-white/30 text-sm text-center mt-6">
-          Already have an account?{' '}
+          Already have an account?{" "}
           <Link href="/login" className="text-gold hover:underline">
             Log in
           </Link>
         </p>
       </div>
     </div>
-  )
+  );
 }
 
 /*

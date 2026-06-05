@@ -82,7 +82,7 @@ const FEATURES = [
   },
   {
     icon: "🧮",
-    badge: "DEAL ANALYZER",
+    badge: "DEAL ANALYZER (BETA)",
     headline: "Real Comps. Real Numbers. Real Fast.",
     body: "Don't go to Zillow looking for comps. The deal analyzer pulls real sold data, analyzes your deal with AI, runs your numbers, and saves everything directly to REIblast.",
     accent: "gold" as const,

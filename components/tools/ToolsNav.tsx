@@ -1,48 +1,49 @@
-'use client'
+"use client";
 
-import { Suspense } from 'react'
-import Link from 'next/link'
-import { usePathname } from 'next/navigation'
-import { LogoFull } from '../shared/Logo'
-import { useLocationId, toolUrl } from '@/lib/hooks/use-location-id'
+import { Suspense } from "react";
+import Link from "next/link";
+import { usePathname } from "next/navigation";
+import { LogoFull } from "../shared/Logo";
+import { useLocationId, toolUrl } from "@/lib/hooks/use-location-id";
 
 const NAV_ITEMS = [
-  { path: '/analyzer', label: 'Deal Analyzer', icon: '⌂' },
-  { path: '/jv', label: 'JV Submission', icon: '🤝' },
-  { path: '/leads', label: 'Lead Sourcing', icon: '📋' },
-]
+  { path: "/analyzer", label: "Deal Analyzer (BETA)", icon: "⌂" },
+  { path: "/jv", label: "JV Submission", icon: "🤝" },
+  { path: "/leads", label: "Lead Sourcing", icon: "📋" },
+];
 
 function NavLinks() {
-  const pathname = usePathname()
-  const locationId = useLocationId()
+  const pathname = usePathname();
+  const locationId = useLocationId();
 
   return (
     <>
       {NAV_ITEMS.map((item) => {
-        const active = pathname.startsWith(item.path)
+        const active = pathname.startsWith(item.path);
         return (
           <Link
             key={item.path}
             href={toolUrl(item.path, locationId)}
             className={`
               flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors
-              ${active
-                ? 'bg-gold/15 text-gold'
-                : 'text-white/50 hover:text-white hover:bg-white/5'
+              ${
+                active
+                  ? "bg-gold/15 text-gold"
+                  : "text-white/50 hover:text-white hover:bg-white/5"
               }
             `}
           >
             <span>{item.icon}</span>
             <span className="hidden sm:inline">{item.label}</span>
           </Link>
-        )
+        );
       })}
     </>
-  )
+  );
 }
 
 export default function ToolsNav() {
-  const pathname = usePathname()
+  const pathname = usePathname();
 
   return (
     <nav className="h-16 border-b border-border-default bg-black/95 backdrop-blur-sm flex items-center px-6 gap-8 sticky top-0 z-50">
@@ -57,7 +58,9 @@ export default function ToolsNav() {
               key={item.path}
               href={item.path}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                pathname.startsWith(item.path) ? 'bg-gold/15 text-gold' : 'text-white/50'
+                pathname.startsWith(item.path)
+                  ? "bg-gold/15 text-gold"
+                  : "text-white/50"
               }`}
             >
               <span>{item.icon}</span>
@@ -76,5 +79,5 @@ export default function ToolsNav() {
         </div>
       </div>
     </nav>
-  )
+  );
 }
