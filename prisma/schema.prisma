@@ -185,3 +185,41 @@ model ApiCall {
   @@index([resource])
   @@index([createdAt])
 }
+
+model LandDeal {
+  id                   String   @id @default(cuid())
+  locationId           String
+  address              String
+  lat                  Float?
+  lng                  Float?
+  lotSizeSqft          Int?
+  lotSizeAcres         Float?
+  zoning               String?
+  roadAccess           String?
+  utilities            String[]
+  topography           String?
+  estimatedValue       Float
+  estimatedValueLow    Float?
+  estimatedValueHigh   Float?
+  valueConfidence      String?
+  valueMethod          String?
+  builderActivityLevel String?
+  builderActivityNote  String?
+  exitStrategy         String?
+  narrative            String?
+  risks                String[]
+  warnings             String[]
+  compsJson            String?
+  compsRawJson         String?  @db.Text
+  discount             Float?
+  endBuyerMax          Float?
+  wholesaleFee         Float?
+  cashOffer            Float?
+  anchorOffer          Float?
+  dealUrl              String?
+  dealType             String   @default("land")
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([locationId, address])
+}
