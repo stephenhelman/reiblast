@@ -1,20 +1,21 @@
 import type { Metadata } from 'next'
+import Link from 'next/link'
 import Pricing from '@/components/marketing/Pricing'
+
+const CORE_FEATURES = [
+  'Pre-built wholesale pipeline',
+  'Locked SMS sequences',
+  'Universal wholesale contracts',
+  'Built-in e-signature',
+  'Deal analyzer with MAO calculator',
+  'JV deal submission network',
+  'Dedicated tools portal',
+  'New tools added monthly',
+]
 
 export const metadata: Metadata = {
   title: 'Pricing — REIblast',
 }
-
-const checkoutUrl = process.env.NEXT_PUBLIC_CHECKOUT_URL
-if (!checkoutUrl) console.warn('NEXT_PUBLIC_CHECKOUT_URL is not set')
-const paymentLink = checkoutUrl ?? '#'
-
-const INCLUDED = [
-  { category: 'CRM & Pipeline', items: ['Pre-built wholesale pipeline', 'Lead tracking & status management', 'Contact database', 'Deal history'] },
-  { category: 'Outreach', items: ['A2P-compliant SMS number', 'Locked follow-up sequences', 'Bulk list blast', 'Opt-out management'] },
-  { category: 'Contracts & Closing', items: ['Universal wholesale PSA', 'Built-in e-signature', 'Document storage', 'Closing checklist'] },
-  { category: 'Analysis & Tools', items: ['Deal analyzer with MAO calc', 'Deal score rating', 'JV submission network', 'Market comps (coming soon)'] },
-]
 
 export default function PricingPage() {
   return (
@@ -35,27 +36,17 @@ export default function PricingPage() {
           <h2 className="text-3xl font-bold text-white text-center mb-12">
             Everything in <span className="text-gold">Core</span>
           </h2>
-          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {INCLUDED.map((section) => (
-              <div
-                key={section.category}
-                className="bg-surface border border-border-default rounded-xl p-6"
-              >
-                <h3 className="text-gold font-semibold text-sm uppercase tracking-wider mb-4">
-                  {section.category}
-                </h3>
-                <ul className="space-y-2">
-                  {section.items.map((item) => (
-                    <li key={item} className="flex items-start gap-2 text-white/70 text-sm">
-                      <svg className="w-4 h-4 text-gold shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
-                        <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                      </svg>
-                      {item}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
+          <div className="max-w-2xl mx-auto bg-surface border border-border-default rounded-xl p-8">
+            <ul className="grid grid-cols-1 sm:grid-cols-2 gap-y-3 gap-x-8">
+              {CORE_FEATURES.map((item) => (
+                <li key={item} className="flex items-start gap-2 text-white/70 text-sm">
+                  <svg className="w-4 h-4 text-gold shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                  {item}
+                </li>
+              ))}
+            </ul>
           </div>
         </div>
 
@@ -64,12 +55,12 @@ export default function PricingPage() {
           <p className="text-white/50 mb-8 max-w-xl mx-auto">
             Join wholesalers who are running their entire operation inside REIblast.
           </p>
-          <a
-            href={paymentLink}
+          <Link
+            href="/checkout"
             className="inline-block bg-gold text-black font-bold text-lg px-10 py-4 rounded-xl hover:bg-gold-hover transition-colors"
           >
-            Get Started — $57/mo
-          </a>
+            Get Started — $79/mo
+          </Link>
           <p className="text-white/30 text-sm mt-4">No contracts. Cancel anytime.</p>
         </div>
       </div>

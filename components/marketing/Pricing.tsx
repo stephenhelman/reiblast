@@ -1,17 +1,14 @@
-const checkoutUrl = process.env.NEXT_PUBLIC_CHECKOUT_URL
-if (!checkoutUrl) console.warn('NEXT_PUBLIC_CHECKOUT_URL is not set')
-const paymentLink = checkoutUrl ?? '#'
+import Link from 'next/link'
 
-const INCLUDED = [
-  'Full CRM with pre-built wholesale pipeline',
-  'Locked SMS follow-up sequences',
-  'Universal wholesale purchase contract',
+const FEATURES = [
+  'Pre-built wholesale pipeline',
+  'Locked SMS sequences',
+  'Universal wholesale contracts',
   'Built-in e-signature',
   'Deal analyzer with MAO calculator',
   'JV deal submission network',
-  'A2P-compliant phone number',
   'Dedicated tools portal',
-  'New templates and tools monthly',
+  'New tools added monthly',
 ]
 
 export default function Pricing() {
@@ -34,14 +31,14 @@ export default function Pricing() {
             <div className="mb-6">
               <p className="text-gold font-semibold text-sm uppercase tracking-wider mb-2">REIblast Core</p>
               <div className="flex items-baseline gap-2">
-                <span className="text-5xl font-bold text-white">$57</span>
+                <span className="text-5xl font-bold text-white">$79</span>
                 <span className="text-white/50 text-xl">/mo</span>
               </div>
               <p className="text-white/40 text-sm mt-1">Cancel anytime</p>
             </div>
 
             <ul className="space-y-3 mb-8">
-              {INCLUDED.map((item) => (
+              {FEATURES.map((item) => (
                 <li key={item} className="flex items-start gap-3">
                   <svg className="w-5 h-5 text-gold shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20">
                     <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
@@ -51,12 +48,12 @@ export default function Pricing() {
               ))}
             </ul>
 
-            <a
-              href={paymentLink}
+            <Link
+              href="/checkout"
               className="block w-full bg-gold text-black font-bold text-center py-4 rounded-xl hover:bg-gold-hover transition-colors"
             >
-              Get Started — $57/mo
-            </a>
+              Get Started — $79/mo
+            </Link>
           </div>
         </div>
       </div>

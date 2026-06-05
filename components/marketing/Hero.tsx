@@ -1,8 +1,5 @@
+import Link from 'next/link'
 import { LogoStacked } from '../shared/Logo'
-
-const checkoutUrl = process.env.NEXT_PUBLIC_CHECKOUT_URL
-if (!checkoutUrl) console.warn('NEXT_PUBLIC_CHECKOUT_URL is not set')
-const paymentLink = checkoutUrl ?? '#'
 
 export default function Hero() {
   return (
@@ -38,13 +35,13 @@ export default function Hero() {
         </p>
 
         <div className="flex flex-col sm:flex-row gap-4">
-          <a
-            href={paymentLink}
+          <Link
+            href="/checkout"
             className="bg-gold text-black font-bold text-lg px-8 py-4 rounded-xl hover:bg-gold-hover transition-colors"
             style={{ fontWeight: 700 }}
           >
-            Get Started — $57/mo
-          </a>
+            Get Started — $79/mo
+          </Link>
           <a
             href="#features"
             className="border border-gold text-gold font-semibold text-lg px-8 py-4 rounded-xl hover:bg-gold/10 transition-colors"

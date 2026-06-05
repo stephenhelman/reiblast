@@ -1,10 +1,6 @@
 import Link from 'next/link'
 import { LogoFull } from '../shared/Logo'
 
-const checkoutUrl = process.env.NEXT_PUBLIC_CHECKOUT_URL
-if (!checkoutUrl) console.warn('NEXT_PUBLIC_CHECKOUT_URL is not set')
-const paymentLink = checkoutUrl ?? '#'
-
 export default function Nav() {
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 border-b border-border-default bg-black/90 backdrop-blur-sm">
@@ -22,19 +18,19 @@ export default function Nav() {
           <a href="https://app.reiblast.app" target="_blank" rel="noreferrer" className="text-white/70 hover:text-white text-sm transition-colors">
             Login
           </a>
-          <a
-            href={paymentLink}
+          <Link
+            href="/checkout"
             className="bg-gold text-black font-semibold text-sm px-5 py-2 rounded-lg hover:bg-gold-hover transition-colors"
           >
             Get Started
-          </a>
+          </Link>
         </div>
-        <a
-          href={paymentLink}
+        <Link
+          href="/checkout"
           className="md:hidden bg-gold text-black font-semibold text-sm px-4 py-2 rounded-lg"
         >
           Get Started
-        </a>
+        </Link>
       </div>
     </nav>
   )

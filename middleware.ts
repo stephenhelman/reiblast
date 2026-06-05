@@ -8,7 +8,7 @@ export function middleware(request: NextRequest) {
   const isToolsHost =
     hostname.startsWith("tools.") ||
     hostname === "tools.reiblast.app" ||
-    hostname === "localhost:3000";
+    hostname === "localhost:3001";
 
   if (isToolsHost) {
     // Widget routes — no auth, rewrite to /tools/widget/*
