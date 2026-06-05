@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useEffect, useState, Suspense } from "react";
 import MinimalHeader from "@/components/tools/MinimalHeader";
+import { useLocationId } from "@/lib/hooks/use-location-id";
 
 const A2P_FEATURES = [
   "Custom domain purchase and setup",
@@ -107,9 +107,8 @@ function GreenCheckCircle({ size }: { size: number }) {
   );
 }
 
-export default function MarketplacePage() {
-  const searchParams = useSearchParams();
-  const locationId = searchParams.get("token") || "";
+function MarketplaceContent() {
+  const locationId = useLocationId();
 
   const [addons, setAddons] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
@@ -511,5 +510,13 @@ export default function MarketplacePage() {
         )}
       </div>
     </div>
+  );
+}
+
+export default function MarketplacePage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-black" />}>
+      <MarketplaceContent />
+    </Suspense>
   );
 }
