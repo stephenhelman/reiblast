@@ -78,7 +78,7 @@ interface CalcResults {
 
 interface Filters {
   radius: 0.25 | 0.5 | 1 | 2;
-  days: 30 | 60 | 90 | 180 | 365 | 730 | 1095 | null;
+  days: 30 | 60 | 90 | 180 | 365 | 730 | 1095 | 1825 | null;
   sqftRange: 100 | 250 | 500 | 750 | null;
   yearRange: 5 | 10 | 20 | null;
   bedsRange: 0 | 1 | 2 | null;
@@ -455,7 +455,7 @@ function SFRContent() {
   const [compsError, setCompsError] = useState("");
   const [filters, setFilters] = useState<Filters>({
     radius: 1,
-    days: null,
+    days: 1825,
     sqftRange: null,
     yearRange: null,
     bedsRange: null,
@@ -523,6 +523,7 @@ function SFRContent() {
   const filteredComps = useMemo<ProcessedComp[]>(() => {
     const sqft = typeof propInfo.sqft === "number" ? propInfo.sqft : null;
     const subBeds = typeof propInfo.beds === "number" ? propInfo.beds : null;
+    const subjectYearBuilt = melissaData?.yearBuilt ?? null;
     const result = processedComps.filter((c) => {
       if (c.distanceMiles > filters.radius) return false;
       if (filters.days !== null && c.daysAgo > filters.days) return false;
@@ -533,6 +534,11 @@ function SFRContent() {
         Math.abs(c.sqft - sqft) > filters.sqftRange
       )
         return false;
+      if (filters.yearRange !== null && subjectYearBuilt && c.yearBuilt) {
+        if (Math.abs(c.yearBuilt - subjectYearBuilt) > filters.yearRange) {
+          return false;
+        }
+      }
       if (filters.bedsRange !== null && subBeds !== null && c.beds != null) {
         if (filters.bedsRange === 0 && c.beds !== subBeds) return false;
         if (
@@ -551,8 +557,39 @@ function SFRContent() {
       yearRange: filters.yearRange,
       bedsRange: filters.bedsRange,
     });
+    console.log("[comps] Filter results:", {
+      total: processedComps.length,
+      afterRadius: processedComps.filter(
+        (c) => c.distanceMiles <= filters.radius,
+      ).length,
+      afterDays: processedComps.filter(
+        (c) => filters.days === null || c.daysAgo <= filters.days,
+      ).length,
+      afterSqft: processedComps.filter(
+        (c) =>
+          !filters.sqftRange ||
+          !sqft ||
+          !c.sqft ||
+          Math.abs(c.sqft - sqft) <= filters.sqftRange,
+      ).length,
+      afterYearBuilt: processedComps.filter(
+        (c) =>
+          !filters.yearRange ||
+          !subjectYearBuilt ||
+          !c.yearBuilt ||
+          Math.abs(c.yearBuilt - subjectYearBuilt) <= filters.yearRange,
+      ).length,
+      afterBeds: processedComps.filter(
+        (c) =>
+          filters.bedsRange === null ||
+          subBeds === null ||
+          c.beds == null ||
+          Math.abs(c.beds - subBeds) <= filters.bedsRange,
+      ).length,
+      finalVisible: result.length,
+    });
     return result;
-  }, [processedComps, filters, propInfo]);
+  }, [processedComps, filters, propInfo, melissaData]);
 
   const { tableComps, filteredIdsSet } = useMemo(() => {
     const filteredIdsSet = new Set(filteredComps.map((c) => c.id));
@@ -1368,7 +1405,7 @@ function SFRContent() {
     setManuallySelected(new Set());
     setFilters({
       radius: 1,
-      days: null,
+      days: 1825,
       sqftRange: null,
       yearRange: null,
       bedsRange: null,
@@ -2103,14 +2140,13 @@ function SFRContent() {
                     }}
                     className="bg-surface-2 text-white text-xs border border-border-default rounded-lg px-2 py-1.5 outline-none cursor-pointer focus:border-gold w-full"
                   >
-                    <option value="">Any</option>
-                    <option value={30}>30 days</option>
-                    <option value={60}>60 days</option>
                     <option value={90}>90 days</option>
-                    <option value={180}>180 days</option>
+                    <option value={180}>6 months</option>
                     <option value={365}>1 year</option>
                     <option value={730}>2 years</option>
                     <option value={1095}>3 years</option>
+                    <option value={1825}>5 years</option>
+                    <option value="">Any</option>
                   </select>
                 </div>
                 <div className="flex flex-col gap-1">

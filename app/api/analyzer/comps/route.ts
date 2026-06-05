@@ -302,10 +302,21 @@ export async function POST(req: NextRequest) {
         }
       })
 
-    console.log('[comps] Returning comp count:', filteredComps.length)
-    const withPrice = filteredComps.filter((c) => c.salePrice).length
-    console.log('[comps] Comps with sale price:', withPrice, 'of', filteredComps.length)
-    return NextResponse.json(filteredComps)
+    const fiveYearsAgo = new Date(
+      Date.now() - 5 * 365 * 24 * 60 * 60 * 1000
+    )
+    const dateFilteredComps = filteredComps.filter((c) => {
+      if (!c.saleDate) return true
+      return new Date(c.saleDate) >= fiveYearsAgo
+    })
+    console.log(
+      '[comps] After 5-year filter:',
+      dateFilteredComps.length, 'of', filteredComps.length
+    )
+    console.log('[comps] Returning comp count:', dateFilteredComps.length)
+    const withPrice = dateFilteredComps.filter((c) => c.salePrice).length
+    console.log('[comps] Comps with sale price:', withPrice, 'of', dateFilteredComps.length)
+    return NextResponse.json(dateFilteredComps)
   } catch (err) {
     console.error('[analyzer/comps] error:', err)
     return NextResponse.json({ error: 'Failed to fetch comps' }, { status: 500 })
