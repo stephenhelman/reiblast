@@ -37,6 +37,10 @@ model User {
   smsComplianceAgreed Boolean  @default(false)
   onboardingComplete  Boolean  @default(false)
 
+  // Addons
+  addons               String[]  @default([])
+  a2pAddonPurchasedAt  DateTime?
+
   // OTP verification
   otpCode                   String?
   otpExpiry                 DateTime?
@@ -48,6 +52,7 @@ model User {
   ghlLocationApiKey         String?
   ghlLocationToken          String?
   ghlLocationTokenExpiresAt DateTime?
+  // Note: ONBOARDING_COMPLETE stage ID must be added to GHL_STAGE_* env vars
   onboardingStage           String?
 
   createdAt           DateTime @default(now())

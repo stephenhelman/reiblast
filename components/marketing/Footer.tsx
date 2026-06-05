@@ -13,9 +13,24 @@ export default function Footer() {
         </div>
 
         <div className="flex items-center gap-8 text-sm flex-wrap justify-center md:justify-end">
-          <Link href="/features" className="text-white/50 hover:text-white transition-colors">Features</Link>
-          <Link href="/pricing" className="text-white/50 hover:text-white transition-colors">Pricing</Link>
-          <Link href="/about" className="text-white/50 hover:text-white transition-colors">About</Link>
+          <Link
+            href="/features"
+            className="text-white/50 hover:text-white transition-colors"
+          >
+            Features
+          </Link>
+          <Link
+            href="/pricing"
+            className="text-white/50 hover:text-white transition-colors"
+          >
+            Pricing
+          </Link>
+          <Link
+            href="/about"
+            className="text-white/50 hover:text-white transition-colors"
+          >
+            About
+          </Link>
           <a
             href="https://app.reiblast.app"
             target="_blank"
@@ -25,7 +40,7 @@ export default function Footer() {
             Login
           </a>
           <a
-            href="mailto:support@reiblast.app"
+            href="mailto:support@mail.reiblast.app"
             className="text-white/50 hover:text-white transition-colors"
           >
             Support

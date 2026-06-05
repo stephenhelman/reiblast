@@ -24,6 +24,10 @@ export async function POST(req: NextRequest) {
     `${body.first_name || ""} ${body.last_name || ""}`.trim();
   const phone = (body.phone as string) || "";
 
+  const customData = body.customData as Record<string, unknown> | undefined;
+  const product = (customData?.product as string) || "";
+  console.log("[GHL webhook] product:", product);
+
   if (!email) {
     console.log("[GHL webhook] No email, skipping");
     return NextResponse.json({ received: true });
@@ -40,6 +44,20 @@ export async function POST(req: NextRequest) {
         status: "pending_onboarding",
       },
     });
+
+    const isA2PPurchase = product.toLowerCase() === "a2p addon";
+
+    if (isA2PPurchase) {
+      const currentAddons = user.addons || [];
+      if (!currentAddons.includes("a2p")) {
+        await prisma.user.update({
+          where: { id: user.id },
+          data: { addons: { push: "a2p" } },
+        });
+        console.log("[GHL webhook] A2P addon added to DB");
+      }
+      return NextResponse.json({ success: true });
+    }
 
     const { contactId } = await createHQContact(name, email, phone);
 

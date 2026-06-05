@@ -26,17 +26,18 @@ const COMING_SOON = [
   {
     name: 'AI Acquisitions Bot',
     description: 'NEPQ-trained AI that qualifies sellers and books appointments via SMS — automatically.',
-    price: '$97/mo',
   },
   {
     name: 'AI Dispositions Bot',
     description: 'Blast your deals to cash buyers and manage responses automatically.',
-    price: '$97/mo',
   },
   {
     name: 'State Contract Bundle',
     description: 'Attorney-reviewed purchase and assignment contracts for the top 10 wholesale markets.',
-    price: '$47 one-time',
+  },
+  {
+    name: 'Ask Ari AI',
+    description: 'Wish you had an experienced wholesaler over your shoulder? Ask Ari AI is here to help. Available 24/7.',
   },
 ]
 
@@ -265,7 +266,6 @@ export default function CheckoutPage() {
                   </div>
                   <p className="text-white font-bold text-lg">{item.name}</p>
                   <p className="text-white/50 text-sm mt-0.5">{item.description}</p>
-                  <p className="text-white/30 text-sm mt-2">{item.price}</p>
                 </div>
               ))}
             </div>

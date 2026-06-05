@@ -28,6 +28,8 @@ export const ONBOARDING_STAGE_IDS: Record<string, string> = {
     process.env.GHL_STAGE_ONBOARDING_FORM_SUBMITTED || "",
   [ONBOARDING_STAGES.ONBOARDING_CONFIRMED]:
     process.env.GHL_STAGE_ONBOARDING_CONFIRMED || "",
+  [ONBOARDING_STAGES.ONBOARDING_COMPLETE]:
+    process.env.GHL_STAGE_ONBOARDING_COMPLETE || "",
   [ONBOARDING_STAGES.SUB_ACCOUNT_PROVISIONED]:
     process.env.GHL_STAGE_SUB_ACCOUNT_PROVISIONED || "",
   [ONBOARDING_STAGES.CREDENTIALS_SENT]:
@@ -43,6 +45,17 @@ export const MEMBER_TAGS = {
   A2P_PENDING: "A2P Pending",
   A2P_SUBMITTED: "A2P Submitted",
   A2P_APPROVED: "A2P Approved",
+  A2P_ADDON_PURCHASED: "A2P Addon Purchased",
   PAYMENT_RECEIVED: "Payment Received",
   CHURNED: "Churned",
 } as const;
+
+export const KNOWN_ADDONS = [
+  'a2p',
+  'acq-bot',
+  'dispo-bot',
+  'contracts',
+  'ask-ari',
+] as const;
+
+export type AddonSlug = typeof KNOWN_ADDONS[number];
