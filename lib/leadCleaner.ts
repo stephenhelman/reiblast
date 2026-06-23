@@ -30,6 +30,7 @@ export interface CleaningResult {
     mobileFound: number
     duplicatesRemoved: number
     noPhone: number
+    dnc?: number
     ready: number
   }
 }
@@ -253,6 +254,185 @@ export function cleanLeads(rows: string[][], headers: string[]): CleaningResult 
 function capitalize(word: string): string {
   if (!word) return ''
   return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
+}
+
+/**
+ * Detect which export format a file uses based on its header row.
+ * DealMachine direct exports have a distinct column structure from BatchLeads.
+ */
+export function detectFileFormat(headers: string[]): 'batchleads' | 'dealmachine' | 'unknown' {
+  const normalized = headers.map((h) => h.toLowerCase().trim())
+
+  // DealMachine has these specific columns
+  if (
+    normalized.includes('contact_id') &&
+    normalized.includes('associated_property_address_full') &&
+    normalized.includes('phone_1_type')
+  ) {
+    return 'dealmachine'
+  }
+
+  // BatchLeads has phone type columns but a different structure
+  if (
+    normalized.some((h) => h.includes('phone') && h.includes('type')) &&
+    !normalized.includes('contact_id')
+  ) {
+    return 'batchleads'
+  }
+
+  return 'unknown'
+}
+
+/**
+ * Clean a DIRECT DealMachine CSV export (not the copy-paste formatter).
+ * Selects the first non-DNC wireless phone per contact, dedupes by property
+ * address, and normalizes phone/address formatting for GHL import.
+ */
+export function cleanDealMachineExport(rows: string[][], headers: string[]): CleaningResult {
+  // Build index map from headers
+  const idx: Record<string, number> = {}
+  headers.forEach((h, i) => {
+    idx[h.trim().toLowerCase()] = i
+  })
+
+  const get = (row: string[], key: string): string => {
+    const i = idx[key.toLowerCase()]
+    return i !== undefined ? (row[i] || '').toString().trim() : ''
+  }
+
+  const seenAddresses = new Set<string>()
+  const contacts: CleanedContact[] = []
+
+  const stats = {
+    totalRows: rows.length,
+    mobileFound: 0,
+    duplicatesRemoved: 0,
+    noPhone: 0,
+    dnc: 0,
+    ready: 0,
+  }
+
+  for (const row of rows) {
+    // Skip completely empty rows
+    if (row.every((cell) => !cell?.trim())) continue
+
+    // Extract property address for dedup
+    const fullPropertyAddress = get(row, 'associated_property_address_full')
+
+    const normalizedAddr = fullPropertyAddress
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .replace(/[.,]/g, '')
+      .trim()
+
+    // Deduplicate by property address
+    if (normalizedAddr && seenAddresses.has(normalizedAddr)) {
+      stats.duplicatesRemoved++
+      continue
+    }
+
+    // TODO: add a filter toggle for "Likely Owner only" using the
+    // contact_flags column ("Likely Owner" / "Potential Owner" / "Family" /
+    // "Resident"). For now we include all rows regardless of ownership flags.
+
+    // Find first valid wireless phone that is not flagged DO NOT CALL.
+    // Rows where phone_1/2/3 are all DNC (or non-wireless) fall through to
+    // the noPhone bucket below — no usable number.
+    let selectedPhone = ''
+    let foundPhone = false
+
+    for (let i = 1; i <= 3; i++) {
+      const phone = get(row, `phone_${i}`)
+      const dnc = get(row, `phone_${i}_do_not_call`)
+      const type = get(row, `phone_${i}_type`)
+
+      if (!phone) continue
+
+      // Skip DNC numbers (removed silently — counted for transparency)
+      if (dnc.toLowerCase().includes('do not call')) {
+        stats.dnc++
+        continue
+      }
+
+      // Accept Wireless only (same as the mobile-only filter)
+      if (type.toLowerCase() === 'wireless') {
+        selectedPhone = phone
+        foundPhone = true
+        break
+      }
+    }
+
+    if (!foundPhone) {
+      stats.noPhone++
+      continue
+    }
+
+    // Mark address as seen
+    if (normalizedAddr) {
+      seenAddresses.add(normalizedAddr)
+    }
+
+    // Parse property address components.
+    // associated_property_address_full format:
+    // "123 Main St, Indianapolis, In 46221" (state may be lowercase)
+    let street = ''
+    let city = ''
+    let state = ''
+    let zip = ''
+
+    const addrParts = fullPropertyAddress.split(',').map((p) => p.trim())
+
+    if (addrParts.length >= 3) {
+      street = addrParts[0]
+      city = addrParts[1]
+      // Last part may be "IN 46221"
+      const stateZip = addrParts[2].trim().split(/\s+/)
+      state = stateZip[0]?.toUpperCase() || ''
+      zip = stateZip[1]?.split('-')[0] || ''
+    } else if (addrParts.length === 2) {
+      street = addrParts[0]
+      city = addrParts[1]
+    } else {
+      street = fullPropertyAddress
+    }
+
+    // Use mailing address as fallback for city/state/zip if parsing failed
+    if (!city) {
+      city = get(row, 'primary_mailing_city')
+    }
+    if (!state) {
+      state = get(row, 'primary_mailing_state').toUpperCase()
+    }
+    if (!zip) {
+      zip = get(row, 'primary_mailing_zip').split('-')[0]
+    }
+
+    // Format phone to digits only, then format as XXX-XXX-XXXX for GHL import.
+    // DealMachine exports phones as unformatted 10-digit strings, e.g. "3172958344".
+    const phoneDigits = selectedPhone.replace(/\D/g, '')
+    const formattedPhone =
+      phoneDigits.length === 10
+        ? `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 6)}-${phoneDigits.slice(6)}`
+        : selectedPhone
+
+    const contact: CleanedContact = {
+      firstName: get(row, 'first_name'),
+      lastName: get(row, 'last_name'),
+      propertyAddress: street,
+      city,
+      state,
+      zip,
+      phone: formattedPhone,
+      phoneType: 'Wireless',
+      email: get(row, 'email_address_1'),
+    }
+
+    contacts.push(contact)
+    stats.mobileFound++
+    stats.ready++
+  }
+
+  return { contacts, stats }
 }
 
 export interface DealMachineContact {

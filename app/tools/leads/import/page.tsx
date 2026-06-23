@@ -7,6 +7,8 @@ import MinimalHeader from '@/components/tools/MinimalHeader'
 import { useLocationId } from '@/lib/hooks/use-location-id'
 import {
   cleanLeads,
+  cleanDealMachineExport,
+  detectFileFormat,
   formatDealMachineData,
   downloadCSV,
   type CleanedContact,
@@ -28,6 +30,7 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
   const [file, setFile] = useState<File | null>(null)
   const [fileError, setFileError] = useState('')
   const [result, setResult] = useState<CleaningResult | null>(null)
+  const [detectedFormat, setDetectedFormat] = useState<string>('')
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [processing, setProcessing] = useState(false)
   const [importing, setImporting] = useState(false)
@@ -47,6 +50,7 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
     setFileError('')
     setFile(chosen)
     setResult(null)
+    setDetectedFormat('')
     setImportResult(null)
   }
 
@@ -76,7 +80,22 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
 
       const headers = rows[0].map(String)
       const dataRows = rows.slice(1).map((r) => r.map(String))
-      const cleaned = cleanLeads(dataRows, headers)
+
+      // Auto-detect the export format and route to the matching cleaner
+      const format = detectFileFormat(headers)
+      let cleaned: CleaningResult
+      if (format === 'dealmachine') {
+        cleaned = cleanDealMachineExport(dataRows, headers)
+        setDetectedFormat('DealMachine Export')
+      } else if (format === 'batchleads') {
+        cleaned = cleanLeads(dataRows, headers)
+        setDetectedFormat('BatchLeads Export')
+      } else {
+        // Try BatchLeads as a fallback for unrecognized files
+        cleaned = cleanLeads(dataRows, headers)
+        setDetectedFormat('Unknown Format')
+      }
+
       setResult(cleaned)
       setSelected(new Set(cleaned.contacts.map((_, i) => i)))
       setPage(0)
@@ -220,11 +239,40 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
   // ── Results ──
   return (
     <div className="px-6 py-8 max-w-7xl mx-auto">
+      {/* File name + detected format badge */}
+      {(file || detectedFormat) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14, flexWrap: 'wrap' }}>
+          {file && (
+            <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 14 }}>{file.name}</span>
+          )}
+          {detectedFormat && (
+            <span style={{
+              display: 'inline-block',
+              background: 'rgba(255,255,255,0.08)',
+              color: 'rgba(255,255,255,0.55)',
+              borderRadius: 999,
+              padding: '3px 10px',
+              fontSize: 12,
+            }}>
+              Detected: {detectedFormat}
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Stats bar */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: 12, marginBottom: 24 }}>
+      <div style={{
+        display: 'grid',
+        gridTemplateColumns: `repeat(${result.stats.dnc && result.stats.dnc > 0 ? 5 : 4},1fr)`,
+        gap: 12,
+        marginBottom: 24,
+      }}>
         <StatCard label="Total Rows" value={result.stats.totalRows} color="rgba(255,255,255,0.5)" />
         <StatCard label="Mobile Found" value={result.stats.mobileFound} color={GOLD} />
         <StatCard label="Duplicates Removed" value={result.stats.duplicatesRemoved} color="rgba(255,255,255,0.5)" />
+        {result.stats.dnc !== undefined && result.stats.dnc > 0 && (
+          <StatCard label="DNC Removed" value={result.stats.dnc} color="#f59e0b" />
+        )}
         <StatCard label="Ready to Import" value={result.stats.ready} color="#22c55e" />
       </div>
 
