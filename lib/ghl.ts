@@ -606,12 +606,19 @@ export type SubAccountCustomValues = {
   copyright_year: string
   service_area: string
   effective_date: string
+  website_url?: string
+  terms_link?: string
+  privacy_policy_link?: string
+  optin_form_link?: string
+  business_email?: string
+  business_phone?: string
+  rep_name?: string
 }
 
 export async function populateSubAccountCustomValues(
   locationId: string,
   values: Partial<SubAccountCustomValues>,
-): Promise<void> {
+): Promise<boolean> {
   const token = await getLocationToken(locationId)
   const locationHeaders = {
     Authorization: `Bearer ${token}`,
@@ -624,7 +631,7 @@ export async function populateSubAccountCustomValues(
   })
   if (!listRes.ok) {
     console.error('[GHL] Failed to list custom values for location:', locationId, await listRes.text())
-    return
+    return false
   }
   const listData = await listRes.json()
   const existing: Array<{ id: string; name: string }> = listData?.customValues ?? []
@@ -635,20 +642,25 @@ export async function populateSubAccountCustomValues(
     cvByKey[cv.name.toLowerCase().replace(/\s+/g, '_')] = cv
   }
 
-  await Promise.all(
-    Object.entries(values).map(([key, value]) => {
+  const results = await Promise.all(
+    Object.entries(values).map(async ([key, value]) => {
       const cv = cvByKey[key]
       if (!cv) {
         console.warn(`[GHL] Custom value "${key}" not found in sub-account — check snapshot`)
-        return Promise.resolve()
+        return true
       }
-      return fetch(`${GHL_BASE_URL}/locations/${locationId}/customValues/${cv.id}`, {
+      const res = await fetch(`${GHL_BASE_URL}/locations/${locationId}/customValues/${cv.id}`, {
         method: 'PUT',
         headers: locationHeaders,
         body: JSON.stringify({ name: cv.name, value }),
       })
+      if (!res.ok) {
+        console.error(`[GHL] Failed to update custom value "${key}" for location:`, locationId, await res.text())
+      }
+      return res.ok
     }),
   )
+  return results.every(Boolean)
 }
 
 export async function populateA2PSite(
