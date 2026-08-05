@@ -228,7 +228,7 @@ function MarketplaceContent() {
                         on your account.
                       </p>
                       <a
-                        href="mailto:support@mail.reiblast.app"
+                        href="mailto:support@reiblast.app"
                         className="inline-block text-gold text-sm mt-3 hover:underline"
                       >
                         Need help with your A2P setup?
@@ -499,10 +499,10 @@ function MarketplaceContent() {
                 {/* Support */}
                 <p className="text-white/40 text-xs mb-1.5">Need help?</p>
                 <a
-                  href="mailto:support@mail.reiblast.app"
+                  href="mailto:support@reiblast.app"
                   className="text-gold text-xs hover:underline"
                 >
-                  support@mail.reiblast.app
+                  support@reiblast.app
                 </a>
               </div>
             </div>

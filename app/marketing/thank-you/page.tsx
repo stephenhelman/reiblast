@@ -225,10 +225,10 @@ export default function ThankYouPage({
           <p className="text-gray-500 text-sm mt-6">
             Questions?{" "}
             <a
-              href="mailto:support@mail.reiblast.app"
+              href="mailto:support@reiblast.app"
               className="text-gold hover:underline"
             >
-              support@mail.reiblast.app
+              support@reiblast.app
             </a>
           </p>
         </div>

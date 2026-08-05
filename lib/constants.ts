@@ -8,7 +8,7 @@ export const MIN_ASSIGNMENT_FEE = 5000;
 export const GHL_APP_URL = "https://app.reiblast.app";
 export const TOOLS_URL = "https://tools.reiblast.app";
 export const MARKETING_URL = "https://reiblast.app";
-export const SUPPORT_EMAIL = "support@mail.reiblast.app";
+export const SUPPORT_EMAIL = "support@reiblast.app";
 
 export const ONBOARDING_STAGES = {
   PAYMENT_RECEIVED: "Payment Received",

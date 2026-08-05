@@ -240,7 +240,7 @@ export default function FeaturesPage() {
               We can point you in the right direction.
             </p>
             <a
-              href="mailto:support@mail.reiblast.app"
+              href="mailto:support@reiblast.app"
               className="text-gold text-sm font-semibold hover:text-gold-hover transition-colors"
             >
               Contact Us →

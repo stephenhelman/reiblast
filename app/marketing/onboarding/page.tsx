@@ -360,10 +360,10 @@ function VerificationFlow() {
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 text-red-400 text-sm leading-relaxed">
                 Too many attempts. Contact{' '}
                 <a
-                  href="mailto:support@mail.reiblast.app"
+                  href="mailto:support@reiblast.app"
                   className="underline hover:text-red-300"
                 >
-                  support@mail.reiblast.app
+                  support@reiblast.app
                 </a>
               </div>
             ) : (

@@ -143,10 +143,10 @@ export default function AboutPage() {
           </a>
           <div>
             <a
-              href="mailto:support@mail.reiblast.app"
+              href="mailto:support@reiblast.app"
               className="text-white/40 text-sm hover:text-white/70 transition-colors"
             >
-              Questions first? support@mail.reiblast.app
+              Questions first? support@reiblast.app
             </a>
           </div>
         </div>
