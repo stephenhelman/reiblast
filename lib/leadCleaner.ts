@@ -260,7 +260,9 @@ function capitalize(word: string): string {
  * Detect which export format a file uses based on its header row.
  * DealMachine direct exports have a distinct column structure from BatchLeads.
  */
-export function detectFileFormat(headers: string[]): 'batchleads' | 'dealmachine' | 'unknown' {
+export function detectFileFormat(
+  headers: string[]
+): 'batchleads' | 'dealmachine' | 'propstream' | 'unknown' {
   const normalized = headers.map((h) => h.toLowerCase().trim())
 
   // DealMachine has these specific columns
@@ -272,6 +274,16 @@ export function detectFileFormat(headers: string[]): 'batchleads' | 'dealmachine
     return 'dealmachine'
   }
 
+  // PropStream: spaced "phone 1 dnc" + "mail street address", no contact_id.
+  // Must be checked BEFORE batchleads (PropStream also has phone+type headers).
+  if (
+    normalized.includes('phone 1 dnc') &&
+    normalized.includes('mail street address') &&
+    !normalized.includes('contact_id')
+  ) {
+    return 'propstream'
+  }
+
   // BatchLeads has phone type columns but a different structure
   if (
     normalized.some((h) => h.includes('phone') && h.includes('type')) &&
@@ -281,6 +293,113 @@ export function detectFileFormat(headers: string[]): 'batchleads' | 'dealmachine
   }
 
   return 'unknown'
+}
+
+/**
+ * Clean a PropStream contact export.
+ * Walks phone slots 1-5 and selects the first Cell number whose DNC field
+ * is blank, skipping any DNC cells along the way. A row is only dropped
+ * (dnc) when every cell it has is DNC; rows with no cell at all are noPhone.
+ */
+export function cleanPropstreamExport(rows: string[][], headers: string[]): CleaningResult {
+  const idx: Record<string, number> = {}
+  headers.forEach((h, i) => {
+    idx[h.toLowerCase().trim()] = i
+  })
+  const get = (row: string[], key: string): string => {
+    const i = idx[key.toLowerCase()]
+    return i === undefined ? '' : (row[i] ?? '').trim()
+  }
+
+  const contacts: CleanedContact[] = []
+  const seen = new Set<string>()
+  let mobileFound = 0
+  let dnc = 0
+  let noPhone = 0
+  let duplicatesRemoved = 0
+  let totalRows = 0
+
+  for (const row of rows) {
+    // skip fully empty rows
+    if (!row.some((c) => (c ?? '').trim() !== '')) continue
+    totalRows++
+
+    // Walk slots 1-5: take the first Cell whose DNC field is blank,
+    // skipping (not stopping at) any Cell that is DNC.
+    let selectedPhone = ''
+    let hadAnyCell = false
+    for (let i = 1; i <= 5; i++) {
+      const rawPhone = get(row, `phone ${i}`)
+      if (!rawPhone) continue
+      if (get(row, `phone ${i} type`).toLowerCase() !== 'cell') continue
+      hadAnyCell = true
+      if (get(row, `phone ${i} dnc`)) continue // DNC — skip, keep looking
+      selectedPhone = rawPhone
+      break
+    }
+
+    if (!hadAnyCell) {
+      noPhone++
+      continue
+    }
+    mobileFound++
+
+    if (!selectedPhone) {
+      // every cell present was DNC
+      dnc++
+      continue
+    }
+
+    const phoneDigits = selectedPhone.replace(/\D/g, '')
+    const phone =
+      phoneDigits.length === 10
+        ? `${phoneDigits.slice(0, 3)}-${phoneDigits.slice(3, 6)}-${phoneDigits.slice(6)}`
+        : selectedPhone
+
+    if (seen.has(phone)) {
+      duplicatesRemoved++
+      continue
+    }
+    seen.add(phone)
+
+    // fall back to company name for LLC-owned rows with no person name
+    const firstName = get(row, 'first name') || get(row, 'company name')
+    const lastName = get(row, 'last name')
+
+    // first non-empty email of the four
+    let email = ''
+    for (let i = 1; i <= 4; i++) {
+      const e = get(row, `email ${i}`)
+      if (e) {
+        email = e
+        break
+      }
+    }
+
+    contacts.push({
+      firstName,
+      lastName,
+      propertyAddress: get(row, 'street address'),
+      city: get(row, 'city'),
+      state: get(row, 'state'),
+      zip: get(row, 'zip'),
+      phone,
+      phoneType: 'Cell',
+      email,
+    })
+  }
+
+  return {
+    contacts,
+    stats: {
+      totalRows,
+      mobileFound,
+      duplicatesRemoved,
+      noPhone,
+      dnc,
+      ready: contacts.length,
+    },
+  }
 }
 
 /**

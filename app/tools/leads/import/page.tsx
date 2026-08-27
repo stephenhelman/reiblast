@@ -8,6 +8,7 @@ import { useLocationId } from '@/lib/hooks/use-location-id'
 import {
   cleanLeads,
   cleanDealMachineExport,
+  cleanPropstreamExport,
   detectFileFormat,
   formatDealMachineData,
   downloadCSV,
@@ -87,6 +88,9 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
       if (format === 'dealmachine') {
         cleaned = cleanDealMachineExport(dataRows, headers)
         setDetectedFormat('DealMachine Export')
+      } else if (format === 'propstream') {
+        cleaned = cleanPropstreamExport(dataRows, headers)
+        setDetectedFormat('PropStream Export')
       } else if (format === 'batchleads') {
         cleaned = cleanLeads(dataRows, headers)
         setDetectedFormat('BatchLeads Export')
