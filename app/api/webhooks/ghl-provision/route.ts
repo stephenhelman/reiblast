@@ -8,11 +8,11 @@ import {
   populateSubAccountCustomValues,
   updateSubAccountProfile,
 } from "@/lib/ghl";
+import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 import { MEMBER_TAGS, ONBOARDING_STAGES } from "@/lib/constants";
 
 export async function POST(req: NextRequest) {
-  const secret = req.headers.get("x-reiblast-secret");
-  if (!secret || secret !== process.env.GHL_WEBHOOK_SECRET) {
+  if (!verifyWebhook(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

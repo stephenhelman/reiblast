@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { populateSubAccountCustomValues } from "@/lib/ghl";
+import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 
 export async function POST(req: NextRequest) {
   // 1. Validate secret header
-  const secret = req.headers.get("x-reiblast-secret");
-  if (!secret || secret !== process.env.GHL_WEBHOOK_SECRET) {
+  if (!verifyWebhook(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

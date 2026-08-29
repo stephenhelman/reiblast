@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 import type { AddonSlug } from "@/lib/constants";
 
 const slugMap: Record<string, AddonSlug> = {
@@ -16,8 +17,7 @@ const slugMap: Record<string, AddonSlug> = {
 };
 
 export async function POST(req: NextRequest) {
-  const incomingSecret = req.headers.get("x-reiblast-secret");
-  if (!incomingSecret || incomingSecret !== process.env.GHL_WEBHOOK_SECRET) {
+  if (!verifyWebhook(req)) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
