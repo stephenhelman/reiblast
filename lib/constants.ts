@@ -45,6 +45,7 @@ export const MEMBER_TAGS = {
   A2P_ADDON_PURCHASED: "A2P Addon Purchased",
   PAYMENT_RECEIVED: "Payment Received",
   CHURNED: "Churned",
+  PAYMENT_FAILED: "payment_failed",
 } as const;
 
 export const KNOWN_ADDONS = [
