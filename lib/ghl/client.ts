@@ -13,7 +13,7 @@ export class GhlApiError extends Error {
 
 function agencyHeaders() {
   return {
-    Authorization: `Bearer ${process.env.GHL_AGENCY_PIT}`,
+    Authorization: `Bearer ${process.env.GHL_AGENCY_API_KEY}`,
     "Content-Type": "application/json",
     Version: "v3",
   };
