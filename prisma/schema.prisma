@@ -21,6 +21,7 @@ model User {
   // inactive — cancelled or deactivated
   // suspended — payment issue or violation
   status              String   @default("pending_onboarding")
+  warningCount        Int      @default(0)
 
   // Business / A2P info
   businessName        String?
@@ -57,6 +58,19 @@ model User {
 
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+
+  @@unique([ghlLocationId], map: "User_ghlLocationId_key")
+}
+
+model Transaction {
+  id            String   @id @default(cuid())
+  userId        String
+  ghlLocationId String
+  dedupeKey     String   @unique
+  paymentStatus String
+  amountCents   Int
+  currency      String
+  createdAt     DateTime @default(now())
 }
 
 model PromoCode {
