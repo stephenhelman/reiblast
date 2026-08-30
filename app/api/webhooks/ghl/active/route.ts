@@ -2,8 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 import { unpauseLocation } from "@/lib/ghl/client";
-import { removeTag } from "@/lib/ghl";
-import { MEMBER_TAGS } from "@/lib/constants";
 
 export async function POST(req: NextRequest) {
   if (!verifyWebhook(req)) {
@@ -18,7 +16,6 @@ export async function POST(req: NextRequest) {
   }
 
   const email = (body.email as string) || "";
-  const contactId = (body.contact_id as string) || (body.contactId as string) || "";
 
   if (!email) {
     console.log("[Active webhook] No email, ignoring");
@@ -39,9 +36,6 @@ export async function POST(req: NextRequest) {
       where: { id: user.id },
       data: { warningCount: 0 },
     });
-    if (contactId) {
-      await removeTag(contactId, MEMBER_TAGS.PAYMENT_FAILED);
-    }
   }
 
   if (wasSuspended && user.ghlLocationId) {

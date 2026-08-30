@@ -57,9 +57,10 @@ reactivation path, whether the account is coming back from a billing pause
 or being manually reactivated by an admin.
 
 - Resolves the `User` by `email`. No-op if no user found.
-- If `warningCount > 0`: resets it to 0 and removes the `payment_failed`
-  tag from the contact, mirroring the same reset the success path in
-  `payment-failed` does.
+- If `warningCount > 0`: resets it to 0. Does not touch GHL tags — the
+  active-stage automation already strips all tags and re-adds the
+  appropriate ones for that stage, so this route doesn't need to (and
+  shouldn't) manage `payment_failed` itself here.
 - If `status === "suspended"`: calls `unpauseLocation()` (same `/saas/pause`
   endpoint as `pauseLocation()`, with `paused: false`) to un-pause the
   sub-account.
