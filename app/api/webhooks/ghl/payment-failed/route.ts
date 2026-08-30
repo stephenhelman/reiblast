@@ -108,14 +108,10 @@ export async function POST(req: NextRequest) {
 
   const action = newCount >= 3 ? "threshold" : "warn";
 
-  if (contactId) {
-    if (action === "threshold") {
-      // Server drives the pause directly — moving the opportunity here
-      // triggers the separate `pause` webhook, which pauses the sub-account.
-      await moveToStage(contactId, ONBOARDING_STAGES.PAUSED, name);
-    } else if (wasZero) {
-      await moveToStage(contactId, ONBOARDING_STAGES.FAILED_PAYMENT, name);
-    }
+  if (contactId && action === "threshold") {
+    // Server drives the pause directly — moving the opportunity here
+    // triggers the separate `pause` webhook, which pauses the sub-account.
+    await moveToStage(contactId, ONBOARDING_STAGES.PAUSED, name);
   }
 
   return NextResponse.json({ action, warningCount: newCount, wasZero });

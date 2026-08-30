@@ -1,8 +1,11 @@
 # Payment Dunning Webhook System
 
-Two GHL webhooks drive payment-failure dunning. The server is the single
-source of truth for pipeline moves — it calls `moveToStage()` directly;
-GHL workflows do not decide moves and should stay dumb triggers.
+Two GHL webhooks drive payment-failure dunning. GHL owns the move into
+Failed Payment on its own (via its own workflow on the raw payment-failed
+event) — the app doesn't touch that stage. The server is the sole authority
+for the one move that actually matters operationally: it calls
+`moveToStage()` into Paused directly once `warningCount` hits 3, rather
+than relying on a GHL workflow to track the count and decide when to pause.
 
 ## Routes
 
@@ -21,15 +24,15 @@ Fires on a GHL payment event (both failure and success, distinguished by
   if it's `>= 0` the failure was already covered elsewhere and nothing
   happens. If the balance is negative, the `payment_failed` tag is added
   and `warningCount` is incremented.
-- On first failure since the last reset (`wasZero`), the route itself calls
-  `moveToStage(contactId, "Failed Payment", ...)`.
+- `wasZero` (this was the user's first failure since their last reset) is
+  returned for observability only — the route does not move the opportunity
+  on it. GHL's own workflow handles the move into Failed Payment.
 - At `warningCount >= 3` ("threshold"), the route itself calls
-  `moveToStage(contactId, "Paused", ...)` instead. That opportunity move is
-  what fires the `pause` webhook below — GHL doesn't decide to pause on its
-  own, it's just relaying a stage-change trigger the server caused.
+  `moveToStage(contactId, "Paused", ...)`. That opportunity move is what
+  fires the `pause` webhook below — GHL doesn't decide to pause on its own,
+  it's just relaying a stage-change trigger the server caused.
 - Returns `{ action: "reset" | "none" | "warn" | "threshold", warningCount, wasZero }`
-  for observability/debugging — GHL automations should not branch on this
-  response since the server has already made every move it's going to make.
+  for observability/debugging.
 
 ### `POST /api/webhooks/ghl/pause`
 
@@ -52,9 +55,9 @@ background jobs or post-response processing.
 
 ## Pipeline stages
 
-- **Failed Payment** — display only. No GHL triggers/automations live on
-  this stage; it exists so staff can see who's in a failing-payment state.
-  The server moves a contact here on their first unresolved failure.
+- **Failed Payment** — display only. No app code moves a contact here;
+  GHL's own workflow handles it directly off the raw payment-failed event.
+  Staff use it to see who's in a failing-payment state.
 - **Paused** — the trigger for the killswitch. The server moves a contact
   here once `warningCount` hits 3 with a still-negative wallet balance;
   the move itself is what fires `pause`, which calls `pauseLocation()` and
@@ -74,14 +77,15 @@ is billing-related. A stale tag left over from a prior failure would
 wrongly force the wallet-balance gate onto a later manual/non-billing
 pause.
 
-## The server dictates all pipeline moves
+## The server dictates the Paused move
 
-`payment-failed` calls `moveToStage()` directly for both Failed Payment and
-Paused — GHL never decides a move on its own. This keeps the dedupe,
-wallet-balance, and warning-counting logic in one place instead of split
-across app code and GHL workflow conditions, and it means there's no
-GHL-side state (a synced custom field, a workflow counter) that could drift
-from `User.warningCount` in the database. `pause` is a second, separate
-webhook rather than something `payment-failed` calls inline, so that a
-contact manually moved to Paused by an admin — with no billing failure
-involved — still goes through the same suspension path.
+`payment-failed` calls `moveToStage()` directly into Paused once
+`warningCount` hits 3 — GHL never tracks the warning count itself or
+decides when to pause. This keeps the dedupe, wallet-balance, and
+warning-counting logic in one place instead of split across app code and a
+GHL workflow condition, and it means there's no GHL-side state (a synced
+custom field, a workflow counter) that could drift from `User.warningCount`
+in the database. `pause` is a second, separate webhook rather than
+something `payment-failed` calls inline, so that a contact manually moved
+to Paused by an admin — with no billing failure involved — still goes
+through the same suspension path.

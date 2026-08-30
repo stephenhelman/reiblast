@@ -18,7 +18,6 @@ export const ONBOARDING_STAGES = {
   CREDENTIALS_SENT: "Credentials Sent",
   A2P_SUBMITTED: "A2P Submitted",
   ACTIVE: "Active Member",
-  FAILED_PAYMENT: "Failed Payment",
   PAUSED: "Paused",
 } as const;
 
@@ -35,8 +34,6 @@ export const ONBOARDING_STAGE_IDS: Record<string, string> = {
     process.env.GHL_STAGE_CREDENTIALS_SENT || "",
   [ONBOARDING_STAGES.A2P_SUBMITTED]: process.env.GHL_STAGE_A2P_SUBMITTED || "",
   [ONBOARDING_STAGES.ACTIVE]: process.env.GHL_STAGE_ACTIVE || "",
-  [ONBOARDING_STAGES.FAILED_PAYMENT]:
-    process.env.GHL_STAGE_FAILED_PAYMENT || "",
   [ONBOARDING_STAGES.PAUSED]: process.env.GHL_STAGE_PAUSED || "",
 };
 
