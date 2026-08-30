@@ -4,8 +4,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 import { getWalletBalance } from "@/lib/ghl/client";
-import { addTag, removeTag } from "@/lib/ghl";
-import { MEMBER_TAGS } from "@/lib/constants";
+import { addTag, removeTag, moveToStage } from "@/lib/ghl";
+import { MEMBER_TAGS, ONBOARDING_STAGES } from "@/lib/constants";
 
 export async function POST(req: NextRequest) {
   if (!verifyWebhook(req)) {
@@ -20,6 +20,7 @@ export async function POST(req: NextRequest) {
   }
 
   const email = (body.email as string) || "";
+  const name = (body.full_name as string) || "";
   const contactId = (body.contact_id as string) || (body.contactId as string) || "";
   const customData = body.customData as Record<string, unknown> | undefined;
   const transactionId = (customData?.transaction_id as string) || "";
@@ -105,9 +106,17 @@ export async function POST(req: NextRequest) {
     data: { warningCount: newCount },
   });
 
-  return NextResponse.json({
-    action: newCount >= 3 ? "threshold" : "warn",
-    warningCount: newCount,
-    wasZero,
-  });
+  const action = newCount >= 3 ? "threshold" : "warn";
+
+  if (contactId) {
+    if (action === "threshold") {
+      // Server drives the pause directly — moving the opportunity here
+      // triggers the separate `pause` webhook, which pauses the sub-account.
+      await moveToStage(contactId, ONBOARDING_STAGES.PAUSED, name);
+    } else if (wasZero) {
+      await moveToStage(contactId, ONBOARDING_STAGES.FAILED_PAYMENT, name);
+    }
+  }
+
+  return NextResponse.json({ action, warningCount: newCount, wasZero });
 }
