@@ -1,6 +1,6 @@
 # Payment Dunning Webhook System
 
-Two GHL webhooks drive payment-failure dunning. GHL owns the move into
+Three GHL webhooks drive payment-failure dunning. GHL owns the move into
 Failed Payment on its own (via its own workflow on the raw payment-failed
 event) — the app doesn't touch that stage. The server is the sole authority
 for the one move that actually matters operationally: it calls
@@ -50,7 +50,23 @@ manually by an admin moving the opportunity themselves (non-billing).
 - On proceeding: calls `pauseLocation()` and sets `user.status = "suspended"`.
 - Returns `{ action: "none" | "paused" }`.
 
-Both routes do all of their work synchronously before responding — no
+### `POST /api/webhooks/ghl/active`
+
+Fires when an opportunity is moved to the Active pipeline stage — the
+reactivation path, whether the account is coming back from a billing pause
+or being manually reactivated by an admin.
+
+- Resolves the `User` by `email`. No-op if no user found.
+- If `warningCount > 0`: resets it to 0 and removes the `payment_failed`
+  tag from the contact, mirroring the same reset the success path in
+  `payment-failed` does.
+- If `status === "suspended"`: calls `unpauseLocation()` (same `/saas/pause`
+  endpoint as `pauseLocation()`, with `paused: false`) to un-pause the
+  sub-account.
+- Always sets `user.status = "active"`.
+- Returns `{ action: "activated", hadWarnings, wasSuspended }`.
+
+All three routes do their work synchronously before responding — no
 background jobs or post-response processing.
 
 ## Pipeline stages

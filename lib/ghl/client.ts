@@ -41,21 +41,35 @@ export async function getWalletBalance(locationId: string): Promise<number> {
   return data.balance as number;
 }
 
-/**
- * Pauses a location's subscription (billing killswitch).
- */
-export async function pauseLocation(locationId: string): Promise<void> {
+async function setLocationPaused(
+  locationId: string,
+  paused: boolean,
+): Promise<void> {
   const companyId = process.env.GHL_COMPANY_ID;
   const endpoint = `/saas/pause/${locationId}`;
 
   const res = await fetch(`${GHL_BASE_URL}${endpoint}`, {
     method: "POST",
     headers: agencyHeaders(),
-    body: JSON.stringify({ paused: true, companyId }),
+    body: JSON.stringify({ paused, companyId }),
   });
 
   if (!res.ok) {
     const errText = await res.text();
     throw new GhlApiError(endpoint, res.status, errText);
   }
+}
+
+/**
+ * Pauses a location's subscription (billing killswitch).
+ */
+export async function pauseLocation(locationId: string): Promise<void> {
+  return setLocationPaused(locationId, true);
+}
+
+/**
+ * Resumes a previously-paused location's subscription.
+ */
+export async function unpauseLocation(locationId: string): Promise<void> {
+  return setLocationPaused(locationId, false);
 }
