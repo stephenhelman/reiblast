@@ -1,5 +1,5 @@
-import { NextRequest, NextResponse } from 'next/server'
-import { prisma } from '@/lib/prisma'
+import { NextRequest, NextResponse } from "next/server";
+import { prisma } from "@/lib/prisma";
 
 const LAND_SYSTEM_PROMPT = `You are a professional real estate wholesaler specializing in land and vacant lot acquisitions. You analyze a subject property and comparable land sales to return a structured JSON object.
 
@@ -161,38 +161,43 @@ OUTPUT — valid JSON only, no markdown, no preamble:
   "narrative": "string",
   "risks": ["string"],
   "warnings": ["string"]
-}`
+}`;
 
 export async function POST(req: NextRequest) {
-  let body: { subject?: unknown; comps?: unknown[]; contextParcels?: unknown[]; locationId?: string }
+  let body: {
+    subject?: unknown;
+    comps?: unknown[];
+    contextParcels?: unknown[];
+    locationId?: string;
+  };
   try {
-    body = await req.json()
+    body = await req.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
   if (!body.subject) {
-    return NextResponse.json({ error: 'subject is required' }, { status: 400 })
+    return NextResponse.json({ error: "subject is required" }, { status: 400 });
   }
 
-  const locationId = body.locationId ?? ''
-  const start = Date.now()
+  const locationId = body.locationId ?? "";
+  const start = Date.now();
 
   try {
-    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
+    const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
       headers: {
-        'x-api-key': process.env.ANTHROPIC_API_KEY!,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
+        "x-api-key": process.env.ANTHROPIC_API_KEY!,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: "claude-sonnet-5",
         max_tokens: 2000,
         system: LAND_SYSTEM_PROMPT,
         messages: [
           {
-            role: 'user',
+            role: "user",
             content: JSON.stringify({
               subject: body.subject,
               comps: body.comps ?? [],
@@ -201,40 +206,60 @@ export async function POST(req: NextRequest) {
           },
         ],
       }),
-    })
+    });
 
-    const durationMs = Date.now() - start
+    const durationMs = Date.now() - start;
 
-    await prisma.apiCall.create({
-      data: {
-        locationId,
-        resource: 'claude',
-        endpoint: '/api/analyzer/land',
-        statusCode: claudeRes.status,
-        durationMs,
-      },
-    }).catch(() => {})
+    await prisma.apiCall
+      .create({
+        data: {
+          locationId,
+          resource: "claude",
+          endpoint: "/api/analyzer/land",
+          statusCode: claudeRes.status,
+          durationMs,
+        },
+      })
+      .catch(() => {});
 
     if (!claudeRes.ok) {
-      const err = await claudeRes.text()
-      console.error('[analyzer/land] Claude API error:', err)
-      return NextResponse.json({ error: 'Analysis service unavailable' }, { status: 500 })
+      const err = await claudeRes.text();
+      console.error("[analyzer/land] Claude API error:", err);
+      return NextResponse.json(
+        { error: "Analysis service unavailable" },
+        { status: 500 },
+      );
     }
 
-    const claudeData = await claudeRes.json()
-    let text = claudeData.content?.[0]?.text || ''
-    text = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
+    const claudeData = await claudeRes.json();
+    let text = claudeData.content?.[0]?.text || "";
+    text = text
+      .replace(/^```(?:json)?\n?/, "")
+      .replace(/\n?```$/, "")
+      .trim();
 
-    const analysis = JSON.parse(text)
+    const analysis = JSON.parse(text);
 
-    const required = ['comps', 'estimated_value', 'builder_activity', 'exit_strategy', 'narrative', 'risks', 'warnings']
+    const required = [
+      "comps",
+      "estimated_value",
+      "builder_activity",
+      "exit_strategy",
+      "narrative",
+      "risks",
+      "warnings",
+    ];
     for (const key of required) {
-      if (!(key in analysis)) throw new Error(`Missing field in analysis: ${key}`)
+      if (!(key in analysis))
+        throw new Error(`Missing field in analysis: ${key}`);
     }
 
-    return NextResponse.json(analysis)
+    return NextResponse.json(analysis);
   } catch (err) {
-    console.error('[analyzer/land] error:', err)
-    return NextResponse.json({ error: 'Failed to generate land analysis' }, { status: 500 })
+    console.error("[analyzer/land] error:", err);
+    return NextResponse.json(
+      { error: "Failed to generate land analysis" },
+      { status: 500 },
+    );
   }
 }

@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from "next/server";
 
 const ARV_SYSTEM_PROMPT = `You are a real estate deal analyzer for wholesale investors. You analyze a subject property and comparable sales and return a structured JSON object. You never fabricate data. You only analyze what is provided.
 
@@ -92,67 +92,93 @@ OUTPUT — return only valid JSON, no markdown, no preamble:
   },
   "narrative": "string",
   "warnings": ["string"]
-}`
+}`;
 
 // daysSinceSold is calculated client-side at request time using current Date.now()
 // Never trust stored daysSinceSold values — always recalculate from saleDate before sending
 export async function POST(req: NextRequest) {
-  let body: { subject?: unknown; comps?: unknown[] }
+  let body: { subject?: unknown; comps?: unknown[] };
   try {
-    body = await req.json()
+    body = await req.json();
   } catch {
-    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 })
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
   if (!body.subject || !body.comps) {
-    return NextResponse.json({ error: 'subject and comps are required' }, { status: 400 })
+    return NextResponse.json(
+      { error: "subject and comps are required" },
+      { status: 400 },
+    );
   }
 
   if (!Array.isArray(body.comps) || body.comps.length < 1) {
-    return NextResponse.json({ error: 'Select at least 1 comp' }, { status: 400 })
+    return NextResponse.json(
+      { error: "Select at least 1 comp" },
+      { status: 400 },
+    );
   }
 
   try {
-    const claudeRes = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
+    const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
       headers: {
-        'x-api-key': process.env.ANTHROPIC_API_KEY!,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
+        "x-api-key": process.env.ANTHROPIC_API_KEY!,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
       },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
+        model: "claude-sonnet-5",
         max_tokens: 1500,
         system: ARV_SYSTEM_PROMPT,
         messages: [
           {
-            role: 'user',
-            content: JSON.stringify({ subject: body.subject, comps: body.comps }),
+            role: "user",
+            content: JSON.stringify({
+              subject: body.subject,
+              comps: body.comps,
+            }),
           },
         ],
       }),
-    })
+    });
 
     if (!claudeRes.ok) {
-      const err = await claudeRes.text()
-      console.error('[analyzer/arv] Claude API error:', err)
-      return NextResponse.json({ error: 'Analysis service unavailable' }, { status: 500 })
+      const err = await claudeRes.text();
+      console.error("[analyzer/arv] Claude API error:", err);
+      return NextResponse.json(
+        { error: "Analysis service unavailable" },
+        { status: 500 },
+      );
     }
 
-    const claudeData = await claudeRes.json()
-    let text = claudeData.content?.[0]?.text || ''
-    text = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '').trim()
+    const claudeData = await claudeRes.json();
+    let text = claudeData.content?.[0]?.text || "";
+    text = text
+      .replace(/^```(?:json)?\n?/, "")
+      .replace(/\n?```$/, "")
+      .trim();
 
-    const analysis = JSON.parse(text)
+    const analysis = JSON.parse(text);
 
-    const required = ['comps', 'arv', 'as_is', 'exit_strategy', 'narrative', 'warnings']
+    const required = [
+      "comps",
+      "arv",
+      "as_is",
+      "exit_strategy",
+      "narrative",
+      "warnings",
+    ];
     for (const key of required) {
-      if (!(key in analysis)) throw new Error(`Missing field in analysis: ${key}`)
+      if (!(key in analysis))
+        throw new Error(`Missing field in analysis: ${key}`);
     }
 
-    return NextResponse.json(analysis)
+    return NextResponse.json(analysis);
   } catch (err) {
-    console.error('[analyzer/arv] error:', err)
-    return NextResponse.json({ error: 'Failed to generate analysis' }, { status: 500 })
+    console.error("[analyzer/arv] error:", err);
+    return NextResponse.json(
+      { error: "Failed to generate analysis" },
+      { status: 500 },
+    );
   }
 }
