@@ -1,5 +1,5 @@
-import Link from 'next/link'
-import { LogoStacked } from '../shared/Logo'
+import Link from "next/link";
+import { LogoStacked } from "../shared/Logo";
 
 export default function Hero() {
   return (
@@ -15,23 +15,26 @@ export default function Hero() {
         </div>
 
         <h1 className="text-5xl md:text-7xl font-extrabold leading-[1.05] mb-6 tracking-tight">
-          <span className="text-white">From List to Blast —</span>
+          <span className="text-white">From List to Blast</span>
           <br />
           <span
             style={{
-              background: 'linear-gradient(90deg, #F5C842 0%, #e0b538 100%)',
-              WebkitBackgroundClip: 'text',
-              WebkitTextFillColor: 'transparent',
-              backgroundClip: 'text',
+              background: "linear-gradient(90deg, #F5C842 0%, #e0b538 100%)",
+              WebkitBackgroundClip: "text",
+              WebkitTextFillColor: "transparent",
+              backgroundClip: "text",
             }}
           >
             Close More Deals, Faster
           </span>
         </h1>
 
-        <p className="text-xl md:text-2xl mb-10 max-w-3xl leading-relaxed" style={{ color: '#888888' }}>
-          The wholesale operating system built for investors who text. Pull your list, blast
-          your market, and close deals — all from one place.
+        <p
+          className="text-xl md:text-2xl mb-10 max-w-3xl leading-relaxed"
+          style={{ color: "#888888" }}
+        >
+          The wholesale operating system built for investors who text. Pull your
+          list, blast your market, and close deals, all from one place.
         </p>
 
         <div className="flex flex-col sm:flex-row gap-4">
@@ -40,7 +43,7 @@ export default function Hero() {
             className="bg-gold text-black font-bold text-lg px-8 py-4 rounded-xl hover:bg-gold-hover transition-colors"
             style={{ fontWeight: 700 }}
           >
-            Get Started — $79/mo
+            Get Started — $57/mo
           </Link>
           <Link
             href="/features"
@@ -50,10 +53,10 @@ export default function Hero() {
           </Link>
         </div>
 
-        <p className="mt-8 text-sm" style={{ color: '#888888' }}>
+        <p className="mt-8 text-sm" style={{ color: "#888888" }}>
           No contracts. Cancel anytime.
         </p>
       </div>
     </section>
-  )
+  );
 }

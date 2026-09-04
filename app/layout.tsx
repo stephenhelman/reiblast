@@ -25,11 +25,6 @@ export default function RootLayout({
     <html lang="en">
       <body className={`${inter.className} bg-black text-white antialiased`}>
         {children}
-        <script
-          src="https://widgets.leadconnectorhq.com/loader.js"
-          data-resources-url="https://widgets.leadconnectorhq.com/chat-widget/loader.js"
-          data-widget-id="6a91db99bde3d5bf50985574"
-        ></script>
       </body>
     </html>
   );

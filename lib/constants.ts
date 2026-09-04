@@ -44,14 +44,12 @@ export const MEMBER_TAGS = {
   A2P_PENDING: "A2P Pending",
   A2P_SUBMITTED: "A2P Submitted",
   A2P_APPROVED: "A2P Approved",
-  A2P_ADDON_PURCHASED: "A2P Addon Purchased",
   PAYMENT_RECEIVED: "Payment Received",
   CHURNED: "Churned",
   PAYMENT_FAILED: "payment_failed",
 } as const;
 
 export const KNOWN_ADDONS = [
-  'a2p',
   'acq-bot',
   'dispo-bot',
   'contracts',

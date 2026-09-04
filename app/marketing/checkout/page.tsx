@@ -14,19 +14,11 @@ const CORE_FEATURES = [
   "New tools added monthly",
 ];
 
-const A2P_FEATURES = [
-  "Custom domain purchase and setup",
-  "Cloudflare DNS configuration",
-  "A2P compliance website",
-  "Brand and campaign registration",
-  "Email sending domain setup",
-];
-
 const COMING_SOON = [
   {
     name: "AI Acquisitions Bot",
     description:
-      "NEPQ-trained AI that qualifies sellers and books appointments via SMS — automatically.",
+      "NEPQ-trained AI that qualifies sellers and books appointments via SMS, automatically.",
   },
   {
     name: "AI Dispositions Bot",
@@ -45,7 +37,7 @@ const COMING_SOON = [
   },
 ];
 
-const BUNDLE_URL = process.env.NEXT_PUBLIC_CHECKOUT_URL_BUNDLE ?? "#";
+const CORE_URL = process.env.NEXT_PUBLIC_CHECKOUT_URL_CORE ?? "#";
 
 function CheckCircle() {
   return (
@@ -67,7 +59,6 @@ function CheckCircle() {
 
 export default function CheckoutPage() {
   const [coreExpanded, setCoreExpanded] = useState(true);
-  const [a2pExpanded, setA2pExpanded] = useState(false);
 
   return (
     <div className="min-h-screen bg-black px-6 py-12">
@@ -108,10 +99,13 @@ export default function CheckoutPage() {
                       Your complete wholesale operating system.
                     </p>
                     <p className="text-gold font-semibold mt-2">
-                      $79
+                      $57
                       <span className="text-white/40 font-normal text-sm">
                         /mo
                       </span>
+                    </p>
+                    <p className="text-gold/80 text-sm font-medium mt-1">
+                      1 week free, then $57/mo
                     </p>
                   </div>
                   <CheckCircle />
@@ -140,67 +134,6 @@ export default function CheckoutPage() {
                 {coreExpanded && (
                   <ul className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-y-2 gap-x-4">
                     {CORE_FEATURES.map((f) => (
-                      <li
-                        key={f}
-                        className="flex items-start gap-2 text-sm text-white/70"
-                      >
-                        <span className="text-gold mt-0.5 shrink-0">•</span>
-                        {f}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-
-              {/* A2P — mandatory, always included */}
-              <div className="border-gold bg-surface shadow-[0_0_20px_rgba(245,200,66,0.08)] rounded-xl border p-6">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex-1 min-w-0">
-                    <div className="mb-2">
-                      <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-gold text-black">
-                        REQUIRED
-                      </span>
-                    </div>
-                    <p className="text-white font-bold text-lg">
-                      A2P Done-For-You Setup
-                    </p>
-                    <p className="text-white/50 text-sm mt-0.5">
-                      Required to send SMS. We handle everything.
-                    </p>
-                    <p className="text-gold font-semibold mt-2">
-                      $100
-                      <span className="text-white/40 font-normal text-sm">
-                        {" "}
-                        one-time
-                      </span>
-                    </p>
-                  </div>
-                  <CheckCircle />
-                </div>
-
-                <button
-                  onClick={() => setA2pExpanded((v) => !v)}
-                  className="flex items-center gap-1.5 text-white/40 hover:text-white/70 text-xs mt-4 transition-colors"
-                >
-                  <svg
-                    className={`w-3.5 h-3.5 transition-transform ${a2pExpanded ? "rotate-180" : ""}`}
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 9l-7 7-7-7"
-                    />
-                  </svg>
-                  {a2pExpanded ? "Hide features" : "Show features"}
-                </button>
-
-                {a2pExpanded && (
-                  <ul className="mt-3 space-y-1.5">
-                    {A2P_FEATURES.map((f) => (
                       <li
                         key={f}
                         className="flex items-start gap-2 text-sm text-white/70"
@@ -243,15 +176,7 @@ export default function CheckoutPage() {
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <span className="text-white/70 text-sm">REIblast Core</span>
-                  <span className="text-white text-sm font-medium">$79/mo</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-white/70 text-sm">
-                    A2P Done-For-You Setup
-                  </span>
-                  <span className="text-white text-sm font-medium">
-                    $100 one-time
-                  </span>
+                  <span className="text-white text-sm font-medium">$57/mo</span>
                 </div>
               </div>
 
@@ -262,27 +187,31 @@ export default function CheckoutPage() {
                   <span className="text-white/50 text-xs uppercase tracking-wide">
                     Due today
                   </span>
-                  <span className="text-white font-bold">$179</span>
+                  <span className="text-white font-bold">$0</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-white/50 text-xs uppercase tracking-wide">
                     Then monthly
                   </span>
-                  <span className="text-white font-bold">$79/mo</span>
+                  <span className="text-white font-bold">$57/mo</span>
                 </div>
               </div>
+              <p className="text-gold text-xs text-center mt-3 font-medium">
+                1 week free. Cancel before your trial ends and you won&apos;t
+                be charged.
+              </p>
 
               <button
                 onClick={() => {
-                  window.location.href = BUNDLE_URL;
+                  window.location.href = CORE_URL;
                 }}
                 className="mt-6 w-full bg-gold text-black font-bold text-lg py-4 rounded-xl hover:bg-gold-hover transition-colors"
               >
-                Complete Order →
+                Start My Free Week →
               </button>
 
               <p className="text-white/30 text-xs text-center mt-3">
-                🔒 Secure checkout via Stripe
+                🔒 Secure checkout via Authorize.net
               </p>
               <p className="text-white/30 text-xs text-center mt-1">
                 Cancel anytime. No long-term contracts.

@@ -14,21 +14,6 @@ const PRODUCT_INFO: Record<
     nextSteps: string[];
   }
 > = {
-  a2p: {
-    name: "A2P Done-For-You Setup",
-    icon: "📱",
-    description:
-      "Your A2P registration is in the queue. " +
-      "We'll reach out within 24 hours to " +
-      "collect your business details and kick " +
-      "off the setup process. Carrier approval " +
-      "typically takes 2-4 weeks from submission.",
-    nextSteps: [
-      "Watch for an email from us within 24 hours",
-      "Have your LLC name and EIN ready",
-      "We'll handle everything else from there",
-    ],
-  },
   "acq-bot": {
     name: "AI Acquisitions Bot",
     icon: "🤖",
@@ -71,7 +56,7 @@ const PRODUCT_INFO: Record<
     nextSteps: [
       "Watch for a confirmation email within 24-48 hours",
       "Contracts will appear in your Documents section",
-      "Pre-loaded with merge fields — just fill and send",
+      "Pre-loaded with merge fields, just fill and send",
     ],
   },
   "ask-ari": {

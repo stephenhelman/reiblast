@@ -52,7 +52,7 @@ const FEATURES = [
     icon: "⚡",
     badge: "PIPELINE",
     headline: "The Pipeline Ari Closes 5-6 Deals a Month With",
-    body: "The pipeline Ari uses on a monthly basis to close his deals. No guessing. Just a proven process — already loaded into your CRM the moment you sign up.",
+    body: "The pipeline Ari uses on a monthly basis to close his deals. No guessing, just a proven process, already loaded into your CRM the moment you sign up.",
     accent: "gold" as const,
     comingSoon: false,
   },
@@ -76,14 +76,14 @@ const FEATURES = [
     icon: "✍️",
     badge: "E-SIGNATURE",
     headline: "Which E-Sign Should You Use? None of the Above.",
-    body: "DocuSign, Dropbox, PandaDoc, RabbitSign — how about none of the above. REIblast has e-signature built in. Send a contract for signature without ever leaving your dashboard.",
+    body: "DocuSign, Dropbox, PandaDoc, RabbitSign. How about none of the above. REIblast has e-signature built in. Send a contract for signature without ever leaving your dashboard.",
     accent: "gold" as const,
     comingSoon: false,
   },
   {
     icon: "🧮",
     badge: "DEAL ANALYZER (BETA)",
-    headline: "Real Comps. Real Numbers. Real Fast.",
+    headline: "Real Comps, Pulled Fast",
     body: "Don't go to Zillow looking for comps. The deal analyzer pulls real sold data, analyzes your deal with AI, runs your numbers, and saves everything directly to REIblast.",
     accent: "gold" as const,
     comingSoon: false,
@@ -124,7 +124,7 @@ export default function FeaturesPage() {
           Nothing You Don&apos;t.
         </h1>
         <p className="text-white/50 text-xl max-w-2xl mx-auto leading-relaxed">
-          REIblast is built around one thing — getting you from list to closed
+          REIblast is built around one thing: getting you from list to closed
           deal as fast as possible.
         </p>
       </section>
@@ -223,9 +223,6 @@ export default function FeaturesPage() {
             included is a general-purpose template and has not been reviewed for
             your specific state or jurisdiction. We recommend having a local
             real estate attorney review any contract before use.
-            <br />
-            <br />
-            An active LLC and EIN are required to sign up for REIblast.
           </p>
         </div>
       </section>
@@ -276,7 +273,7 @@ export default function FeaturesPage() {
           href="/checkout"
           className="inline-block bg-gold text-black font-bold text-lg px-10 py-4 rounded-xl hover:bg-gold-hover transition-colors"
         >
-          Get Started — $79/mo
+          Get Started — $57/mo
         </Link>
       </section>
     </div>

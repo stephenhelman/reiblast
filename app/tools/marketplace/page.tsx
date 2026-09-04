@@ -4,14 +4,6 @@ import { useEffect, useState, Suspense } from "react";
 import MinimalHeader from "@/components/tools/MinimalHeader";
 import { useLocationId } from "@/lib/hooks/use-location-id";
 
-const A2P_FEATURES = [
-  "Custom domain purchase and setup",
-  "Cloudflare DNS configuration",
-  "A2P compliance website",
-  "Brand and campaign registration",
-  "Email sending domain setup",
-];
-
 const COMING_SOON_ADDONS = [
   {
     name: "AI Acquisitions Bot",
@@ -36,7 +28,6 @@ const COMING_SOON_ADDONS = [
 ];
 
 const ADDON_ROWS = [
-  { slug: "a2p", label: "A2P Setup", comingSoon: false },
   { slug: "acq-bot", label: "AI Acquisitions Bot", comingSoon: true },
   { slug: "dispo-bot", label: "AI Dispositions Bot", comingSoon: true },
   { slug: "contracts", label: "State Contracts", comingSoon: true },
@@ -138,8 +129,6 @@ function MarketplaceContent() {
       });
   }, [locationId]);
 
-  const hasA2P = addons.includes("a2p");
-
   return (
     <div className="min-h-screen bg-black">
       <MinimalHeader title="Marketplace" />
@@ -191,146 +180,6 @@ function MarketplaceContent() {
                 <SkeletonCards />
               ) : (
                 <>
-                  {/* A2P card */}
-                  {hasA2P ? (
-                    /* PURCHASED STATE */
-                    <div
-                      style={{
-                        background: "#141414",
-                        border: "1px solid rgba(34,197,94,0.4)",
-                        borderRadius: 16,
-                        padding: 28,
-                      }}
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <span
-                            className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-1 rounded-full"
-                            style={{
-                              background: "rgba(34,197,94,0.1)",
-                              color: "#4ade80",
-                              border: "1px solid rgba(34,197,94,0.3)",
-                            }}
-                          >
-                            ✓ Active
-                          </span>
-                          <p className="text-white font-bold text-xl mt-2">
-                            A2P Done-For-You Setup
-                          </p>
-                        </div>
-                        <GreenCheckCircle size={44} />
-                      </div>
-                      <p
-                        className="text-white/60 text-sm mt-4"
-                        style={{ lineHeight: 1.7 }}
-                      >
-                        Your A2P registration is active. SMS sending is enabled
-                        on your account.
-                      </p>
-                      <a
-                        href="mailto:support@reiblast.app"
-                        className="inline-block text-gold text-sm mt-3 hover:underline"
-                      >
-                        Need help with your A2P setup?
-                      </a>
-                    </div>
-                  ) : (
-                    /* AVAILABLE STATE */
-                    <div
-                      style={{
-                        background: "#141414",
-                        border: "1px solid #F5C842",
-                        borderRadius: 16,
-                        padding: 28,
-                      }}
-                    >
-                      <div className="flex items-start justify-between gap-4">
-                        <div className="flex-1 min-w-0">
-                          <span
-                            className="inline-block text-xs font-bold px-2.5 py-1 rounded-full"
-                            style={{
-                              border: "1px solid #F5C842",
-                              color: "#F5C842",
-                            }}
-                          >
-                            ADD-ON
-                          </span>
-                          <p className="text-white font-bold text-xl mt-2">
-                            A2P Done-For-You Setup
-                          </p>
-                          <div className="flex items-baseline gap-2 mt-1.5">
-                            <span className="text-gold font-bold text-2xl">
-                              $100
-                            </span>
-                            <span className="text-white/40 text-sm">
-                              one-time
-                            </span>
-                          </div>
-                        </div>
-                        <div
-                          className="flex items-center justify-center shrink-0"
-                          style={{
-                            width: 44,
-                            height: 44,
-                            borderRadius: "50%",
-                            background: "rgba(245,200,66,0.1)",
-                            border: "1px solid rgba(245,200,66,0.3)",
-                          }}
-                        >
-                          <span style={{ color: "#F5C842", fontSize: 18 }}>
-                            →
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Amber warning */}
-                      <div
-                        className="flex items-start gap-2 mt-4 rounded-lg px-3 py-2"
-                        style={{
-                          background: "rgba(245,158,11,0.1)",
-                          border: "1px solid rgba(245,158,11,0.2)",
-                        }}
-                      >
-                        <span className="text-amber-400 shrink-0 text-sm">
-                          ⚠
-                        </span>
-                        <p
-                          className="text-xs font-semibold"
-                          style={{ color: "rgba(252,211,77,0.8)" }}
-                        >
-                          SMS sending is currently disabled on your account. A2P
-                          registration is required.
-                        </p>
-                      </div>
-
-                      {/* Feature list */}
-                      <ul className="mt-4 space-y-2">
-                        {A2P_FEATURES.map((f) => (
-                          <li
-                            key={f}
-                            className="flex items-start gap-2 text-sm text-white/70"
-                          >
-                            <span className="text-gold mt-0.5 shrink-0">•</span>
-                            {f}
-                          </li>
-                        ))}
-                      </ul>
-
-                      {/* CTA */}
-                      <button
-                        onClick={() =>
-                          window.open(
-                            process.env.NEXT_PUBLIC_CHECKOUT_URL_A2P || "#",
-                            "_blank",
-                          )
-                        }
-                        className="mt-5 w-full bg-gold text-black font-bold text-base py-4 rounded-xl hover:bg-gold-hover transition-colors"
-                      >
-                        Add to REIblast — $100 →
-                      </button>
-                    </div>
-                  )}
-
                   {/* Coming soon cards */}
                   <div className="mt-8">
                     <p className="text-white/30 text-xs font-bold uppercase tracking-widest mb-5">

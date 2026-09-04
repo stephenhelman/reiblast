@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import Script from "next/script";
 
 export const metadata: Metadata = {
   title: "You're All Set — REIblast",
@@ -25,7 +26,7 @@ export default function OnboardingCompletePage() {
         }
       `}</style>
 
-      <div className="min-h-screen bg-black flex items-center justify-center px-6 py-20">
+      <div className="min-h-screen bg-black flex flex-col items-center px-6 py-20 gap-8">
         <div
           className="w-full text-center"
           style={{
@@ -134,6 +135,96 @@ export default function OnboardingCompletePage() {
               support@reiblast.app
             </a>
           </p>
+        </div>
+
+        {/* Watch a message from Ari — VSL placeholder */}
+        <div
+          className="w-full"
+          style={{
+            maxWidth: 720,
+            background: "#141414",
+            border: "1px solid rgba(255,255,255,0.08)",
+            borderRadius: 20,
+            padding: 40,
+          }}
+        >
+          <p className="text-gold text-xs font-bold uppercase tracking-widest text-center mb-2">
+            Before You Go
+          </p>
+          <h2 className="text-white text-2xl font-bold text-center mb-6">
+            A Quick Message from Ari
+          </h2>
+
+          <div
+            className="flex flex-col items-center justify-center text-center"
+            style={{
+              aspectRatio: "16 / 9",
+              background: "#000",
+              border: "1px dashed rgba(245,200,66,0.35)",
+              borderRadius: 12,
+              padding: 24,
+            }}
+          >
+            <div className="text-4xl mb-3">🎬</div>
+            <p className="text-white/70 text-sm max-w-sm">
+              Your welcome video from Ari is coming soon. In the meantime, get
+              familiar with the REIblast wholesale process below.
+            </p>
+            <a
+              href="https://reiblast.app"
+              className="mt-4 text-gold text-sm font-semibold hover:underline"
+            >
+              Learn how REIblast works →
+            </a>
+          </div>
+        </div>
+
+        {/* Book your onboarding call */}
+        <div
+          className="w-full"
+          style={{
+            maxWidth: 720,
+            background: "#141414",
+            border: "1px solid rgba(245,200,66,0.3)",
+            borderRadius: 20,
+            padding: 40,
+          }}
+        >
+          <p className="text-gold text-xs font-bold uppercase tracking-widest text-center mb-2">
+            Next Step
+          </p>
+          <h2 className="text-white text-2xl font-bold text-center mb-2">
+            Book Your Onboarding Call
+          </h2>
+          <p className="text-gray-400 text-sm text-center mb-6">
+            Grab a spot on the calendar and we&apos;ll walk through your
+            account together.
+          </p>
+
+          <div
+            style={{
+              borderRadius: 12,
+              overflow: "hidden",
+              border: "1px solid rgba(255,255,255,0.08)",
+            }}
+          >
+            <iframe
+              src="https://api.leadconnectorhq.com/widget/booking/p2AFv4aWQvYZgAhOOxsg"
+              style={{
+                width: "100%",
+                height: 750,
+                border: "none",
+                overflow: "hidden",
+                display: "block",
+              }}
+              scrolling="no"
+              id="p2AFv4aWQvYZgAhOOxsg_1788397624766"
+            />
+          </div>
+          <Script
+            src="https://link.msgsndr.com/js/form_embed.js"
+            strategy="afterInteractive"
+          />
         </div>
       </div>
     </>

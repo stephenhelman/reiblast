@@ -64,7 +64,7 @@ export default function Pricing() {
               href="/checkout"
               className="block w-full bg-gold text-black font-bold text-center py-4 rounded-xl hover:bg-gold-hover transition-colors"
             >
-              Get Started — $79/mo
+              Get Started — $57/mo
             </Link>
           </div>
         </div>

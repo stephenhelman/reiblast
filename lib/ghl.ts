@@ -663,29 +663,3 @@ export async function populateSubAccountCustomValues(
   return results.every(Boolean)
 }
 
-export async function populateA2PSite(
-  locationId: string,
-  businessData: {
-    businessName: string;
-    businessAddress: string;
-    businessCity: string;
-    businessState: string;
-    businessZip: string;
-    businessPhone: string;
-    businessEmail: string;
-    websiteUrl?: string;
-  },
-): Promise<boolean> {
-  const res = await fetch(
-    `${GHL_BASE_URL}/locations/${locationId}/customValues`,
-    {
-      method: "POST",
-      headers: agencyHeaders(),
-      body: JSON.stringify({
-        name: "A2P Business Info",
-        value: JSON.stringify(businessData),
-      }),
-    },
-  );
-  return res.ok;
-}

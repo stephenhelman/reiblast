@@ -71,7 +71,7 @@ export default function AboutPage() {
           <p className="text-white/70 text-lg leading-[1.85] mb-6">
             Ari started wholesaling in his early 20s out of Houston, TX. While
             most investors were cold calling, door knocking, and paying for
-            expensive lead generation services, Ari kept it simple — build a
+            expensive lead generation services, Ari kept it simple: build a
             list, text blast it, close the deal.
           </p>
           <p className="text-white/70 text-lg leading-[1.85] mb-6">
@@ -84,12 +84,12 @@ export default function AboutPage() {
             contract tool. A separate e-sign tool.
           </p>
           <p className="text-white/70 text-lg leading-[1.85] mb-6">
-            It was a mess — and it was slowing down his students.
+            It was a mess, and it was slowing down his students.
           </p>
           <p className="text-white/70 text-lg leading-[1.85]">
-            REIblast is what he wished existed when he started. One system. His
-            exact pipeline, his exact sequences, his contracts — all in one
-            place. Built for investors who text.
+            REIblast is what he wished existed when he started. One system with
+            his exact pipeline, his exact sequences, and his contracts, all in
+            one place. Built for investors who text.
           </p>
         </div>
       </section>
@@ -129,7 +129,7 @@ export default function AboutPage() {
             Want Ari in Your Corner?
           </h2>
           <p className="text-white/60 text-lg leading-[1.75] mb-10">
-            Ari mentors students one-on-one with one goal — get you to your
+            Ari mentors students one-on-one with one goal: get you to your
             first deal in 30 days. If you want his personal guidance on top of
             the REIblast system, book a session directly.
           </p>
@@ -161,7 +161,7 @@ export default function AboutPage() {
           href="/checkout"
           className="inline-block bg-gold text-black font-bold text-lg px-10 py-4 rounded-xl hover:bg-gold-hover transition-colors"
         >
-          Get Started — $79/mo
+          Get Started — $57/mo
         </Link>
       </section>
     </div>
