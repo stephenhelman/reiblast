@@ -43,20 +43,6 @@ export async function POST(req: NextRequest) {
       },
     });
 
-    const isA2PPurchase = product.toLowerCase() === "a2p addon";
-
-    if (isA2PPurchase) {
-      const currentAddons = user.addons || [];
-      if (!currentAddons.includes("a2p")) {
-        await prisma.user.update({
-          where: { id: user.id },
-          data: { addons: { push: "a2p" } },
-        });
-        console.log("[GHL webhook] A2P addon added to DB");
-      }
-      return NextResponse.json({ success: true });
-    }
-
     const { contactId } = await createHQContact(name, email, phone);
 
     const otp = Math.floor(100000 + Math.random() * 900000).toString();

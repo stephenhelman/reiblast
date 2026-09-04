@@ -4,8 +4,6 @@ import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 import type { AddonSlug } from "@/lib/constants";
 
 const slugMap: Record<string, AddonSlug> = {
-  "a2p addon": "a2p",
-  "a2p": "a2p",
   "acq-bot": "acq-bot",
   "ai acquisitions bot": "acq-bot",
   "dispo-bot": "dispo-bot",
@@ -74,18 +72,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ success: true, message: "Already owned" });
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const updateData: any = {
-      addons: { push: slug },
-    };
-
-    if (slug === "a2p") {
-      updateData.a2pAddonPurchasedAt = new Date();
-    }
-
     await prisma.user.update({
       where: { id: user.id },
-      data: updateData,
+      data: { addons: { push: slug } },
     });
 
     console.log("[Addons webhook] Addon added:", slug, email);

@@ -25,19 +25,11 @@ const USAGE_RATES = [
   { icon: "✉️", label: "Emails", rate: "$0.0007", unit: "per email" },
 ];
 
-const A2P_FEATURES = [
-  "Custom domain purchase and setup",
-  "Cloudflare DNS configuration",
-  "A2P compliance website",
-  "Brand and campaign registration",
-  "Email sending domain setup",
-];
-
 const COMING_SOON_ADDONS = [
   {
     name: "AI Acquisitions Bot",
     description:
-      "NEPQ-trained AI that qualifies sellers and books appointments via SMS — automatically.",
+      "NEPQ-trained AI that qualifies sellers and books appointments via SMS, automatically.",
   },
   {
     name: "AI Dispositions Bot",
@@ -113,9 +105,12 @@ export default function PricingPage() {
 
             {/* Price */}
             <div className="flex items-baseline gap-1 mb-1">
-              <span className="text-6xl font-bold text-white">$79</span>
+              <span className="text-6xl font-bold text-white">$57</span>
               <span className="text-xl text-white/50">/mo</span>
             </div>
+            <p className="text-gold text-sm font-semibold mb-1">
+              1 week free trial
+            </p>
             <p className="text-white/40 text-sm mb-6">Cancel anytime</p>
 
             <div className="border-t border-white/10 my-5" />
@@ -177,52 +172,6 @@ export default function PricingPage() {
             Enhance your REIblast experience.
           </p>
 
-          {/* A2P card */}
-          <div
-            className="bg-surface rounded-2xl p-8 mb-6"
-            style={{
-              border: "1px solid #F5C842",
-              maxWidth: 680,
-              margin: "0 auto 24px",
-            }}
-          >
-            <div className="flex flex-col md:flex-row gap-8 items-start">
-              <div className="flex-1 min-w-0">
-                <p className="text-white font-bold text-xl mb-2">
-                  A2P Done-For-You Setup
-                </p>
-                <div className="flex items-baseline gap-1 mb-3">
-                  <span className="text-2xl font-bold text-gold">$100</span>
-                  <span className="text-white/40 text-sm">one-time</span>
-                </div>
-                <p className="text-white/60 text-sm leading-[1.7]">
-                  Required to send SMS messages through REIblast. We handle
-                  everything — domain setup, DNS configuration, compliance
-                  website, and carrier registration.
-                </p>
-                <ul className="mt-4 space-y-1.5">
-                  {A2P_FEATURES.map((f) => (
-                    <li
-                      key={f}
-                      className="flex items-start gap-2 text-sm text-white/50"
-                    >
-                      <span className="text-gold mt-0.5 shrink-0">•</span>
-                      {f}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="shrink-0 w-full md:w-auto">
-                <Link
-                  href="/checkout?a2p=true"
-                  className="inline-block bg-gold text-black font-bold py-3 px-7 rounded-xl hover:bg-gold-hover transition-colors whitespace-nowrap"
-                >
-                  Add to REIblast →
-                </Link>
-              </div>
-            </div>
-          </div>
-
           {/* Coming soon add-ons */}
           <div
             className="grid md:grid-cols-2 gap-4"
@@ -256,9 +205,6 @@ export default function PricingPage() {
             included is a general-purpose template and has not been reviewed for
             your specific state or jurisdiction. We recommend having a local
             real estate attorney review any contract before use.
-            <br />
-            <br />
-            An active LLC and EIN are required to sign up for REIblast.
           </p>
         </div>
       </section>
@@ -306,7 +252,7 @@ export default function PricingPage() {
           href="/checkout"
           className="inline-block bg-gold text-black font-bold text-lg px-10 py-4 rounded-xl hover:bg-gold-hover transition-colors"
         >
-          Get Started — $79/mo
+          Get Started — $57/mo, 1 Week Free
         </Link>
       </section>
     </div>

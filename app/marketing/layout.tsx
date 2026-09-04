@@ -14,6 +14,11 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
       <Nav />
       <main>{children}</main>
       <Footer />
+      <script
+        src="https://widgets.leadconnectorhq.com/loader.js"
+        data-resources-url="https://widgets.leadconnectorhq.com/chat-widget/loader.js"
+        data-widget-id="6a91db99bde3d5bf50985574"
+      ></script>
     </>
   )
 }

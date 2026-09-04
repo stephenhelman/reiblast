@@ -12,7 +12,7 @@ const paymentLink = checkoutUrl ?? "#";
 
 const FEATURES = [
   "Pre-built CRM pipeline + A2P-compliant SMS sequences ready on day one",
-  "Universal wholesale contract with built-in e-signature — no extra tools",
+  "Universal wholesale contract with built-in e-signature, no extra tools",
   "Deal analyzer (BETA), JV network, and lead sourcing all in one portal",
 ];
 
@@ -31,7 +31,7 @@ export default function SignupPage() {
             Ready to get started?
           </h1>
           <p className="text-white/50 mb-8">
-            Everything you need to run your wholesale operation — one flat
+            Everything you need to run your wholesale operation, one flat
             monthly price.
           </p>
 
@@ -62,7 +62,7 @@ export default function SignupPage() {
             href={paymentLink}
             className="block w-full bg-gold text-black font-bold text-lg py-4 rounded-xl hover:bg-gold-hover transition-colors"
           >
-            Subscribe Now — $57/mo
+            Start My Free Week — $57/mo After
           </a>
 
           <p className="text-white/30 text-xs mt-4">

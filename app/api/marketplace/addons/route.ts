@@ -18,7 +18,6 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     addons: user.addons,
-    a2p: user.addons.includes('a2p'),
     acqBot: user.addons.includes('acq-bot'),
     dispoBot: user.addons.includes('dispo-bot'),
     contracts: user.addons.includes('contracts'),
