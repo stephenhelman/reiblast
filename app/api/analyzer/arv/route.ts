@@ -128,7 +128,8 @@ export async function POST(req: NextRequest) {
       },
       body: JSON.stringify({
         model: "claude-sonnet-5",
-        max_tokens: 1500,
+        max_tokens: 4096,
+        output_config: { effort: "low" },
         system: ARV_SYSTEM_PROMPT,
         messages: [
           {
@@ -152,7 +153,10 @@ export async function POST(req: NextRequest) {
     }
 
     const claudeData = await claudeRes.json();
-    let text = claudeData.content?.[0]?.text || "";
+    const textBlock = (claudeData.content ?? []).find(
+      (block: { type?: string }) => block.type === "text",
+    );
+    let text = textBlock?.text || "";
     text = text
       .replace(/^```(?:json)?\n?/, "")
       .replace(/\n?```$/, "")
