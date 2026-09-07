@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import CostEstimatorButton from "@/components/marketing/CostEstimatorModal";
 
 export const metadata: Metadata = {
   title: "Pricing — REIblast",
@@ -23,29 +24,6 @@ const USAGE_RATES = [
   { icon: "📲", label: "Inbound Calls", rate: "$0.0094", unit: "per minute" },
   { icon: "💬", label: "Outbound Texts", rate: "$0.0091", unit: "per segment" },
   { icon: "✉️", label: "Emails", rate: "$0.0007", unit: "per email" },
-];
-
-const COMING_SOON_ADDONS = [
-  {
-    name: "AI Acquisitions Bot",
-    description:
-      "NEPQ-trained AI that qualifies sellers and books appointments via SMS, automatically.",
-  },
-  {
-    name: "AI Dispositions Bot",
-    description:
-      "Blast your deals to cash buyers and manage responses automatically.",
-  },
-  {
-    name: "State Contract Bundle",
-    description:
-      "Attorney-reviewed purchase and assignment contracts for the top 10 wholesale markets.",
-  },
-  {
-    name: "Ask Ari AI",
-    description:
-      "Wish you had an experienced wholesaler over your shoulder? Ask Ari AI is here to help. Available 24/7.",
-  },
 ];
 
 function Checkmark() {
@@ -131,6 +109,61 @@ export default function PricingPage() {
             >
               Get Started →
             </Link>
+
+            <div className="text-center mt-4">
+              <CostEstimatorButton />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* What's included vs billed separately */}
+      <section className="py-16 px-6 border-t border-border-default">
+        <div className="max-w-3xl mx-auto">
+          <SectionLabel>WHAT&apos;S INCLUDED</SectionLabel>
+          <p className="text-white/50 text-center mb-10">
+            Know exactly what&apos;s covered by your subscription and what&apos;s
+            billed separately.
+          </p>
+          <div className="grid md:grid-cols-2 gap-4">
+            <div className="bg-surface border border-border-default rounded-xl p-6">
+              <p className="text-gold font-semibold text-sm uppercase tracking-wider mb-4">
+                Included in your $57/mo
+              </p>
+              <ul className="space-y-3">
+                {[
+                  "CRM & pipeline",
+                  "SMS sequences",
+                  "Contracts + e-signature",
+                  "Deal analyzer",
+                  "Lead cleaner",
+                  "Support",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-3">
+                    <Checkmark />
+                    <span className="text-white/80 text-sm">{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+            <div className="bg-surface border border-border-default rounded-xl p-6">
+              <p className="text-white/60 font-semibold text-sm uppercase tracking-wider mb-4">
+                Billed separately (pass-through)
+              </p>
+              <ul className="space-y-3">
+                {[
+                  "Phone number(s) — $1.265/number/month",
+                  "A2P registration — $23.50 one-time",
+                  "A2P monthly carrier fee — $2.10 (sole prop) / $10.50 (LLC/EIN)",
+                  "Usage (texts/calls/emails) — see rates below",
+                ].map((item) => (
+                  <li key={item} className="flex items-start gap-3">
+                    <span className="text-white/40 mt-0.5 shrink-0">•</span>
+                    <span className="text-white/60 text-sm">{item}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         </div>
       </section>
@@ -161,37 +194,6 @@ export default function PricingPage() {
             Usage rates are billed in addition to your monthly subscription.
             Rates subject to change.
           </p>
-        </div>
-      </section>
-
-      {/* Add-ons */}
-      <section className="py-16 px-6 border-t border-border-default">
-        <div className="max-w-3xl mx-auto">
-          <SectionLabel>ADD-ONS</SectionLabel>
-          <p className="text-white/50 text-center mb-10">
-            Enhance your REIblast experience.
-          </p>
-
-          {/* Coming soon add-ons */}
-          <div
-            className="grid md:grid-cols-2 gap-4"
-            style={{ maxWidth: 680, margin: "0 auto" }}
-          >
-            {COMING_SOON_ADDONS.map((item) => (
-              <div
-                key={item.name}
-                className="bg-surface border border-white/10 rounded-xl p-6 opacity-50 cursor-not-allowed"
-              >
-                <span className="text-xs font-bold px-2.5 py-1 rounded-full border border-white/20 text-white/40">
-                  COMING SOON
-                </span>
-                <p className="text-white font-bold text-base mt-3 mb-1">
-                  {item.name}
-                </p>
-                <p className="text-white/40 text-sm">{item.description}</p>
-              </div>
-            ))}
-          </div>
         </div>
       </section>
 

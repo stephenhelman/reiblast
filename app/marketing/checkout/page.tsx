@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { LogoFull } from "@/components/shared/Logo";
+import CostEstimatorButton from "@/components/marketing/CostEstimatorModal";
 
 const CORE_FEATURES = [
   "Pre-built wholesale pipeline",
@@ -14,30 +15,7 @@ const CORE_FEATURES = [
   "New tools added monthly",
 ];
 
-const COMING_SOON = [
-  {
-    name: "AI Acquisitions Bot",
-    description:
-      "NEPQ-trained AI that qualifies sellers and books appointments via SMS, automatically.",
-  },
-  {
-    name: "AI Dispositions Bot",
-    description:
-      "Blast your deals to cash buyers and manage responses automatically.",
-  },
-  {
-    name: "State Contract Bundle",
-    description:
-      "Attorney-reviewed purchase and assignment contracts for the top 10 wholesale markets.",
-  },
-  {
-    name: "Ask Ari AI",
-    description:
-      "Wish you had an experienced wholesaler over your shoulder? Ask Ari AI is here to help. Available 24/7.",
-  },
-];
-
-const CORE_URL = process.env.NEXT_PUBLIC_CHECKOUT_URL_CORE ?? "#";
+const CORE_URL = process.env.NEXT_PUBLIC_CHECKOUT_URL_CORE;
 
 function CheckCircle() {
   return (
@@ -146,23 +124,6 @@ export default function CheckoutPage() {
                 )}
               </div>
 
-              {/* Coming soon — static display only */}
-              {COMING_SOON.map((item) => (
-                <div
-                  key={item.name}
-                  className="opacity-50 cursor-not-allowed rounded-xl border border-white/10 bg-surface p-6"
-                >
-                  <div className="mb-2">
-                    <span className="text-xs font-bold px-2.5 py-1 rounded-full border border-white/20 text-white/40">
-                      COMING SOON
-                    </span>
-                  </div>
-                  <p className="text-white font-bold text-lg">{item.name}</p>
-                  <p className="text-white/50 text-sm mt-0.5">
-                    {item.description}
-                  </p>
-                </div>
-              ))}
             </div>
           </div>
 
@@ -201,14 +162,29 @@ export default function CheckoutPage() {
                 be charged.
               </p>
 
-              <button
-                onClick={() => {
-                  window.location.href = CORE_URL;
-                }}
-                className="mt-6 w-full bg-gold text-black font-bold text-lg py-4 rounded-xl hover:bg-gold-hover transition-colors"
-              >
-                Start My Free Week →
-              </button>
+              {CORE_URL ? (
+                <button
+                  onClick={() => {
+                    window.location.href = CORE_URL;
+                  }}
+                  className="mt-6 w-full bg-gold text-black font-bold text-lg py-4 rounded-xl hover:bg-gold-hover transition-colors"
+                >
+                  Start My Free Week →
+                </button>
+              ) : (
+                <>
+                  <button
+                    disabled
+                    className="mt-6 w-full bg-gold/30 text-black/50 font-bold text-lg py-4 rounded-xl cursor-not-allowed"
+                  >
+                    Start My Free Week →
+                  </button>
+                  <p className="text-white/50 text-xs text-center mt-2">
+                    Checkout temporarily unavailable — contact
+                    support@reiblast.app
+                  </p>
+                </>
+              )}
 
               <p className="text-white/30 text-xs text-center mt-3">
                 🔒 Secure checkout via Authorize.net
@@ -216,6 +192,10 @@ export default function CheckoutPage() {
               <p className="text-white/30 text-xs text-center mt-1">
                 Cancel anytime. No long-term contracts.
               </p>
+
+              <div className="text-center mt-4">
+                <CostEstimatorButton />
+              </div>
             </div>
           </div>
         </div>

@@ -12,68 +12,6 @@ const EMAIL = "support@reiblast.app";
 const PHONE_DISPLAY = "(832) 820-1980";
 const PHONE_HREF = "+18328201980";
 
-const FAQS = [
-  {
-    q: "How do I cancel?",
-    a: (
-      <>
-        Log in, go to Billing, select Cancel Subscription. It is immediate and
-        self-service. You keep access through the end of your paid period. Full
-        details in our{" "}
-        <Link
-          href="/refund-policy"
-          className="text-gold hover:text-gold-hover underline underline-offset-4 transition-colors"
-        >
-          Refund and Cancellation Policy
-        </Link>
-        .
-      </>
-    ),
-  },
-  {
-    q: "How do I add credits?",
-    a: (
-      <>
-        In your account portal under Billing. Credits fund messaging, calling,
-        and email usage.
-      </>
-    ),
-  },
-  {
-    q: "How long does A2P registration take?",
-    a: (
-      <>
-        Typically two to three business days after submission. Registration
-        requires an EIN and accurate business information.
-      </>
-    ),
-  },
-  {
-    q: "I received a text I did not sign up for.",
-    a: (
-      <>
-        Reply STOP to that message to opt out immediately and permanently. If
-        you want your information removed entirely, email{" "}
-        <a
-          href={`mailto:${EMAIL}`}
-          className="text-gold hover:text-gold-hover underline underline-offset-4 transition-colors"
-        >
-          {EMAIL}
-        </a>{" "}
-        with the phone number and we will trace it to the sending account and
-        require removal. Details in Section 9 of our{" "}
-        <Link
-          href="/privacy"
-          className="text-gold hover:text-gold-hover underline underline-offset-4 transition-colors"
-        >
-          Privacy Policy
-        </Link>
-        .
-      </>
-    ),
-  },
-];
-
 function ContactMethods() {
   return (
     <div className="flex flex-col sm:flex-row gap-4 mb-6">
@@ -166,21 +104,44 @@ export default function ContactPage() {
       {/* Common questions */}
       <section className="py-16 px-6">
         <div className="max-w-2xl mx-auto">
-          <h2 className="text-3xl font-bold text-white mb-8">
+          <h2 className="text-3xl font-bold text-white mb-6">
             Common questions
           </h2>
-          <div className="flex flex-col gap-5">
-            {FAQS.map((f) => (
-              <div
-                key={f.q}
-                className="bg-surface border border-border-default rounded-xl p-6"
+          <p className="text-white/70 text-[17px] leading-[1.85] mb-8">
+            Billing, A2P registration, and account questions are answered on
+            our{" "}
+            <Link
+              href="/faq"
+              className="text-gold hover:text-gold-hover underline underline-offset-4 transition-colors"
+            >
+              FAQ page
+            </Link>
+            .
+          </p>
+          <div className="bg-surface border border-border-default rounded-xl p-6">
+            <p className="text-white font-bold text-[17px] mb-3">
+              I received a text I did not sign up for.
+            </p>
+            <p className="text-white/70 text-[17px] leading-[1.85]">
+              Reply STOP to that message to opt out immediately and
+              permanently. If you want your information removed entirely,
+              email{" "}
+              <a
+                href={`mailto:${EMAIL}`}
+                className="text-gold hover:text-gold-hover underline underline-offset-4 transition-colors"
               >
-                <p className="text-white font-bold text-[17px] mb-3">{f.q}</p>
-                <p className="text-white/70 text-[17px] leading-[1.85]">
-                  {f.a}
-                </p>
-              </div>
-            ))}
+                {EMAIL}
+              </a>{" "}
+              with the phone number and we will trace it to the sending
+              account and require removal. Details in Section 9 of our{" "}
+              <Link
+                href="/privacy"
+                className="text-gold hover:text-gold-hover underline underline-offset-4 transition-colors"
+              >
+                Privacy Policy
+              </Link>
+              .
+            </p>
           </div>
         </div>
       </section>
