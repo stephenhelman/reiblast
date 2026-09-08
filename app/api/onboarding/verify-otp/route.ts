@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { verifyOtp } from '@/lib/otp'
+import { ONBOARDING_OTP_VISIBILITY_FIELD } from '@/lib/constants'
 
 export async function POST(req: NextRequest) {
   try {
@@ -18,28 +20,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 })
     }
 
-    if (!user.otpCode) {
-      return NextResponse.json(
-        { error: 'No code found. Request a new one.' },
-        { status: 400 },
-      )
-    }
+    const result = await verifyOtp({
+      userId: user.id,
+      code: otp,
+      contactId,
+      visibilityField: ONBOARDING_OTP_VISIBILITY_FIELD,
+    })
 
-    if (!user.otpExpiry || user.otpExpiry < new Date()) {
+    if (result.status === 'expired') {
       return NextResponse.json(
         { error: 'Code expired. Request a new one.' },
         { status: 400 },
       )
     }
 
-    if (user.otpCode !== otp) {
-      return NextResponse.json({ error: 'Invalid code. Try again.' }, { status: 400 })
+    if (result.status === 'locked_out') {
+      return NextResponse.json(
+        { error: 'Invalid code. Try again.' },
+        { status: 400 },
+      )
     }
 
-    await prisma.user.update({
-      where: { id: user.id },
-      data: { otpCode: null, otpExpiry: null },
-    })
+    if (result.status === 'wrong') {
+      return NextResponse.json({ error: 'Invalid code. Try again.' }, { status: 400 })
+    }
 
     return NextResponse.json({ success: true, email: user.email })
   } catch (err) {

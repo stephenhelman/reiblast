@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getGhlAccessToken } from '@/lib/ghl-token'
 import type { CleanedContact, DealMachineContact } from '@/lib/leadCleaner'
+import { requireMember } from '@/lib/requireMember'
 
 const GHL_BASE = 'https://services.leadconnectorhq.com'
 
@@ -11,6 +12,12 @@ function sleep(ms: number): Promise<void> {
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireMember(req)
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   const body = await req.json()
   const { contacts, locationId, tag } = body as {
     contacts: AnyContact[]

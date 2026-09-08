@@ -14,6 +14,7 @@
     "@types/bcryptjs": "^2.4.6",
     "@types/papaparse": "^5.5.2",
     "bcryptjs": "^3.0.3",
+    "jose": "^6.2.12",
     "next": "^14.2.35",
     "next-auth": "^4.24.14",
     "papaparse": "^5.5.3",

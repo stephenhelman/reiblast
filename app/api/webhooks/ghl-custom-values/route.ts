@@ -3,6 +3,17 @@ import { prisma } from "@/lib/prisma";
 import { populateSubAccountCustomValues } from "@/lib/ghl";
 import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 
+// Normalizes a US phone number to E.164 (+1XXXXXXXXXX). Returns null if
+// absent, empty, or the digits don't resolve to a valid 10/11-digit US number.
+function normalizeToE164(raw: string): string | null {
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, "");
+  if (digits.length === 10) return `+1${digits}`;
+  if (digits.length === 11 && digits.startsWith("1")) return `+${digits}`;
+  console.error("[CustomValues webhook] Malformed a2pPhone, storing null:", raw);
+  return null;
+}
+
 export async function POST(req: NextRequest) {
   // 1. Validate secret header
   if (!verifyWebhook(req)) {
@@ -25,7 +36,8 @@ export async function POST(req: NextRequest) {
     const domain = (customData?.domain as string) || "";
     const repName = (customData?.repName as string) || "";
     const businessEmail = (customData?.businessEmail as string) || "";
-    const businessPhone = (customData?.businessPhone as string) || "";
+    const a2pPhoneRaw = (customData?.a2pPhone as string) || "";
+    const a2pPhone = normalizeToE164(a2pPhoneRaw);
 
     // 4. Validate required fields
     if (!email) {
@@ -40,7 +52,7 @@ export async function POST(req: NextRequest) {
       domain,
       repName,
       businessEmail,
-      businessPhone,
+      a2pPhone,
     });
 
     // 5. Find user by email
@@ -79,8 +91,8 @@ export async function POST(req: NextRequest) {
     if (businessEmail) {
       values.business_email = businessEmail;
     }
-    if (businessPhone) {
-      values.business_phone = businessPhone;
+    if (a2pPhone) {
+      values.business_phone = a2pPhone;
     }
     if (repName) {
       values.rep_name = repName;
@@ -111,7 +123,7 @@ export async function POST(req: NextRequest) {
       data: {
         websiteUrl: `https://${cleanDomain}`,
         businessEmail: businessEmail || user.businessEmail || "",
-        businessPhone: businessPhone || user.businessPhone || "",
+        a2pPhone,
       },
     });
 

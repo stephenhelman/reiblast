@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { requireMember } from "@/lib/requireMember";
 
 const LAND_SYSTEM_PROMPT = `You are a professional real estate wholesaler specializing in land and vacant lot acquisitions. You analyze a subject property and comparable land sales to return a structured JSON object.
 
@@ -164,6 +165,12 @@ OUTPUT — valid JSON only, no markdown, no preamble:
 }`;
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireMember(req);
+  } catch {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   let body: {
     subject?: unknown;
     comps?: unknown[];

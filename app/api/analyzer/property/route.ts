@@ -1,10 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { lookupProperty } from '@/lib/melissa'
 import { prisma } from '@/lib/prisma'
+import { requireMember } from '@/lib/requireMember'
 
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireMember(req)
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   let body: { formattedAddress?: string; locationId?: string }
   try {
     body = await req.json()

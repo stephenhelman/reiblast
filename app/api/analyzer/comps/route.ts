@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getSalesComps } from '@/lib/rentcast'
 import { prisma } from '@/lib/prisma'
+import { requireMember } from '@/lib/requireMember'
 
 // 1 mile ≈ 0.0145 degrees
 const RADIUS_DEG = 0.0145
@@ -129,6 +130,12 @@ function mapDbCompToComp(
 }
 
 export async function POST(req: NextRequest) {
+  try {
+    await requireMember(req)
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   let body: {
     lat?: number
     lng?: number

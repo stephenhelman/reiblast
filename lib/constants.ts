@@ -57,3 +57,10 @@ export const KNOWN_ADDONS = [
 ] as const;
 
 export type AddonSlug = typeof KNOWN_ADDONS[number];
+
+// GHL custom field key used for support-visibility OTP display (not the delivery path)
+export const ONBOARDING_OTP_VISIBILITY_FIELD = "otp_code";
+
+export const TOOLS_SESSION_COOKIE = "reiblast_tools_session";
+export const TOOLS_SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+export const TOOLS_OTP_SEND_COOLDOWN_MS = 60 * 1000;

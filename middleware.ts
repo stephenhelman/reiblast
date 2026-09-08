@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { verifyToolsSession } from "@/lib/toolsSession";
+import { TOOLS_SESSION_COOKIE } from "@/lib/constants";
 
-export function middleware(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   const hostname = request.headers.get("host") || "";
   const { pathname } = request.nextUrl;
 
@@ -11,14 +13,20 @@ export function middleware(request: NextRequest) {
     hostname === "localhost:3001";
 
   if (isToolsHost) {
-    // Widget routes — no auth, rewrite to /tools/widget/*
-    if (pathname.startsWith("/widget")) {
-      return NextResponse.rewrite(
-        new URL(`/tools/widget${pathname.replace("/widget", "")}`, request.url),
-      );
+    // /enter (and its verify/resend actions) is the only unauthenticated tool route —
+    // it's what mints the session in the first place. Every other tool route,
+    // widgets included, now requires a valid session. No public tool routes remain.
+    const isEnterRoute = pathname === "/enter" || pathname.startsWith("/enter/");
+
+    if (!isEnterRoute) {
+      const token = request.cookies.get(TOOLS_SESSION_COOKIE)?.value;
+      const session = token ? await verifyToolsSession(token) : null;
+
+      if (!session) {
+        return NextResponse.rewrite(new URL("/tools/session-expired", request.url));
+      }
     }
 
-    // All other tool routes — auth handled via token query param on each page
     return NextResponse.rewrite(
       new URL(`/tools${pathname === "/" ? "" : pathname}`, request.url),
     );

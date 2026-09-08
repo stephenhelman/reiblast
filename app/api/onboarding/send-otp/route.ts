@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { sendOTPEmail } from '@/lib/ghl'
+import { mintOtp, redeliverOtp } from '@/lib/otp'
+import { ONBOARDING_OTP_VISIBILITY_FIELD } from '@/lib/constants'
 
 const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
 
@@ -33,18 +34,6 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Account not found' }, { status: 404 })
     }
 
-    let otp = user.otpCode
-    let otpExpiry = user.otpExpiry
-
-    if (!otp || !otpExpiry || otpExpiry < new Date()) {
-      otp = Math.floor(100000 + Math.random() * 900000).toString()
-      otpExpiry = new Date(Date.now() + 10 * 60 * 1000)
-      await prisma.user.update({
-        where: { id: user.id },
-        data: { otpCode: otp, otpExpiry },
-      })
-    }
-
     const contactRes = await fetch(`${GHL_BASE_URL}/contacts/${contactId}`, {
       headers: hqHeaders(),
     })
@@ -56,13 +45,27 @@ export async function POST(req: NextRequest) {
     const contactData = await contactRes.json()
     const contact = contactData.contact
     const email: string = contact?.email || ''
-    const firstName: string = contact?.firstName || ''
+    const phone: string = contact?.phone || ''
 
     if (!email) {
       return NextResponse.json({ error: 'No email on contact' }, { status: 400 })
     }
 
-    await sendOTPEmail(contactId, email, otp, user.name || firstName)
+    const hasLiveCode =
+      user.otpCode && user.otpExpiry && user.otpExpiry > new Date() && user.otpAttempts < 3
+
+    const otpArgs = {
+      userId: user.id,
+      contactId,
+      phone,
+      visibilityField: ONBOARDING_OTP_VISIBILITY_FIELD,
+      flow: 'onboarding' as const,
+    }
+
+    const result = hasLiveCode ? await redeliverOtp(otpArgs) : await mintOtp(otpArgs)
+    if (!result.success) {
+      return NextResponse.json({ error: 'Failed to send code' }, { status: 500 })
+    }
 
     return NextResponse.json({ success: true, maskedEmail: maskEmail(email) })
   } catch (err) {

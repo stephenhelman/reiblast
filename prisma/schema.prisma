@@ -31,8 +31,9 @@ model User {
   businessCity        String?
   businessState       String?
   businessZip         String?
-  businessPhone       String?
+  businessPhone       String?   // Member's self-entered business phone from onboarding — NOT the A2P number.
   businessEmail       String?
+  a2pPhone            String?   // KYC-assigned A2P sending number, written by the custom-values webhook; null = not yet provisioned. This is the field the tools /enter gate reads.
   websiteUrl          String?
   targetMarket        String?
   smsComplianceAgreed Boolean  @default(false)
@@ -45,6 +46,8 @@ model User {
   // OTP verification
   otpCode                   String?
   otpExpiry                 DateTime?
+  otpAttempts               Int       @default(0)
+  otpLastSentAt             DateTime? // Send cooldown timestamp — set on every successful mint/resend/redeliver, independent of otpExpiry.
 
   // GHL
   ghlContactId              String?
