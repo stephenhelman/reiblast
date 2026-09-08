@@ -52,15 +52,19 @@ export async function verifyOtpAction(_prev: VerifyState, formData: FormData): P
   const token = await signToolsSession({ userId: user.id, locationId })
   const requestHeaders = await headers()
   const host = requestHeaders.get('host') || ''
+  const cookieDomain = toolsCookieDomain(host)
+  // TEMP DIAGNOSTIC — remove once session persistence is confirmed working.
+  console.log('[enter/verify] host:', host, 'cookieDomain:', cookieDomain, 'token length:', token.length)
   const cookieStore = await cookies()
   cookieStore.set(TOOLS_SESSION_COOKIE, token, {
     httpOnly: true,
     secure: true,
     sameSite: 'lax',
-    domain: toolsCookieDomain(host),
+    domain: cookieDomain,
     maxAge: TOOLS_SESSION_MAX_AGE_SECONDS,
     path: '/',
   })
+  console.log('[enter/verify] cookie set, redirecting to /')
 
   redirect('/')
 }

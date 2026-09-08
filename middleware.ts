@@ -20,7 +20,17 @@ export async function middleware(request: NextRequest) {
 
     if (!isEnterRoute) {
       const token = request.cookies.get(TOOLS_SESSION_COOKIE)?.value;
+      // TEMP DIAGNOSTIC — remove once session persistence is confirmed working.
+      console.log(
+        "[middleware] tools route",
+        pathname,
+        "cookie present:",
+        !!token,
+        "cookie length:",
+        token?.length ?? 0,
+      );
       const session = token ? await verifyToolsSession(token) : null;
+      console.log("[middleware] session valid:", !!session, session ? { userId: session.userId, locationId: session.locationId } : null);
 
       if (!session) {
         const expiredUrl = request.nextUrl.clone();

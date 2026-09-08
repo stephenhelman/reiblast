@@ -14,7 +14,22 @@ function getSecret(): Uint8Array {
   return new TextEncoder().encode(secret);
 }
 
+// TEMP DIAGNOSTIC — remove once session persistence is confirmed working.
+// Fingerprints the secret (never logs the secret itself) so sign-time and
+// verify-time can be compared across runtimes/deploys.
+async function secretFingerprint(): Promise<string> {
+  const secret = process.env.TOOLS_SESSION_SECRET;
+  if (!secret) return "MISSING";
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(secret));
+  const hex = Array.from(new Uint8Array(digest))
+    .slice(0, 4)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return `len=${secret.length} fp=${hex}`;
+}
+
 export async function signToolsSession(payload: ToolsSessionPayload): Promise<string> {
+  console.log("[toolsSession] signing with secret", await secretFingerprint());
   return new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
@@ -25,11 +40,19 @@ export async function signToolsSession(payload: ToolsSessionPayload): Promise<st
 export async function verifyToolsSession(token: string): Promise<ToolsSessionPayload | null> {
   try {
     const { payload } = await jwtVerify(token, getSecret());
+    console.log("[toolsSession] verify OK with secret", await secretFingerprint());
     if (typeof payload.userId !== "string" || typeof payload.locationId !== "string") {
+      console.log("[toolsSession] verify failed: payload missing userId/locationId", payload);
       return null;
     }
     return { userId: payload.userId, locationId: payload.locationId };
-  } catch {
+  } catch (err) {
+    console.log(
+      "[toolsSession] verify FAILED with secret",
+      await secretFingerprint(),
+      "error:",
+      err instanceof Error ? err.message : String(err),
+    );
     return null;
   }
 }
