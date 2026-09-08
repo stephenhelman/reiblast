@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { LogoFull } from "@/components/shared/Logo";
 import CostEstimatorButton from "@/components/marketing/CostEstimatorModal";
+import CheckoutModal from "@/components/marketing/CheckoutModal";
 
 const CORE_FEATURES = [
   "Pre-built wholesale pipeline",
@@ -14,8 +15,6 @@ const CORE_FEATURES = [
   "Dedicated tools portal",
   "New tools added monthly",
 ];
-
-const CORE_URL = process.env.NEXT_PUBLIC_CHECKOUT_URL_CORE;
 
 function CheckCircle() {
   return (
@@ -37,6 +36,7 @@ function CheckCircle() {
 
 export default function CheckoutPage() {
   const [coreExpanded, setCoreExpanded] = useState(true);
+  const [checkoutOpen, setCheckoutOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-black px-6 py-12">
@@ -162,29 +162,14 @@ export default function CheckoutPage() {
                 be charged.
               </p>
 
-              {CORE_URL ? (
-                <button
-                  onClick={() => {
-                    window.location.href = CORE_URL;
-                  }}
-                  className="mt-6 w-full bg-gold text-black font-bold text-lg py-4 rounded-xl hover:bg-gold-hover transition-colors"
-                >
-                  Start My Free Week →
-                </button>
-              ) : (
-                <>
-                  <button
-                    disabled
-                    className="mt-6 w-full bg-gold/30 text-black/50 font-bold text-lg py-4 rounded-xl cursor-not-allowed"
-                  >
-                    Start My Free Week →
-                  </button>
-                  <p className="text-white/50 text-xs text-center mt-2">
-                    Checkout temporarily unavailable — contact
-                    support@reiblast.app
-                  </p>
-                </>
-              )}
+              <button
+                onClick={() => setCheckoutOpen(true)}
+                className="mt-6 w-full bg-gold text-black font-bold text-lg py-4 rounded-xl hover:bg-gold-hover transition-colors"
+              >
+                Start My Free Week →
+              </button>
+
+              <CheckoutModal open={checkoutOpen} onClose={() => setCheckoutOpen(false)} />
 
               <p className="text-white/30 text-xs text-center mt-3">
                 🔒 Secure checkout via Authorize.net
