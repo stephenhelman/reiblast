@@ -9,6 +9,12 @@ import MinimalHeader from '@/components/tools/MinimalHeader'
 
 export const dynamic = 'force-dynamic'
 
+function formatPhone(raw: string): string {
+  const digits = raw.replace(/\D/g, '').slice(-10)
+  if (digits.length !== 10) return raw
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
+}
+
 function Screen({ title, message, children }: { title: string; message?: string; children?: React.ReactNode }) {
   return (
     <div className="min-h-screen bg-black">
@@ -104,7 +110,8 @@ export default async function EnterPage({
   return (
     <Screen title="Enter your code">
       <p className="mb-6 text-sm text-white/50">
-        {withinCooldown ? 'A code was already sent — check your phone.' : 'We texted a 6-digit code to your phone.'}
+        {withinCooldown ? 'A code was already sent to' : 'We sent a code to'} {formatPhone(user.a2pPhone)} inside your
+        REIblast CRM. Enter that code here.
       </p>
       <OtpForm locationId={locationId} />
     </Screen>
