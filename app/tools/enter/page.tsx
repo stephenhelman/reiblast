@@ -2,15 +2,21 @@ import { prisma } from '@/lib/prisma'
 import { mintOtp } from '@/lib/otp'
 import { TOOLS_OTP_SEND_COOLDOWN_MS } from '@/lib/constants'
 import { OtpForm } from './OtpForm'
+import MinimalHeader from '@/components/tools/MinimalHeader'
 
 export const dynamic = 'force-dynamic'
 
 function Screen({ title, message, children }: { title: string; message?: string; children?: React.ReactNode }) {
   return (
-    <div style={{ maxWidth: 420, margin: '80px auto', padding: 24, fontFamily: 'system-ui, sans-serif' }}>
-      <h1>{title}</h1>
-      {message && <p>{message}</p>}
-      {children}
+    <div className="min-h-screen bg-black">
+      <MinimalHeader title="REIblast Tools" />
+      <div className="flex items-center justify-center px-6 py-20">
+        <div className="w-full max-w-sm rounded-2xl border border-border-default bg-surface p-8 text-center">
+          <h1 className="mb-2 text-xl font-bold text-white">{title}</h1>
+          {message && <p className="text-sm leading-relaxed text-white/50">{message}</p>}
+          {children}
+        </div>
+      </div>
     </div>
   )
 }
@@ -83,7 +89,9 @@ export default async function EnterPage({
 
   return (
     <Screen title="Enter your code">
-      <p>{withinCooldown ? 'A code was already sent — check your phone.' : 'We texted a 6-digit code to your phone.'}</p>
+      <p className="mb-6 text-sm text-white/50">
+        {withinCooldown ? 'A code was already sent — check your phone.' : 'We texted a 6-digit code to your phone.'}
+      </p>
       <OtpForm locationId={locationId} />
     </Screen>
   )
