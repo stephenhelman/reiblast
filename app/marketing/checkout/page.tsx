@@ -39,7 +39,7 @@ export default function CheckoutPage() {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-black px-6 py-12">
+    <div className="min-h-screen bg-black px-6 pt-32 pb-12">
       <div className="max-w-275 mx-auto">
         {/* Header */}
         <div className="flex flex-col items-center text-center mb-12">
