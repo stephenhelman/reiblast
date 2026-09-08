@@ -1,6 +1,9 @@
+import { cookies } from 'next/headers'
+import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { mintOtp } from '@/lib/otp'
-import { TOOLS_OTP_SEND_COOLDOWN_MS } from '@/lib/constants'
+import { verifyToolsSession } from '@/lib/toolsSession'
+import { TOOLS_OTP_SEND_COOLDOWN_MS, TOOLS_SESSION_COOKIE } from '@/lib/constants'
 import { OtpForm } from './OtpForm'
 import MinimalHeader from '@/components/tools/MinimalHeader'
 
@@ -27,6 +30,17 @@ export default async function EnterPage({
   searchParams: { locationId?: string }
 }) {
   const locationId = searchParams.locationId || ''
+
+  // Already have a valid session for this location? Skip straight to the
+  // tools landing instead of re-sending an OTP on every menu-link click.
+  const cookieStore = await cookies()
+  const existingToken = cookieStore.get(TOOLS_SESSION_COOKIE)?.value
+  if (existingToken) {
+    const session = await verifyToolsSession(existingToken)
+    if (session && (!locationId || session.locationId === locationId)) {
+      redirect('/')
+    }
+  }
 
   if (!locationId) {
     return (
