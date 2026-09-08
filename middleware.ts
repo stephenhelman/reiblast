@@ -23,19 +23,22 @@ export async function middleware(request: NextRequest) {
       const session = token ? await verifyToolsSession(token) : null;
 
       if (!session) {
-        return NextResponse.rewrite(new URL("/tools/session-expired", request.url));
+        const expiredUrl = request.nextUrl.clone();
+        expiredUrl.pathname = "/tools/session-expired";
+        expiredUrl.search = "";
+        return NextResponse.rewrite(expiredUrl);
       }
     }
 
-    return NextResponse.rewrite(
-      new URL(`/tools${pathname === "/" ? "" : pathname}`, request.url),
-    );
+    const toolsUrl = request.nextUrl.clone();
+    toolsUrl.pathname = `/tools${pathname === "/" ? "" : pathname}`;
+    return NextResponse.rewrite(toolsUrl);
   }
 
   // Marketing site — all other hostnames
-  return NextResponse.rewrite(
-    new URL(`/marketing${pathname === "/" ? "" : pathname}`, request.url),
-  );
+  const marketingUrl = request.nextUrl.clone();
+  marketingUrl.pathname = `/marketing${pathname === "/" ? "" : pathname}`;
+  return NextResponse.rewrite(marketingUrl);
 }
 
 export const config = {
