@@ -1,9 +1,11 @@
-// PLACEHOLDER SEED DATA — every price, credit cost, allowance, tagline, hook, and
-// compare-copy string below is a dummy value for foundation/dev work. None of this
-// is approved pricing or copy. Do not ship copy or numbers from this file as-is.
+// PLACEHOLDER-BUT-GROUNDED SEED DATA — prices/allowances/credit costs below are
+// pulled from the product spec (credits ~$0.20 each) rather than invented, but
+// are still placeholders pending real pricing sign-off. Taglines/hooks/compare
+// copy remain pure placeholder strings. Do not ship any of this as-is.
 //
 // Read via lib/catalog.ts — do not import this file directly from components.
 
+import { CORE_PRICE, PLATFORM_NAME } from "@/lib/constants";
 import type { Bundle, Catalog, OpDirectService, Pack, SoloPlan, Tool } from "@/types/catalog";
 
 const tools: Tool[] = [
@@ -16,8 +18,10 @@ const tools: Tool[] = [
     icon: "/brand/icons/rei-score.svg",
     wordmark: "/brand/wordmarks/rei-score.png",
     category: "Analysis",
-    unit: "run",
+    unit: "analysis",
     href: "/rei-score",
+    consumesCredits: true,
+    creditCost: { amount: 5 },
     compareCopy: ["Placeholder: ARV + comps", "Placeholder: offer ranges", "Placeholder: MAO calc"],
   },
   {
@@ -29,8 +33,10 @@ const tools: Tool[] = [
     icon: "/brand/icons/rei-pack.svg",
     wordmark: "/brand/wordmarks/rei-pack.png",
     category: "Dispo",
-    unit: "run",
+    unit: "packet",
     href: "/rei-pack",
+    consumesCredits: true,
+    creditCost: { amount: 1 },
     compareCopy: ["Placeholder: flyer generation", "Placeholder: buyer matching"],
   },
   {
@@ -42,8 +48,11 @@ const tools: Tool[] = [
     icon: "/brand/icons/rei-ask.svg",
     wordmark: "/brand/wordmarks/rei-ask.png",
     category: "AI",
-    unit: "send",
+    unit: "query",
     href: "/rei-ask",
+    consumesCredits: true,
+    // 1 credit per 5 queries (0.2 credits/query) — represented as a fractional amount.
+    creditCost: { amount: 0.2 },
     compareCopy: ["Placeholder: natural-language queries", "Placeholder: deal summaries"],
   },
   {
@@ -57,6 +66,7 @@ const tools: Tool[] = [
     category: "Leads",
     unit: "lookup",
     href: "/rei-scrub",
+    consumesCredits: false,
     compareCopy: ["Placeholder: DNC scrub", "Placeholder: dedupe"],
   },
   {
@@ -68,8 +78,12 @@ const tools: Tool[] = [
     icon: "/brand/icons/rei-dispo.svg",
     wordmark: "/brand/wordmarks/rei-dispo.png",
     category: "Dispo",
-    unit: "run",
+    unit: "handoff",
     href: "/rei-dispo",
+    consumesCredits: true,
+    creditCost: { amount: 10 },
+    // REIacq + REIdispo are two Tool marks sharing ONE "bots" entitlement/subscription/pool.
+    entitlementGroup: "bots",
     compareCopy: ["Placeholder: buyer blasts", "Placeholder: contract tracking"],
   },
   {
@@ -81,8 +95,12 @@ const tools: Tool[] = [
     icon: "/brand/icons/rei-acq.svg",
     wordmark: "/brand/wordmarks/rei-acq.png",
     category: "Acquisitions",
-    unit: "run",
+    unit: "handoff",
     href: "/rei-acq",
+    consumesCredits: true,
+    creditCost: { amount: 10 },
+    // REIacq + REIdispo are two Tool marks sharing ONE "bots" entitlement/subscription/pool.
+    entitlementGroup: "bots",
     compareCopy: ["Placeholder: pipeline stages", "Placeholder: offer tracking"],
   },
   {
@@ -96,6 +114,7 @@ const tools: Tool[] = [
     category: "Closing",
     unit: "run",
     href: "/rei-close",
+    consumesCredits: false,
     compareCopy: ["Placeholder: title coordination", "Placeholder: doc tracking"],
   },
   {
@@ -109,6 +128,7 @@ const tools: Tool[] = [
     category: "Marketing",
     unit: "run",
     href: "/rei-site",
+    consumesCredits: false,
     free: true,
     compareCopy: ["Placeholder: hosted pages", "Placeholder: lead capture form"],
   },
@@ -123,46 +143,60 @@ const tools: Tool[] = [
     category: "Docs",
     unit: "run",
     href: "/rei-kit",
+    consumesCredits: false,
     comingSoon: true,
     compareCopy: ["Placeholder: state-specific contracts", "Placeholder: e-sign ready"],
   },
 ];
 
+// Universal shared-wallet packs — REItools-Architecture §5: 100/$18, 250/$40,
+// 600/$90 (~$0.18-0.20/credit, better rate at scale). Not tied to any tool —
+// packToUnits() translates a pack's credits into any metered tool's units.
 const packs: Pack[] = [
-  { type: "pack", id: "pack-rei-score-10", toolSlug: "rei-score", name: "10 runs", units: 10, price: 19 },
-  { type: "pack", id: "pack-rei-score-50", toolSlug: "rei-score", name: "50 runs", units: 50, price: 79 },
-  { type: "pack", id: "pack-rei-pack-10", toolSlug: "rei-pack", name: "10 runs", units: 10, price: 15 },
-  { type: "pack", id: "pack-rei-ask-100", toolSlug: "rei-ask", name: "100 sends", units: 100, price: 25 },
-  { type: "pack", id: "pack-rei-scrub-1000", toolSlug: "rei-scrub", name: "1,000 lookups", units: 1000, price: 29 },
-  { type: "pack", id: "pack-rei-dispo-10", toolSlug: "rei-dispo", name: "10 runs", units: 10, price: 19 },
-  { type: "pack", id: "pack-rei-acq-10", toolSlug: "rei-acq", name: "10 runs", units: 10, price: 19 },
-  { type: "pack", id: "pack-rei-close-10", toolSlug: "rei-close", name: "10 runs", units: 10, price: 15 },
+  { type: "pack", id: "pack-100", name: "100 credits", credits: 100, price: 18 },
+  { type: "pack", id: "pack-250", name: "250 credits", credits: 250, price: 40 },
+  { type: "pack", id: "pack-600", name: "600 credits", credits: 600, price: 90, bestValue: true },
 ];
 
-// Core is the baseline bundle at price 0 (+$0). Plus/Pro carry OP-only additive
-// prices on top of the 57 core membership — no bundle price includes the 57.
+// Core is a NON-purchasable reference baseline (§5) — what every member already
+// has via the base membership, not a store "bundle". Kept separate from
+// `bundles` below; see catalog.coreBaseline / lib/catalog's getCoreBaseline().
+// rei-scrub/rei-site stay listed in `covers` purely so resolveAllowance still
+// treats them as unlimited/free when Core is the active bundle — they're not
+// a marketed Core feature, just carried-forward baseline access.
+const coreBaseline: Bundle = {
+  type: "bundle",
+  id: "bundle-core",
+  slug: "core",
+  name: "Core",
+  tagline: "Placeholder tagline: your baseline REIblast membership access.",
+  price: 0,
+  covers: ["rei-score", "rei-scrub", "rei-site"],
+  allowances: { "rei-score": 10 },
+  compareCopy: ["Placeholder: included with your membership", "Placeholder: baseline REIscore analyses"],
+};
+
+// Two purchasable bundles only (§5), additive on top of the $57 membership.
+// allowanceByLevel: score {core:10, plus:50, pro:175}; ask {solo:500} from
+// Plus; pack {solo:150} from Plus; bots {solo:60 shared} from Pro only.
+// rei-scrub/rei-site carried forward in `covers` for the same reason as Core
+// (see above) — not a distinguishing Plus/Pro feature, just baseline access
+// that shouldn't disappear when a member upgrades off Core.
+//
+// À-la-carte checks (must stay true — see solo prices below):
+//   Plus $49 < score-plus($25) + ask($15) + pack($19) = $59
+//   Pro  $149 < score-pro($69) + ask($15) + pack($19) + bots($79) = $182
 const bundles: Bundle[] = [
-  {
-    type: "bundle",
-    id: "bundle-core",
-    slug: "core",
-    name: "Core",
-    tagline: "Placeholder tagline: what's included in every membership.",
-    price: 0,
-    covers: ["rei-score", "rei-scrub", "rei-site"],
-    allowances: { "rei-score": 10, "rei-scrub": 500 },
-    compareCopy: ["Placeholder: included with membership", "Placeholder: baseline analysis + scrub"],
-  },
   {
     type: "bundle",
     id: "bundle-plus",
     slug: "plus",
     name: "Plus",
     tagline: "Placeholder tagline: for active dispo.",
-    price: 47,
-    covers: ["rei-score", "rei-scrub", "rei-site", "rei-pack", "rei-dispo", "rei-ask"],
-    allowances: { "rei-score": 50, "rei-scrub": 2000, "rei-pack": 25, "rei-dispo": 25, "rei-ask": 300 },
-    compareCopy: ["Placeholder: everything in Core", "Placeholder: dispo + AI included"],
+    price: 49,
+    covers: ["rei-score", "rei-scrub", "rei-site", "rei-ask", "rei-pack"],
+    allowances: { "rei-score": 50, "rei-ask": 500, "rei-pack": 150 },
+    compareCopy: ["Placeholder: REIscore — 50/mo", "Placeholder: REIask — 500 queries/mo", "Placeholder: REIpack — 150/mo"],
   },
   {
     type: "bundle",
@@ -170,56 +204,60 @@ const bundles: Bundle[] = [
     slug: "pro",
     name: "Pro",
     tagline: "Placeholder tagline: full pipeline coverage.",
-    price: 97,
-    covers: [
-      "rei-score",
-      "rei-scrub",
-      "rei-site",
-      "rei-pack",
-      "rei-dispo",
-      "rei-ask",
-      "rei-acq",
-      "rei-close",
+    price: 149,
+    bestValue: true,
+    covers: ["rei-score", "rei-scrub", "rei-site", "rei-ask", "rei-pack", "bots"],
+    allowances: { "rei-score": 175, "rei-ask": 500, "rei-pack": 150, bots: 60 },
+    compareCopy: [
+      "Placeholder: REIscore — 175/mo",
+      "Placeholder: REIask — 500 queries/mo",
+      "Placeholder: REIpack — 150/mo",
+      "Placeholder: REIacq + REIdispo bots — 60 shared handoffs/mo",
     ],
-    allowances: {
-      "rei-score": 200,
-      "rei-scrub": 10000,
-      "rei-pack": 100,
-      "rei-dispo": 100,
-      "rei-ask": 1000,
-      "rei-acq": 100,
-      "rei-close": 50,
-    },
-    compareCopy: ["Placeholder: everything in Plus", "Placeholder: acquisitions + closing included"],
   },
 ];
 
+// Solo subs (§5) — REIscore has two tiers (Plus-equivalent, Pro-equivalent);
+// REIask, REIpack, and the shared "bots" pool each have one.
 const soloPlans: SoloPlan[] = [
-  { type: "solo-plan", id: "solo-rei-score", toolSlug: "rei-score", name: "REIscore solo", price: 29, allowance: 25 },
-  { type: "solo-plan", id: "solo-rei-ask", toolSlug: "rei-ask", name: "REIask solo", price: 19, allowance: 200 },
-  { type: "solo-plan", id: "solo-rei-acq", toolSlug: "rei-acq", name: "REIacq solo", price: 39, allowance: 25 },
+  { type: "solo-plan", id: "score-plus-solo", entitlementKey: "rei-score", name: "REIscore solo — Plus", price: 25, allowance: 50 },
+  { type: "solo-plan", id: "score-pro-solo", entitlementKey: "rei-score", name: "REIscore solo — Pro", price: 69, allowance: 175 },
+  { type: "solo-plan", id: "ask-sub", entitlementKey: "rei-ask", name: "REIask solo", price: 15, allowance: 500 },
+  { type: "solo-plan", id: "pack-sub", entitlementKey: "rei-pack", name: "REIpack solo", price: 19, allowance: 150 },
+  { type: "solo-plan", id: "bots-sub", entitlementKey: "bots", name: "REIacq + REIdispo bots", price: 79, allowance: 60 },
 ];
 
+// Done-for-you, one-time builds distributed by OP Web Studio — separate from the
+// metered/free rei-site & rei-kit Tool entries above (those are the in-app tools;
+// these are the store's build-it-for-you services, matching the store mockup).
+// §5: both are launchable:false, consumesCredits:false, bucket "op-direct", no
+// metering/allowance — the OpDirectService type has no such fields because
+// nothing (cardStatus, packToUnits, resolveAllowance) is ever called on one;
+// `type: "op-direct"` already IS the bucket discriminator, and REIsite/REIkit
+// never appear as launcher cards, so "not launchable/not metered" is simply
+// true by construction rather than a flag to set.
 const opDirectServices: OpDirectService[] = [
   {
     type: "op-direct",
-    id: "op-direct-cold-calling",
-    slug: "cold-calling",
-    name: "OP Cold Calling",
-    tagline: "Placeholder tagline: done-for-you dialing.",
-    hook: "Placeholder hook: our team calls your list for you.",
+    id: "op-direct-site",
+    slug: "site",
+    name: "REI/site",
+    tagline: "Placeholder tagline: a compliant site built to book you deals.",
+    hook: "Placeholder hook: a conversion-built website wired straight into your CRM, done for you start to finish.",
     price: 500,
-    compareCopy: ["Placeholder: dedicated caller", "Placeholder: weekly reporting"],
+    toolSlug: "rei-site",
+    compareCopy: ["Placeholder: full build + SEO", "Placeholder: routes leads into your CRM"],
   },
   {
     type: "op-direct",
-    id: "op-direct-va-support",
-    slug: "va-support",
-    name: "OP VA Support",
-    tagline: "Placeholder tagline: dedicated virtual assistant.",
-    hook: "Placeholder hook: hand off the busywork.",
-    price: 800,
-    compareCopy: ["Placeholder: 20hrs/week", "Placeholder: trained on your SOPs"],
+    id: "op-direct-kit",
+    slug: "kit",
+    name: "REI/kit",
+    tagline: "Placeholder tagline: look legit — logo and brand kit, done for you.",
+    hook: "Placeholder hook: a full logo and brand kit so you look established from day one.",
+    price: 250, // TBD — placeholder, unset in the product spec.
+    toolSlug: "rei-kit",
+    compareCopy: ["Placeholder: logo + brand marks", "Placeholder: ready for site, packets, signage"],
   },
 ];
 
@@ -227,6 +265,8 @@ export const catalog: Catalog = {
   tools,
   packs,
   bundles,
+  coreBaseline,
   soloPlans,
   opDirectServices,
+  membership: { name: PLATFORM_NAME, price: CORE_PRICE },
 };

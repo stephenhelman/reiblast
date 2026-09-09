@@ -22,16 +22,12 @@ interface ToolsLauncherClientProps {
 export default function ToolsLauncherClient({ member, tools, bundle, soloPlans }: ToolsLauncherClientProps) {
   const [choiceTool, setChoiceTool] = useState<Tool | null>(null)
   const firstName = member.name.split(' ')[0]
-  const totalCredits = Object.values(member.entitlements.creditBalances).reduce(
-    (sum, balance) => sum + (balance ?? 0),
-    0,
-  )
 
   return (
     <main className="min-h-screen bg-black text-white">
       <AppHeader
         brandSlot={<Image src={portalBrand.wordmark} alt="REI/tools" height={30} width={140} style={{ height: 30, width: 'auto' }} />}
-        account={{ name: member.name, creditBalance: totalCredits }}
+        account={{ name: member.name, creditBalance: member.entitlements.creditBalance }}
         actionSlot={
           <Link href={buildStoreLink({ from: 'launcher', intent: 'credits' })}>
             <Button variant="gold" size="sm">

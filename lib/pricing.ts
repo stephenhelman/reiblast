@@ -1,10 +1,15 @@
 // Pure pricing/entitlement functions. No I/O, no catalog reads — callers pass in
 // the tool/member/bundle data (from lib/catalog.ts) they already have.
+//
+// These are DISPLAY derivations only — cardStatus/resolveAllowance/packToUnits
+// compute what a card or price should show. None of this debits the wallet,
+// decrements an allowance pool, or enforces entitlement; that's separate,
+// unbuilt wallet-mechanics work.
 
-import type { Bundle, CardStatus, Member, Pack, SoloPlan, Tool, ToolSlug } from "@/types/catalog";
+import type { Bundle, CardStatus, EntitlementKey, Member, Pack, SoloPlan, Tool } from "@/types/catalog";
 
 export interface CartItem {
-  toolSlug: ToolSlug;
+  entitlementKey: EntitlementKey;
   price: number;
 }
 
@@ -13,18 +18,27 @@ export interface ResolvedAllowance {
   allowance: number | null;
 }
 
-/** Units a given pack grants for a given tool. Throws if the pack isn't for that tool. */
+/** The key a tool's allowance/covers/solo-plan lookups use — its own slug, unless it shares a pooled entitlement (e.g. rei-acq/rei-dispo -> "bots"). */
+function entitlementKeyFor(tool: Tool): EntitlementKey {
+  return tool.entitlementGroup ?? tool.slug;
+}
+
+/**
+ * Units a universal credit pack buys for a given tool: floor(pack.credits / tool.creditCost.amount).
+ * Works for any metered tool from the same shared-wallet pack — there's no
+ * per-tool pack to mismatch against, so this never throws. A tool that
+ * doesn't consume credits (consumesCredits: false, or no creditCost) simply
+ * yields 0 — credits don't apply to it.
+ */
 export function packToUnits(pack: Pack, tool: Tool): number {
-  if (pack.toolSlug !== tool.slug) {
-    throw new Error(`Pack ${pack.id} is not for tool ${tool.slug}`);
-  }
-  return pack.units;
+  if (!tool.consumesCredits || !tool.creditCost) return 0;
+  return Math.floor(pack.credits / tool.creditCost.amount);
 }
 
 /**
  * Highest covering plan wins — bundle and solo-plan allowances never stack.
- * If both the member's bundle and a solo plan cover the tool, the larger
- * allowance is used, not their sum.
+ * If both the member's bundle and a solo plan cover the tool's entitlement,
+ * the larger allowance is used, not their sum.
  */
 export function resolveAllowance(
   tool: Tool,
@@ -32,12 +46,19 @@ export function resolveAllowance(
   bundle: Bundle | null,
   soloPlans: SoloPlan[],
 ): ResolvedAllowance {
-  const bundleAllowance =
-    bundle && bundle.covers.includes(tool.slug) ? bundle.allowances[tool.slug] ?? Infinity : null;
+  const key = entitlementKeyFor(tool);
 
-  const hasSoloPlan = member.entitlements.soloPlanToolSlugs.includes(tool.slug);
-  const soloPlan = hasSoloPlan ? soloPlans.find((plan) => plan.toolSlug === tool.slug) : undefined;
-  const soloAllowance = soloPlan ? soloPlan.allowance : null;
+  const bundleAllowance =
+    bundle && bundle.covers.includes(key) ? bundle.allowances[key] ?? Infinity : null;
+
+  // An entitlement can have more than one purchasable tier (e.g. REIscore Plus
+  // vs Pro solo) — select the owned plan for this key with the highest
+  // allowance, since owning one tier is what matters, not which was found first.
+  const ownedSoloPlans = soloPlans.filter(
+    (plan) => plan.entitlementKey === key && member.entitlements.soloPlanIds.includes(plan.id),
+  );
+  const soloAllowance =
+    ownedSoloPlans.length > 0 ? Math.max(...ownedSoloPlans.map((plan) => plan.allowance)) : null;
 
   if (bundleAllowance === null && soloAllowance === null) {
     return { source: null, allowance: null };
@@ -50,7 +71,11 @@ export function resolveAllowance(
   return { source: "solo-plan", allowance: soloAllowance };
 }
 
-/** Resolves the launcher card status for a tool given a member and their active bundle. */
+/**
+ * Resolves the launcher/store card status for a tool given a member and their
+ * active bundle. Display only: "on-credits"/"out-of-credits" both read the
+ * ONE shared wallet balance — they do not track or debit anything.
+ */
 export function cardStatus(
   tool: Tool,
   member: Member,
@@ -63,10 +88,10 @@ export function cardStatus(
   const { allowance } = resolveAllowance(tool, member, bundle, soloPlans);
   if (allowance !== null) return "in-plan";
 
-  const creditBalance = member.entitlements.creditBalances[tool.slug] ?? 0;
-  if (creditBalance > 0) return "on-credits";
+  if (!tool.consumesCredits) return "locked";
 
-  if (member.entitlements.toolsWithCreditHistory.includes(tool.slug)) return "out-of-credits";
+  if (member.entitlements.creditBalance > 0) return "on-credits";
+  if (member.entitlements.hasEverBoughtCredits) return "out-of-credits";
 
   return "locked";
 }
@@ -79,11 +104,11 @@ export function smartCart(cart: CartItem[], bundles: Bundle[]): Bundle | null {
   if (cart.length === 0) return null;
 
   const cartTotal = cart.reduce((sum, item) => sum + item.price, 0);
-  const cartSlugs = cart.map((item) => item.toolSlug);
+  const cartKeys = cart.map((item) => item.entitlementKey);
 
   const qualifying = bundles.filter(
     (bundle) =>
-      cartSlugs.every((slug) => bundle.covers.includes(slug)) && bundle.price < cartTotal,
+      cartKeys.every((key) => bundle.covers.includes(key)) && bundle.price < cartTotal,
   );
 
   if (qualifying.length === 0) return null;

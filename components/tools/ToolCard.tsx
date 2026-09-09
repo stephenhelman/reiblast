@@ -75,8 +75,7 @@ export default function ToolCard({ tool, member, bundle, soloPlans, onKeepGoing 
   } else if (status === 'free') {
     infoLine = <Tag tone="green">Free</Tag>
   } else if (status === 'on-credits' || status === 'out-of-credits') {
-    const balance = member.entitlements.creditBalances[tool.slug] ?? 0
-    infoLine = <CreditCoin value={`${balance} credits`} size="sm" />
+    infoLine = <CreditCoin value={`${member.entitlements.creditBalance} credits`} size="sm" />
   }
 
   const blurClasses = bodyBlurred ? 'blur-sm opacity-50 pointer-events-none select-none' : ''

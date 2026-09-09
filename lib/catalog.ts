@@ -16,6 +16,7 @@ import type {
   Bundle,
   BundleSlug,
   Catalog,
+  EntitlementKey,
   Member,
   OpDirectService,
   Pack,
@@ -36,26 +37,39 @@ export function getTool(slug: ToolSlug): Tool | undefined {
   return catalog.tools.find((tool) => tool.slug === slug);
 }
 
-export function getPacks(toolSlug?: ToolSlug): Pack[] {
-  return toolSlug ? catalog.packs.filter((pack) => pack.toolSlug === toolSlug) : catalog.packs;
+/** Packs are universal (shared-wallet credits) — no tool filter to apply. */
+export function getPacks(): Pack[] {
+  return catalog.packs;
 }
 
+/** Purchasable bundles only (Plus/Pro) — for the store's Bundles tab list. */
 export function getBundles(): Bundle[] {
   return catalog.bundles;
 }
 
+/** The non-purchasable Core reference baseline — render separately, never in a purchasable list. */
+export function getCoreBaseline(): Bundle {
+  return catalog.coreBaseline;
+}
+
+/** Resolves a bundle by slug for allowance/coverage lookups — checks purchasable bundles AND the Core baseline, since a member's bundleSlug can be "core". */
 export function getBundle(slug: BundleSlug): Bundle | undefined {
+  if (slug === catalog.coreBaseline.slug) return catalog.coreBaseline;
   return catalog.bundles.find((bundle) => bundle.slug === slug);
 }
 
-export function getSoloPlans(toolSlug?: ToolSlug): SoloPlan[] {
-  return toolSlug
-    ? catalog.soloPlans.filter((plan) => plan.toolSlug === toolSlug)
+export function getSoloPlans(entitlementKey?: EntitlementKey): SoloPlan[] {
+  return entitlementKey
+    ? catalog.soloPlans.filter((plan) => plan.entitlementKey === entitlementKey)
     : catalog.soloPlans;
 }
 
 export function getOpDirectServices(): OpDirectService[] {
   return catalog.opDirectServices;
+}
+
+export function getMembership(): Catalog["membership"] {
+  return catalog.membership;
 }
 
 /**
