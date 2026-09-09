@@ -9,6 +9,8 @@
   --color-border-default: #2A2A2A;
   --color-silver: #C0C0C0;
   --color-gray: #888888;
+  --color-green: #3fb950;
+  --color-red: #f0464b;
 }
 
 :root {

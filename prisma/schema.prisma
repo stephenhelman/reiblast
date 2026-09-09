@@ -245,3 +245,109 @@ model LandDeal {
 
   @@unique([locationId, address])
 }
+
+// --- Catalog / launcher target schema -------------------------------------
+// Mirrors types/catalog.ts. NOT wired to any reader yet and NOT migrated —
+// config/catalog.ts + config/member.mock.ts remain the source of truth until
+// lib/catalog.ts is switched over. Kept here so the eventual migration is a
+// mechanical `prisma migrate dev`, not a schema design exercise.
+
+model CatalogTool {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  tagline     String
+  hook        String
+  icon        String
+  wordmark    String
+  category    String
+  unit        String
+  free        Boolean  @default(false)
+  comingSoon  Boolean  @default(false)
+  compareCopy String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  packs          CatalogPack[]
+  soloPlans      CatalogSoloPlan[]
+  creditBalances MemberCreditBalance[]
+}
+
+model CatalogPack {
+  id        String      @id @default(cuid())
+  toolSlug  String
+  tool      CatalogTool @relation(fields: [toolSlug], references: [slug])
+  name      String
+  units     Int
+  price     Float
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([toolSlug])
+}
+
+model CatalogBundle {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  tagline     String
+  price       Float
+  covers      String[]
+  allowances  Json
+  compareCopy String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members MemberEntitlement[]
+}
+
+model CatalogSoloPlan {
+  id        String      @id @default(cuid())
+  toolSlug  String
+  tool      CatalogTool @relation(fields: [toolSlug], references: [slug])
+  name      String
+  price     Float
+  allowance Int
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  @@index([toolSlug])
+}
+
+model CatalogOpDirectService {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  tagline     String
+  hook        String
+  price       Float
+  compareCopy String[]
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model MemberEntitlement {
+  id                     String         @id @default(cuid())
+  userId                 String         @unique
+  bundleSlug             String?
+  bundle                 CatalogBundle? @relation(fields: [bundleSlug], references: [slug])
+  soloPlanToolSlugs      String[]
+  toolsWithCreditHistory String[]
+  opDirectServiceIds     String[]
+  createdAt              DateTime       @default(now())
+  updatedAt              DateTime       @updatedAt
+
+  creditBalances MemberCreditBalance[]
+}
+
+model MemberCreditBalance {
+  id            String            @id @default(cuid())
+  entitlementId String
+  entitlement   MemberEntitlement @relation(fields: [entitlementId], references: [id])
+  toolSlug      String
+  tool          CatalogTool       @relation(fields: [toolSlug], references: [slug])
+  balance       Int               @default(0)
+  updatedAt     DateTime          @updatedAt
+
+  @@unique([entitlementId, toolSlug])
+}

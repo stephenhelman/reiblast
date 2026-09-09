@@ -2,7 +2,7 @@
 
 import React from 'react'
 
-type Variant = 'primary' | 'outline' | 'ghost'
+type Variant = 'gold' | 'gold-outline' | 'quiet' | 'primary' | 'outline' | 'ghost'
 type Size = 'sm' | 'md' | 'lg'
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
@@ -12,13 +12,17 @@ interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   children: React.ReactNode
 }
 
+// 'primary'/'outline'/'ghost' are kept as aliases of 'gold'/'gold-outline'/'quiet'
+// for existing call sites — new primitives should use the gold/quiet naming.
 const variantClasses: Record<Variant, string> = {
-  primary:
-    'bg-gold text-black hover:bg-gold-hover font-semibold',
+  gold: 'bg-gold text-black hover:bg-gold-hover font-semibold',
+  'gold-outline':
+    'border border-gold text-gold bg-transparent hover:bg-gold/10 font-semibold',
+  quiet: 'border-none bg-transparent text-gold hover:bg-gold/10 font-semibold',
+  primary: 'bg-gold text-black hover:bg-gold-hover font-semibold',
   outline:
     'border border-gold text-gold bg-transparent hover:bg-gold/10 font-semibold',
-  ghost:
-    'border-none bg-transparent text-gold hover:bg-gold/10 font-semibold',
+  ghost: 'border-none bg-transparent text-gold hover:bg-gold/10 font-semibold',
 }
 
 const sizeClasses: Record<Size, string> = {
@@ -28,7 +32,7 @@ const sizeClasses: Record<Size, string> = {
 }
 
 export default function Button({
-  variant = 'primary',
+  variant = 'gold',
   size = 'md',
   loading = false,
   disabled,
