@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { mintOtp, redeliverOtp } from '@/lib/otp'
 import { ONBOARDING_OTP_VISIBILITY_FIELD } from '@/lib/constants'
+import { guardRegion } from '@/lib/geo'
 
 const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
 
@@ -20,6 +21,11 @@ function maskEmail(email: string): string {
 }
 
 export async function POST(req: NextRequest) {
+  // US-only funnel gate — mirrors the middleware page gate so the endpoint
+  // behind the form can't be called directly from a blocked region.
+  const blocked = guardRegion(req)
+  if (blocked) return blocked
+
   try {
     const { contactId } = await req.json()
     if (!contactId) {

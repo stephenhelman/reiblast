@@ -1,4 +1,5 @@
-import { NextResponse } from 'next/server'
+import { NextRequest, NextResponse } from 'next/server'
+import { guardRegion } from '@/lib/geo'
 
 const GHL_BASE_URL = 'https://services.leadconnectorhq.com'
 
@@ -21,7 +22,12 @@ function maskName(firstName: string, lastName: string): string {
   return `${firstName} ${last}.`.trim()
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // US-only funnel gate — this feeds the social-proof ticker on the gated
+  // /onboarding page, so it follows the same policy as the rest of the flow.
+  const blocked = guardRegion(req)
+  if (blocked) return blocked
+
   try {
     const fifteenMinutesAgo = Date.now() - 15 * 60 * 1000
 

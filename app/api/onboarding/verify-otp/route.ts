@@ -2,8 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { verifyOtp } from '@/lib/otp'
 import { ONBOARDING_OTP_VISIBILITY_FIELD } from '@/lib/constants'
+import { guardRegion } from '@/lib/geo'
 
 export async function POST(req: NextRequest) {
+  // US-only funnel gate — mirrors the middleware page gate so the endpoint
+  // behind the form can't be called directly from a blocked region.
+  const blocked = guardRegion(req)
+  if (blocked) return blocked
+
   try {
     const body = await req.json()
     const { contactId, otp } = body

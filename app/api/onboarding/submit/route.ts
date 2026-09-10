@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { moveToStage, updateHQContact } from '@/lib/ghl'
 import { ONBOARDING_STAGES, SUPPORT_EMAIL } from '@/lib/constants'
+import { guardRegion } from '@/lib/geo'
 
 const REQUIRED_FIELDS = [
   'email', 'legalBusinessName', 'ein', 'businessType',
@@ -10,6 +11,11 @@ const REQUIRED_FIELDS = [
 ]
 
 export async function POST(req: NextRequest) {
+  // US-only funnel gate — mirrors the middleware page gate so the endpoint
+  // behind the form can't be called directly from a blocked region.
+  const blocked = guardRegion(req)
+  if (blocked) return blocked
+
   let body: Record<string, unknown>
   try {
     body = await req.json()

@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { verifyToolsSession } from "@/lib/toolsSession";
 import { TOOLS_SESSION_COOKIE } from "@/lib/constants";
+import {
+  REGION_UNAVAILABLE_PATH,
+  getCountry,
+  isCountryAllowed,
+  isGatedPath,
+} from "@/lib/geo";
 
 export async function middleware(request: NextRequest) {
   const hostname = request.headers.get("host") || "";
@@ -46,6 +52,23 @@ export async function middleware(request: NextRequest) {
   }
 
   // Marketing site — all other hostnames
+
+  // US-only gate on the paid funnel. Scoped to the checkout/onboarding entry
+  // points in GATED_PREFIXES; the rest of the marketing site stays globally
+  // viewable. This runs at the edge before the rewrite, so a gated route is
+  // unreachable by direct URL for a blocked visitor — not merely hidden in the UI.
+  //
+  // Scoping lives here rather than in `config.matcher` because this middleware's
+  // matcher is load-bearing: it must keep matching every path to perform the
+  // host-based /marketing and /tools rewrites below. Narrowing the matcher to the
+  // checkout paths would stop the rest of the site from resolving at all.
+  if (isGatedPath(pathname) && !isCountryAllowed(getCountry(request))) {
+    const blockedUrl = request.nextUrl.clone();
+    blockedUrl.pathname = REGION_UNAVAILABLE_PATH;
+    blockedUrl.search = "";
+    return NextResponse.redirect(blockedUrl);
+  }
+
   const marketingUrl = request.nextUrl.clone();
   marketingUrl.pathname = `/marketing${pathname === "/" ? "" : pathname}`;
   return NextResponse.rewrite(marketingUrl);
