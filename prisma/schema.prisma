@@ -62,6 +62,11 @@ model User {
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
+  // REItools engine back-relations — schema-only, no columns on User.
+  wallet        Wallet?
+  subscriptions Subscription[]
+  ledgerEntries LedgerEntry[]
+
   @@unique([ghlLocationId], map: "User_ghlLocationId_key")
 }
 
@@ -246,108 +251,226 @@ model LandDeal {
   @@unique([locationId, address])
 }
 
-// --- Catalog / launcher target schema -------------------------------------
-// Mirrors types/catalog.ts. NOT wired to any reader yet and NOT migrated —
-// config/catalog.ts + config/member.mock.ts remain the source of truth until
-// lib/catalog.ts is switched over. Kept here so the eventual migration is a
-// mechanical `prisma migrate dev`, not a schema design exercise.
+// --- REItools engine: catalog, entitlement, wallet + ledger ---------------
+// Spec: .claude/rei-tools/REItools-Wallet-Engine-Sprint.md. Additive — nothing
+// in the running app reads these tables yet (lib/catalog.ts still reads the
+// config/catalog.ts const seed). Money is Int cents. Each number is owned by
+// one canonical row and read through FKs, never copied down. Every relation is
+// onDelete: Restrict so catalog/user deletes can't erase ledger provenance.
 
-model CatalogTool {
-  id          String   @id @default(cuid())
-  slug        String   @unique
-  name        String
-  tagline     String
-  hook        String
-  icon        String
-  wordmark    String
-  category    String
-  unit        String
-  free        Boolean  @default(false)
-  comingSoon  Boolean  @default(false)
-  compareCopy String[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  packs          CatalogPack[]
-  soloPlans      CatalogSoloPlan[]
-  creditBalances MemberCreditBalance[]
+enum FeatureBucket {
+  core_included
+  addon
 }
 
-model CatalogPack {
-  id        String      @id @default(cuid())
-  toolSlug  String
-  tool      CatalogTool @relation(fields: [toolSlug], references: [slug])
-  name      String
-  units     Int
-  price     Float
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-
-  @@index([toolSlug])
+enum MeteringShape {
+  per_cycle
+  by_volume
+  none
 }
 
-model CatalogBundle {
-  id          String   @id @default(cuid())
-  slug        String   @unique
-  name        String
-  tagline     String
-  price       Float
-  covers      String[]
-  allowances  Json
-  compareCopy String[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-
-  members MemberEntitlement[]
+// Declaration order IS the ordering — replace-not-stack "highest wins" is max(level).
+enum TierLevel {
+  base
+  plus
+  pro
 }
 
-model CatalogSoloPlan {
-  id        String      @id @default(cuid())
-  toolSlug  String
-  tool      CatalogTool @relation(fields: [toolSlug], references: [slug])
-  name      String
-  price     Float
-  allowance Int
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
-
-  @@index([toolSlug])
+enum BundleLevel {
+  plus
+  pro
 }
 
-model CatalogOpDirectService {
-  id          String   @id @default(cuid())
-  slug        String   @unique
-  name        String
-  tagline     String
-  hook        String
-  price       Float
-  compareCopy String[]
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+enum SubscriptionType {
+  tool_sub
+  bundle
 }
 
-model MemberEntitlement {
-  id                     String         @id @default(cuid())
-  userId                 String         @unique
-  bundleSlug             String?
-  bundle                 CatalogBundle? @relation(fields: [bundleSlug], references: [slug])
-  soloPlanToolSlugs      String[]
-  toolsWithCreditHistory String[]
-  opDirectServiceIds     String[]
-  createdAt              DateTime       @default(now())
-  updatedAt              DateTime       @updatedAt
-
-  creditBalances MemberCreditBalance[]
+enum SubscriptionStatus {
+  active
+  past_due
+  canceled
 }
 
-model MemberCreditBalance {
-  id            String            @id @default(cuid())
-  entitlementId String
-  entitlement   MemberEntitlement @relation(fields: [entitlementId], references: [id])
-  toolSlug      String
-  tool          CatalogTool       @relation(fields: [toolSlug], references: [slug])
-  balance       Int               @default(0)
-  updatedAt     DateTime          @updatedAt
+enum LedgerKind {
+  funding
+  consumption
+}
 
-  @@unique([entitlementId, toolSlug])
+enum FundingReason {
+  pack_purchase
+  tier_grant
+  bundle_grant
+  adjustment
+}
+
+enum ConsumptionOutcome {
+  success
+  fail
+}
+
+// Billing / metering / entitlement unit. Owns everything shared across its
+// surfaces (bots = one Feature, two surfaces). No `active` — availability is
+// derived from its surfaces.
+model Feature {
+  id               String        @id @default(cuid())
+  slug             String        @unique
+  bucket           FeatureBucket
+  meteringShape    MeteringShape
+  creditCost       Int           // credits per debit
+  unitsPerDebit    Int           @default(1) // REIask: 1 credit per 5 units
+  consumptionEvent String
+  unifiedName      String?       // shown only when ALL surfaces are active (REIclose)
+  unifiedTagline   String?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  tiers         Tier[]
+  surfaces      Tool[]
+  ledgerEntries LedgerEntry[]
+}
+
+// Render surface / card. Owns per-card identity and THE activation gate.
+model Tool {
+  id           String   @id @default(cuid())
+  slug         String   @unique
+  featureId    String
+  feature      Feature  @relation(fields: [featureId], references: [id], onDelete: Restrict)
+  name         String
+  tagline      String
+  hook         String
+  icon         String
+  wordmark     String
+  category     String
+  unit         String   // translator unit ("analyses", "handoffs")
+  active       Boolean  @default(false) // per-surface gate — activation is a data change, not a deploy
+  launchable   Boolean
+  launchTarget String
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  ledgerEntries LedgerEntry[]
+}
+
+// Canonical per (feature, level) — owns price + allowance.
+model Tier {
+  id            String    @id @default(cuid())
+  featureId     String
+  feature       Feature   @relation(fields: [featureId], references: [id], onDelete: Restrict)
+  level         TierLevel
+  displayName   String?   // optional override; default derives from name + level suffix
+  priceCents    Int       // 0 for membership-granted base tiers
+  allowance     Int?      // included units per period; null = unlimited
+  stripePriceId String?   // null for membership-granted base tiers
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  bundles       BundleTier[]
+  subscriptions Subscription[]
+
+  @@unique([featureId, level])
+}
+
+// No `active` — availability derives from all covered surfaces being active.
+// No base bundle: "included in Core" is display-only, never a row.
+model Bundle {
+  id            String      @id @default(cuid())
+  slug          String      @unique
+  name          String
+  level         BundleLevel
+  priceCents    Int
+  stripePriceId String?
+  createdAt     DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  tiers         BundleTier[]
+  subscriptions Subscription[]
+}
+
+// Which specific tier rows a bundle covers. Insert/delete only.
+model BundleTier {
+  id        String   @id @default(cuid())
+  bundleId  String
+  bundle    Bundle   @relation(fields: [bundleId], references: [id], onDelete: Restrict)
+  tierId    String
+  tier      Tier     @relation(fields: [tierId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
+
+  @@unique([bundleId, tierId])
+}
+
+// Universal wallet top-up — not per-tool.
+model CreditPack {
+  id            String   @id @default(cuid())
+  slug          String   @unique
+  credits       Int
+  priceCents    Int
+  stripePriceId String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  fundingEntries LedgerEntry[]
+}
+
+// Transmorphic: points at a Tier (tool_sub) or a Bundle (bundle); stores no
+// numbers. NOT yet enforced here (deferred to the logic-layer chat): one
+// active tool_sub per (user, feature), and type matching tierId/bundleId.
+model Subscription {
+  id                   String             @id @default(cuid())
+  userId               String
+  user                 User               @relation(fields: [userId], references: [id], onDelete: Restrict)
+  type                 SubscriptionType
+  tierId               String?            // set for tool_sub
+  tier                 Tier?              @relation(fields: [tierId], references: [id], onDelete: Restrict)
+  bundleId             String?            // set for bundle
+  bundle               Bundle?            @relation(fields: [bundleId], references: [id], onDelete: Restrict)
+  status               SubscriptionStatus
+  periodStart          DateTime           // current billing period = the allowance window
+  periodEnd            DateTime
+  stripeSubscriptionId String?
+  createdAt            DateTime           @default(now())
+  updatedAt            DateTime           @updatedAt
+
+  @@index([userId])
+}
+
+// The single shared credit balance — the one materialized number.
+model Wallet {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  balance   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+// Append-only — never updated. creditDelta is the only balance-affecting field.
+// Funding fields are set on kind = funding rows, consumption fields on
+// kind = consumption rows.
+model LedgerEntry {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Restrict)
+  kind        LedgerKind
+  creditDelta Int
+  createdAt   DateTime   @default(now())
+
+  // funding
+  reason       FundingReason?
+  creditPackId String?
+  creditPack   CreditPack?    @relation(fields: [creditPackId], references: [id], onDelete: Restrict)
+  refId        String?        // Stripe / Transaction handle for non-pack funding
+
+  // consumption
+  toolId           String?             // which surface ran the unit
+  tool             Tool?               @relation(fields: [toolId], references: [id], onDelete: Restrict)
+  featureId        String?             // which pool it drew from — group-by key for allowance-used
+  feature          Feature?            @relation(fields: [featureId], references: [id], onDelete: Restrict)
+  unitCount        Int?
+  vendorCostCents  Int?                // logged even at zero debit and on fail
+  creditsDebited   Int?
+  allowanceCovered Boolean?
+  outcome          ConsumptionOutcome?
+
+  @@index([userId, featureId, createdAt])
 }
