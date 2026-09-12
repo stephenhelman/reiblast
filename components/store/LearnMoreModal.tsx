@@ -5,23 +5,23 @@ import Image from 'next/image'
 import Modal from '@/components/shared/Modal'
 import Button from '@/components/shared/Button'
 import { getBrandAssets, portalBrand } from '@/lib/brandAssets'
-import type { Bundle, OpDirectService, SoloPlan, Tool } from '@/types/catalog'
+import { formatCents } from '@/lib/money'
+import type { StoreAddonService, StoreBundle, StoreTool } from '@/types/store'
 import type { CartItem, LearnMoreSubject } from './cartTypes'
 
 interface Tier {
   id: string
   name: string
   line: string
-  price: number
+  priceCents: number
   per: 'mo' | 'once'
 }
 
 interface LearnMoreModalProps {
   subject: LearnMoreSubject | null
-  tools: Tool[]
-  bundles: Bundle[]
-  services: OpDirectService[]
-  soloPlans: SoloPlan[]
+  tools: StoreTool[]
+  bundles: StoreBundle[]
+  services: StoreAddonService[]
   membershipName: string
   onClose: () => void
   onAddToCart: (item: CartItem) => void
@@ -32,7 +32,6 @@ export default function LearnMoreModal({
   tools,
   bundles,
   services,
-  soloPlans,
   membershipName,
   onClose,
   onAddToCart,
@@ -45,29 +44,36 @@ export default function LearnMoreModal({
   let compareCopy: string[] = []
   let note = ''
   let tiers: Tier[] = []
+  let subjectFeatureSlug: string | undefined
 
   if (subject?.kind === 'tool') {
     const tool = tools.find((t) => t.slug === subject.toolSlug)
     if (tool) {
-      wordmark = getBrandAssets(tool.slug).wordmark
+      wordmark = getBrandAssets(tool.brandSlug).wordmark
       name = tool.name
       hook = tool.hook
       compareCopy = tool.compareCopy
-      const key = tool.entitlementGroup ?? tool.slug
-      tiers = soloPlans
-        .filter((sp) => sp.entitlementKey === key)
-        .map((sp) => ({ id: sp.id, name: sp.name, line: `${sp.allowance} ${tool.unit}s included / mo`, price: sp.price, per: 'mo' }))
+      subjectFeatureSlug = tool.featureSlug
+      // Base tier is membership-included (priceCents 0) for core_included features and
+      // is never the thing being sold here — only paid rungs are purchasable add-ons.
+      tiers = tool.tiers
+        .filter((tier) => tier.priceCents > 0)
+        .map((tier) => ({
+          id: tier.id,
+          name: tier.name,
+          line: tier.allowance === null ? `Unlimited ${tool.unit} / mo` : `${tier.allowance} ${tool.unit} included / mo`,
+          priceCents: tier.priceCents,
+          per: 'mo',
+        }))
       note = 'Or get it inside a bundle with a higher shared allowance.'
     }
   } else if (subject?.kind === 'bundle') {
     const bundle = bundles.find((b) => b.slug === subject.bundleSlug)
     if (bundle) {
-      const repTool = bundle.covers[0] ? tools.find((t) => t.slug === bundle.covers[0]) : undefined
-      wordmark = repTool ? getBrandAssets(repTool.slug).wordmark : portalBrand.wordmark
       name = bundle.name
       hook = bundle.tagline
-      compareCopy = bundle.compareCopy
-      tiers = [{ id: bundle.id, name: `${bundle.name} bundle`, line: bundle.compareCopy[0] ?? '', price: bundle.price, per: 'mo' }]
+      compareCopy = bundle.coverageLines
+      tiers = [{ id: bundle.id, name: `${bundle.name} bundle`, line: bundle.coverageLines[0] ?? '', priceCents: bundle.priceCents, per: 'mo' }]
       note = `On top of your ${membershipName} membership. Replaces any lower bundle or solo subscriptions it covers.`
     }
   } else if (subject?.kind === 'service') {
@@ -77,7 +83,7 @@ export default function LearnMoreModal({
       name = service.name
       hook = service.hook
       compareCopy = service.compareCopy
-      tiers = [{ id: service.id, name: service.name, line: service.compareCopy[0] ?? '', price: service.price, per: 'once' }]
+      tiers = [{ id: service.id, name: service.name, line: service.compareCopy[0] ?? '', priceCents: service.priceCents, per: 'once' }]
       note = 'Distributed by OP Web Studio.'
     }
   }
@@ -93,13 +99,12 @@ export default function LearnMoreModal({
     const tier = tiers.find((t) => t.id === activeTierId)
     if (!tier || !subject) return
 
-    const toolForEntitlement = subject.kind === 'tool' ? tools.find((t) => t.slug === subject.toolSlug) : undefined
     const item: CartItem = {
       id: tier.id,
       kind: tier.per === 'once' ? 'once' : 'sub',
       name: tier.name,
-      price: tier.price,
-      entitlementKey: toolForEntitlement ? toolForEntitlement.entitlementGroup ?? toolForEntitlement.slug : undefined,
+      priceCents: tier.priceCents,
+      featureSlug: subject.kind === 'tool' ? subjectFeatureSlug : undefined,
       bundleSlug: subject.kind === 'bundle' ? subject.bundleSlug : undefined,
     }
     onAddToCart(item)
@@ -136,7 +141,7 @@ export default function LearnMoreModal({
                     <div className="text-[12.4px] text-silver mt-0.5">{tier.line}</div>
                   </div>
                   <div className="font-bold text-lg font-display whitespace-nowrap">
-                    {tier.per === 'once' ? `$${tier.price}` : `+$${tier.price}`}
+                    {tier.per === 'once' ? formatCents(tier.priceCents) : `+${formatCents(tier.priceCents)}`}
                     <span className="text-[11.5px] font-medium text-silver"> {tier.per === 'once' ? 'one-time' : '/mo'}</span>
                   </div>
                 </button>

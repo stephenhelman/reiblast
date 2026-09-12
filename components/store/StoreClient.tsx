@@ -6,23 +6,16 @@ import Link from 'next/link'
 import AppHeader from '@/components/shared/AppHeader'
 import Button from '@/components/shared/Button'
 import { portalBrand } from '@/lib/brandAssets'
-import type { ParsedStoreLink, StoreTab } from '@/lib/storeLink'
-import type { Bundle, Catalog, Member, OpDirectService, Pack, SoloPlan, Tool, ToolSlug } from '@/types/catalog'
+import { formatCents } from '@/lib/money'
+import { resolveArrival, type ParsedStoreLink, type StoreTab } from '@/lib/storeLink'
+import type { StoreBundle, StoreData } from '@/types/store'
 import { CreditsPanel, ToolsPanel, BundlesPanel, AddonsPanel } from './panels'
 import LearnMoreModal from './LearnMoreModal'
 import CartDrawer from './CartDrawer'
 import type { CartItem, LearnMoreSubject } from './cartTypes'
 
 interface StoreClientProps {
-  member: Member
-  tools: Tool[]
-  packs: Pack[]
-  bundles: Bundle[]
-  coreBaseline: Bundle
-  soloPlans: SoloPlan[]
-  services: OpDirectService[]
-  membership: Catalog['membership']
-  currentBundle: Bundle | null
+  store: StoreData
   arrival: ParsedStoreLink
 }
 
@@ -44,27 +37,23 @@ function CartIcon({ className = '' }: { className?: string }) {
   )
 }
 
-export default function StoreClient({
-  member,
-  tools,
-  packs,
-  bundles,
-  coreBaseline,
-  soloPlans,
-  services,
-  membership,
-  currentBundle,
-  arrival,
-}: StoreClientProps) {
-  const [activeTab, setActiveTab] = useState<StoreTab>(arrival.tab)
+export default function StoreClient({ store, arrival }: StoreClientProps) {
+  const { member, tools, packs, bundles, coreBaseline, addons, membership } = store
+
+  // Resolved once against the fetched catalog (hasHigherTier is precomputed
+  // onto each tool server-side) — this decides the REAL tab/open-state,
+  // arrival.tab is just parseStoreLink's naive pre-resolution guess.
+  const [resolved] = useState(() => resolveArrival(arrival, tools))
+
+  const [activeTab, setActiveTab] = useState<StoreTab>(resolved.tab)
   const [cart, setCart] = useState<CartItem[]>([])
   const [cartOpen, setCartOpen] = useState(false)
-  const [learnMoreSubject, setLearnMoreSubject] = useState<LearnMoreSubject | null>(null)
+  const [learnMoreSubject, setLearnMoreSubject] = useState<LearnMoreSubject | null>(
+    resolved.openToolSlug ? { kind: 'tool', toolSlug: resolved.openToolSlug } : null,
+  )
   const [arrivalDismissed, setArrivalDismissed] = useState(false)
 
-  const arrivalToolSlug: ToolSlug | undefined =
-    arrival.from && tools.some((t) => t.slug === arrival.from) ? (arrival.from as ToolSlug) : undefined
-  const arrivalTool = arrivalToolSlug ? tools.find((t) => t.slug === arrivalToolSlug) : undefined
+  const arrivalTool = arrival.from ? tools.find((t) => t.slug === arrival.from) : undefined
   const showArrival = !!arrivalTool && !arrivalDismissed
 
   const addToCart = (item: CartItem) => {
@@ -72,10 +61,10 @@ export default function StoreClient({
     setCartOpen(true)
   }
   const removeFromCart = (id: string) => setCart((prev) => prev.filter((i) => i.id !== id))
-  const applySwap = (bundle: Bundle) => {
+  const applySwap = (bundle: StoreBundle) => {
     setCart((prev) => [
-      ...prev.filter((i) => !i.entitlementKey || !bundle.covers.includes(i.entitlementKey)),
-      { id: bundle.id, kind: 'sub', name: `${bundle.name} bundle`, price: bundle.price, bundleSlug: bundle.slug },
+      ...prev.filter((i) => !i.featureSlug || !bundle.coversFeatureSlugs.includes(i.featureSlug)),
+      { id: bundle.id, kind: 'sub', name: `${bundle.name} bundle`, priceCents: bundle.priceCents, bundleSlug: bundle.slug },
     ])
   }
 
@@ -91,7 +80,7 @@ export default function StoreClient({
             <Image src={portalBrand.wordmark} alt="REI/tools" height={18} width={90} style={{ height: 18, width: 'auto' }} />
           </Link>
         }
-        account={{ name: member.name, creditBalance: member.entitlements.creditBalance }}
+        account={{ name: member.name, creditBalance: member.walletBalance }}
         actionSlot={
           <div className="flex items-center gap-3">
             <Button variant="gold" size="sm" onClick={() => setActiveTab('credits')}>
@@ -118,8 +107,11 @@ export default function StoreClient({
           <h1 className="text-2xl font-semibold">Store</h1>
           <p className="text-gray text-sm mt-1">Add credits, subscribe to tools, move up a bundle, or book a done-for-you service.</p>
           <p className="text-[12.5px] text-gray mt-2">
-            Everything here is <b className="text-silver font-semibold">separate from your ${membership.price}/mo {membership.name} membership</b> and
-            billed on top of it — your CRM subscription stays exactly as it is.
+            Everything here is{' '}
+            <b className="text-silver font-semibold">
+              separate from your {formatCents(membership.priceCents)}/mo {membership.name} membership
+            </b>{' '}
+            and billed on top of it — your CRM subscription stays exactly as it is.
           </p>
         </div>
 
@@ -127,7 +119,7 @@ export default function StoreClient({
           <div className="mt-4 flex items-center gap-2.5 rounded-lg bg-gold/10 border border-gold-hover px-3.5 py-2.25 text-[12.7px] text-gold">
             <span>
               Coming from <b className="text-white">{arrivalTool.name}</b>
-              {arrival.intent === 'credits' ? ` — showing credits, in ${arrivalTool.unit}s.` : '.'}
+              {arrival.intent === 'credits' ? ` — showing credits, in ${arrivalTool.unit}.` : '.'}
             </span>
             <button onClick={() => setArrivalDismissed(true)} className="ml-auto text-gold/70 hover:text-gold">
               ×
@@ -150,35 +142,34 @@ export default function StoreClient({
           ))}
         </nav>
 
-        {activeTab === 'credits' && <CreditsPanel tools={tools} packs={packs} initialToolSlug={arrivalToolSlug} onAddToCart={addToCart} />}
-        {activeTab === 'tools' && (
-          <ToolsPanel
+        {activeTab === 'credits' && (
+          <CreditsPanel
             tools={tools}
-            member={member}
-            bundle={currentBundle}
-            soloPlans={soloPlans}
-            onLearnMore={setLearnMoreSubject}
+            packs={packs}
+            initialToolSlug={resolved.creditsToolSlug ?? undefined}
+            upgradeMaxedToolSlug={resolved.upgradeMaxedToolSlug}
+            onAddToCart={addToCart}
           />
         )}
+        {activeTab === 'tools' && <ToolsPanel tools={tools} onLearnMore={setLearnMoreSubject} />}
         {activeTab === 'bundles' && (
           <BundlesPanel
             coreBaseline={coreBaseline}
             bundles={bundles}
             membershipName={membership.name}
-            membershipPrice={membership.price}
-            currentBundleSlug={member.entitlements.bundleSlug}
+            membershipPriceCents={membership.priceCents}
+            currentBundleSlug={member.currentBundleSlug}
             onLearnMore={setLearnMoreSubject}
           />
         )}
-        {activeTab === 'addons' && <AddonsPanel services={services} onLearnMore={setLearnMoreSubject} />}
+        {activeTab === 'addons' && <AddonsPanel services={addons} onLearnMore={setLearnMoreSubject} />}
       </div>
 
       <LearnMoreModal
         subject={learnMoreSubject}
         tools={tools}
         bundles={bundles}
-        services={services}
-        soloPlans={soloPlans}
+        services={addons}
         membershipName={membership.name}
         onClose={() => setLearnMoreSubject(null)}
         onAddToCart={addToCart}

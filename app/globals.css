@@ -48,3 +48,14 @@ body {
     animation: none;
   }
 }
+
+/* Functional scroll, no visible scrollbar — for embed containers (cross-origin
+   iframes) where we can theme our wrapper but not the iframe's own chrome. */
+.scrollbar-hide {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}

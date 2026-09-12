@@ -1,232 +1,309 @@
-'use client'
+"use client";
 
-import { useState, useEffect, useRef, Suspense } from 'react'
-import { useSearchParams, useRouter } from 'next/navigation'
-import Input from '@/components/shared/Input'
-import Button from '@/components/shared/Button'
-import { LogoStacked } from '@/components/shared/Logo'
-import { GHL_APP_URL, SUPPORT_EMAIL } from '@/lib/constants'
+import { useState, useEffect, useRef, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import Input from "@/components/shared/Input";
+import Button from "@/components/shared/Button";
+import { LogoStacked } from "@/components/shared/Logo";
+import { GHL_APP_URL, SUPPORT_EMAIL } from "@/lib/constants";
 
 const US_STATES = [
-  'AL','AK','AZ','AR','CA','CO','CT','DE','FL','GA','HI','ID','IL','IN',
-  'IA','KS','KY','LA','ME','MD','MA','MI','MN','MS','MO','MT','NE','NV',
-  'NH','NJ','NM','NY','NC','ND','OH','OK','OR','PA','RI','SC','SD','TN',
-  'TX','UT','VT','VA','WA','WV','WI','WY',
-]
+  "AL",
+  "AK",
+  "AZ",
+  "AR",
+  "CA",
+  "CO",
+  "CT",
+  "DE",
+  "FL",
+  "GA",
+  "HI",
+  "ID",
+  "IL",
+  "IN",
+  "IA",
+  "KS",
+  "KY",
+  "LA",
+  "ME",
+  "MD",
+  "MA",
+  "MI",
+  "MN",
+  "MS",
+  "MO",
+  "MT",
+  "NE",
+  "NV",
+  "NH",
+  "NJ",
+  "NM",
+  "NY",
+  "NC",
+  "ND",
+  "OH",
+  "OK",
+  "OR",
+  "PA",
+  "RI",
+  "SC",
+  "SD",
+  "TN",
+  "TX",
+  "UT",
+  "VT",
+  "VA",
+  "WA",
+  "WV",
+  "WI",
+  "WY",
+];
 
-const BUSINESS_TYPES = ['LLC', 'Corporation', 'Sole Proprietorship', 'Partnership']
+const BUSINESS_TYPES = [
+  "LLC",
+  "Corporation",
+  "Sole Proprietorship",
+  "Partnership",
+];
 
 const LOADING_MESSAGES = [
-  'Verifying your information...',
-  'Setting up your account...',
-  'Applying your workspace...',
-  'Configuring your CRM...',
-  'Almost ready...',
-]
+  "Verifying your information...",
+  "Setting up your account...",
+  "Applying your workspace...",
+  "Configuring your CRM...",
+  "Almost ready...",
+];
 
-type GateState = 'checking' | 'not_found' | 'active' | 'onboarding_complete' | 'pending_onboarding'
-type VerifyState = 'find' | 'select' | 'authorizing' | 'otp'
+type GateState =
+  | "checking"
+  | "not_found"
+  | "active"
+  | "onboarding_complete"
+  | "pending_onboarding";
+type VerifyState = "find" | "select" | "authorizing" | "otp";
 
 interface Contact {
-  contactId: string
-  displayName: string
-  maskedEmail: string
-  createdAt: string
+  contactId: string;
+  displayName: string;
+  maskedEmail: string;
+  createdAt: string;
 }
 
 interface Step1Fields {
-  email: string
-  legalBusinessName: string
-  ein: string
-  businessType: string
-  businessAddress: string
-  businessCity: string
-  businessState: string
-  businessZip: string
-  businessPhone: string
-  businessEmail: string
-  websiteUrl: string
-  targetMarket: string
+  email: string;
+  legalBusinessName: string;
+  ein: string;
+  businessType: string;
+  businessAddress: string;
+  businessCity: string;
+  businessState: string;
+  businessZip: string;
+  businessPhone: string;
+  businessEmail: string;
+  websiteUrl: string;
+  targetMarket: string;
 }
 
 function StepIndicator({ step }: { step: number }) {
-  const steps = ['Business Info', 'SMS Compliance', 'Review']
+  const steps = ["Business Info", "SMS Compliance", "Review"];
   return (
     <div className="flex items-center justify-center gap-0 mb-10">
       {steps.map((label, i) => {
-        const n = i + 1
-        const active = n === step
-        const done = n < step
+        const n = i + 1;
+        const active = n === step;
+        const done = n < step;
         return (
           <div key={n} className="flex items-center">
             <div className="flex flex-col items-center gap-1">
               <div
                 className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold border-2 transition-colors ${
                   done
-                    ? 'bg-gold border-gold text-black'
+                    ? "bg-gold border-gold text-black"
                     : active
-                    ? 'border-gold text-gold bg-transparent'
-                    : 'border-white/20 text-white/30 bg-transparent'
+                      ? "border-gold text-gold bg-transparent"
+                      : "border-white/20 text-white/30 bg-transparent"
                 }`}
               >
-                {done ? '✓' : n}
+                {done ? "✓" : n}
               </div>
-              <span className={`text-xs whitespace-nowrap ${active ? 'text-gold' : done ? 'text-white/60' : 'text-white/30'}`}>
+              <span
+                className={`text-xs whitespace-nowrap ${active ? "text-gold" : done ? "text-white/60" : "text-white/30"}`}
+              >
                 {label}
               </span>
             </div>
             {i < steps.length - 1 && (
-              <div className={`w-16 h-px mx-1 mb-5 ${n < step ? 'bg-gold' : 'bg-white/10'}`} />
+              <div
+                className={`w-16 h-px mx-1 mb-5 ${n < step ? "bg-gold" : "bg-white/10"}`}
+              />
             )}
           </div>
-        )
+        );
       })}
     </div>
-  )
+  );
 }
 
 function VerificationFlow() {
-  const router = useRouter()
-  const [state, setState] = useState<VerifyState>('find')
-  const [contacts, setContacts] = useState<Contact[]>([])
-  const [selectedId, setSelectedId] = useState('')
-  const [maskedEmail, setMaskedEmail] = useState('')
-  const [otpDigits, setOtpDigits] = useState<string[]>(['', '', '', '', '', ''])
-  const inputRefs = useRef<(HTMLInputElement | null)[]>([null, null, null, null, null, null])
-  const [otpError, setOtpError] = useState('')
-  const [findLoading, setFindLoading] = useState(false)
-  const [findEmpty, setFindEmpty] = useState(false)
-  const [sendError, setSendError] = useState(false)
-  const [showNotSeen, setShowNotSeen] = useState(false)
-  const [verifyLoading, setVerifyLoading] = useState(false)
-  const [failCount, setFailCount] = useState(0)
-  const [cooldown, setCooldown] = useState(0)
-  const [shake, setShake] = useState(false)
+  const router = useRouter();
+  const [state, setState] = useState<VerifyState>("find");
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [selectedId, setSelectedId] = useState("");
+  const [maskedEmail, setMaskedEmail] = useState("");
+  const [otpDigits, setOtpDigits] = useState<string[]>([
+    "",
+    "",
+    "",
+    "",
+    "",
+    "",
+  ]);
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+  ]);
+  const [otpError, setOtpError] = useState("");
+  const [findLoading, setFindLoading] = useState(false);
+  const [findEmpty, setFindEmpty] = useState(false);
+  const [sendError, setSendError] = useState(false);
+  const [showNotSeen, setShowNotSeen] = useState(false);
+  const [verifyLoading, setVerifyLoading] = useState(false);
+  const [failCount, setFailCount] = useState(0);
+  const [cooldown, setCooldown] = useState(0);
+  const [shake, setShake] = useState(false);
 
   useEffect(() => {
-    if (cooldown <= 0) return
-    const t = setTimeout(() => setCooldown((c) => c - 1), 1000)
-    return () => clearTimeout(t)
-  }, [cooldown])
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((c) => c - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
   useEffect(() => {
-    if (state === 'otp') {
-      setTimeout(() => inputRefs.current[0]?.focus(), 50)
+    if (state === "otp") {
+      setTimeout(() => inputRefs.current[0]?.focus(), 50);
     }
-  }, [state])
+  }, [state]);
 
   async function findAccounts() {
-    setFindLoading(true)
-    setFindEmpty(false)
+    setFindLoading(true);
+    setFindEmpty(false);
     try {
-      const res = await fetch('/api/onboarding/recent-contacts')
-      const data = await res.json()
+      const res = await fetch("/api/onboarding/recent-contacts");
+      const data = await res.json();
       if (!data.contacts || data.contacts.length === 0) {
-        setFindEmpty(true)
+        setFindEmpty(true);
       } else {
-        setContacts(data.contacts)
-        setState('select')
+        setContacts(data.contacts);
+        setState("select");
       }
     } catch {
-      setFindEmpty(true)
+      setFindEmpty(true);
     } finally {
-      setFindLoading(false)
+      setFindLoading(false);
     }
   }
 
   async function selectContact(contactId: string) {
-    setSelectedId(contactId)
-    setState('authorizing')
-    setSendError(false)
+    setSelectedId(contactId);
+    setState("authorizing");
+    setSendError(false);
     try {
-      const res = await fetch('/api/onboarding/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/onboarding/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contactId }),
-      })
-      const data = await res.json()
+      });
+      const data = await res.json();
       if (res.ok) {
-        setMaskedEmail(data.maskedEmail)
-        setCooldown(60)
-        setState('otp')
+        setMaskedEmail(data.maskedEmail);
+        setCooldown(60);
+        setState("otp");
       } else {
-        setSendError(true)
-        setState('select')
+        setSendError(true);
+        setState("select");
       }
     } catch {
-      setSendError(true)
-      setState('select')
+      setSendError(true);
+      setState("select");
     }
   }
 
   async function resendOtp() {
-    if (cooldown > 0) return
-    setCooldown(60)
+    if (cooldown > 0) return;
+    setCooldown(60);
     try {
-      const res = await fetch('/api/onboarding/send-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/onboarding/send-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contactId: selectedId }),
-      })
-      const data = await res.json()
-      if (res.ok) setMaskedEmail(data.maskedEmail)
+      });
+      const data = await res.json();
+      if (res.ok) setMaskedEmail(data.maskedEmail);
     } catch {}
   }
 
   function handleOtpChange(index: number, value: string) {
-    const digit = value.replace(/\D/g, '').slice(-1)
-    const next = [...otpDigits]
-    next[index] = digit
-    setOtpDigits(next)
-    setOtpError('')
+    const digit = value.replace(/\D/g, "").slice(-1);
+    const next = [...otpDigits];
+    next[index] = digit;
+    setOtpDigits(next);
+    setOtpError("");
     if (digit && index < 5) {
-      inputRefs.current[index + 1]?.focus()
+      inputRefs.current[index + 1]?.focus();
     }
   }
 
-  function handleOtpKeyDown(index: number, e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Backspace' && !otpDigits[index] && index > 0) {
-      inputRefs.current[index - 1]?.focus()
+  function handleOtpKeyDown(
+    index: number,
+    e: React.KeyboardEvent<HTMLInputElement>,
+  ) {
+    if (e.key === "Backspace" && !otpDigits[index] && index > 0) {
+      inputRefs.current[index - 1]?.focus();
     }
-    if (e.key === 'Enter') verifyOtp()
+    if (e.key === "Enter") verifyOtp();
   }
 
   function handleOtpPaste(e: React.ClipboardEvent<HTMLInputElement>) {
-    e.preventDefault()
-    const text = e.clipboardData.getData('text').replace(/\D/g, '').slice(0, 6)
-    const next: string[] = ['', '', '', '', '', '']
-    for (let i = 0; i < text.length; i++) next[i] = text[i]
-    setOtpDigits(next)
-    inputRefs.current[Math.min(text.length, 5)]?.focus()
+    e.preventDefault();
+    const text = e.clipboardData.getData("text").replace(/\D/g, "").slice(0, 6);
+    const next: string[] = ["", "", "", "", "", ""];
+    for (let i = 0; i < text.length; i++) next[i] = text[i];
+    setOtpDigits(next);
+    inputRefs.current[Math.min(text.length, 5)]?.focus();
   }
 
   async function verifyOtp() {
-    const otp = otpDigits.join('')
-    if (otp.length < 6 || verifyLoading || failCount >= 3) return
-    setVerifyLoading(true)
-    setOtpError('')
+    const otp = otpDigits.join("");
+    if (otp.length < 6 || verifyLoading || failCount >= 3) return;
+    setVerifyLoading(true);
+    setOtpError("");
     try {
-      const res = await fetch('/api/onboarding/verify-otp', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/onboarding/verify-otp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ contactId: selectedId, otp }),
-      })
-      const data = await res.json()
+      });
+      const data = await res.json();
       if (res.ok) {
-        router.push(`/onboarding?email=${encodeURIComponent(data.email)}`)
+        router.push(`/onboarding?email=${encodeURIComponent(data.email)}`);
       } else {
-        const next = failCount + 1
-        setFailCount(next)
-        if (next < 3) setOtpError(data.error || 'Invalid code. Try again.')
-        setShake(true)
-        setTimeout(() => setShake(false), 600)
-        setOtpDigits(['', '', '', '', '', ''])
-        setTimeout(() => inputRefs.current[0]?.focus(), 50)
+        const next = failCount + 1;
+        setFailCount(next);
+        if (next < 3) setOtpError(data.error || "Invalid code. Try again.");
+        setShake(true);
+        setTimeout(() => setShake(false), 600);
+        setOtpDigits(["", "", "", "", "", ""]);
+        setTimeout(() => inputRefs.current[0]?.focus(), 50);
       }
     } catch {
-      setOtpError('Something went wrong. Try again.')
+      setOtpError("Something went wrong. Try again.");
     } finally {
-      setVerifyLoading(false)
+      setVerifyLoading(false);
     }
   }
 
@@ -249,7 +326,7 @@ function VerificationFlow() {
         </div>
 
         {/* STATE 1 — Find Account */}
-        {state === 'find' && (
+        {state === "find" && (
           <div className="text-center">
             <h1 className="text-2xl font-bold mb-3">Welcome to REIblast</h1>
             <p className="text-white/50 text-sm leading-relaxed mb-8">
@@ -272,19 +349,21 @@ function VerificationFlow() {
                   Searching...
                 </>
               ) : findEmpty ? (
-                'Try Again'
+                "Try Again"
               ) : (
-                'Find My Account →'
+                "Find My Account →"
               )}
             </button>
           </div>
         )}
 
         {/* STATE 2 — Select Account */}
-        {state === 'select' && (
+        {state === "select" && (
           <div>
             <h1 className="text-xl font-bold mb-1">Is this you?</h1>
-            <p className="text-white/50 text-sm mb-6">Select your account to continue.</p>
+            <p className="text-white/50 text-sm mb-6">
+              Select your account to continue.
+            </p>
             {sendError && (
               <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3 text-red-400 text-sm mb-4">
                 Failed to send code. Please try again.
@@ -297,8 +376,12 @@ function VerificationFlow() {
                   className="bg-[#141414] border border-[#2A2A2A] hover:border-gold rounded-xl p-4 flex items-center justify-between gap-4 transition-colors"
                 >
                   <div className="min-w-0">
-                    <p className="font-semibold text-white truncate">{c.displayName}</p>
-                    <p className="text-white/40 text-sm truncate">{c.maskedEmail}</p>
+                    <p className="font-semibold text-white truncate">
+                      {c.displayName}
+                    </p>
+                    <p className="text-white/40 text-sm truncate">
+                      {c.maskedEmail}
+                    </p>
                   </div>
                   <button
                     onClick={() => selectContact(c.contactId)}
@@ -324,10 +407,10 @@ function VerificationFlow() {
                 </p>
                 <button
                   onClick={() => {
-                    setState('find')
-                    setShowNotSeen(false)
-                    setContacts([])
-                    setFindEmpty(false)
+                    setState("find");
+                    setShowNotSeen(false);
+                    setContacts([]);
+                    setFindEmpty(false);
                   }}
                   className="text-gold text-sm font-semibold hover:underline"
                 >
@@ -339,26 +422,28 @@ function VerificationFlow() {
         )}
 
         {/* STATE 3 — Authorizing */}
-        {state === 'authorizing' && (
+        {state === "authorizing" && (
           <div className="text-center">
             <div className="w-16 h-16 border-2 border-gold border-t-transparent rounded-full animate-spin mx-auto mb-6" />
             <h2 className="text-xl font-bold mb-2">Authorizing...</h2>
-            <p className="text-white/50 text-sm">Sending your verification code</p>
+            <p className="text-white/50 text-sm">
+              Sending your verification code
+            </p>
           </div>
         )}
 
         {/* STATE 4 — OTP Entry */}
-        {state === 'otp' && (
+        {state === "otp" && (
           <div className="text-center">
             <h2 className="text-xl font-bold mb-2">Check your email</h2>
             <p className="text-white/50 text-sm mb-8">
-              We sent a 6-digit code to{' '}
+              We sent a 6-digit code to{" "}
               <span className="text-white font-medium">{maskedEmail}</span>
             </p>
 
             {failCount >= 3 ? (
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-6 text-red-400 text-sm leading-relaxed">
-                Too many attempts. Contact{' '}
+                Too many attempts. Contact{" "}
                 <a
                   href="mailto:support@reiblast.app"
                   className="underline hover:text-red-300"
@@ -368,11 +453,15 @@ function VerificationFlow() {
               </div>
             ) : (
               <>
-                <div className={`flex gap-2 justify-center mb-2 ${shake ? 'otp-shake' : ''}`}>
+                <div
+                  className={`flex gap-2 justify-center mb-2 ${shake ? "otp-shake" : ""}`}
+                >
                   {otpDigits.map((digit, i) => (
                     <input
                       key={i}
-                      ref={(el) => { inputRefs.current[i] = el }}
+                      ref={(el) => {
+                        inputRefs.current[i] = el;
+                      }}
                       type="text"
                       inputMode="numeric"
                       pattern="[0-9]*"
@@ -384,8 +473,8 @@ function VerificationFlow() {
                       disabled={verifyLoading}
                       className={`w-12 h-14 text-center text-2xl font-bold bg-[#1C1C1C] border-2 rounded-lg outline-none transition-all ${
                         otpError
-                          ? 'border-red-500 text-red-400'
-                          : 'border-gold/50 text-white focus:border-gold focus:shadow-[0_0_0_3px_rgba(245,200,66,0.15)]'
+                          ? "border-red-500 text-red-400"
+                          : "border-gold/50 text-white focus:border-gold focus:shadow-[0_0_0_3px_rgba(245,200,66,0.15)]"
                       }`}
                     />
                   ))}
@@ -405,7 +494,7 @@ function VerificationFlow() {
                       Verifying...
                     </>
                   ) : (
-                    'Verify →'
+                    "Verify →"
                   )}
                 </button>
 
@@ -415,15 +504,17 @@ function VerificationFlow() {
                     disabled={cooldown > 0}
                     className="text-sm text-white/40 hover:text-white/70 transition-colors disabled:hover:text-white/40 disabled:cursor-default"
                   >
-                    {cooldown > 0 ? `Resend code in ${cooldown}s` : 'Resend code'}
+                    {cooldown > 0
+                      ? `Resend code in ${cooldown}s`
+                      : "Resend code"}
                   </button>
                   <button
                     onClick={() => {
-                      setState('find')
-                      setOtpDigits(['', '', '', '', '', ''])
-                      setOtpError('')
-                      setFailCount(0)
-                      setContacts([])
+                      setState("find");
+                      setOtpDigits(["", "", "", "", "", ""]);
+                      setOtpError("");
+                      setFailCount(0);
+                      setContacts([]);
                     }}
                     className="text-sm text-white/30 hover:text-white/50 transition-colors"
                   >
@@ -436,164 +527,183 @@ function VerificationFlow() {
         )}
       </div>
     </div>
-  )
+  );
 }
 
 function OnboardingContent() {
-  const searchParams = useSearchParams()
-  const router = useRouter()
+  const searchParams = useSearchParams();
+  const router = useRouter();
 
-  const emailParam = searchParams.get('email') || ''
-  const isValidEmail = (
+  const emailParam = searchParams.get("email") || "";
+  const isValidEmail =
     emailParam.length > 0 &&
-    emailParam.includes('@') &&
-    !emailParam.includes('{{')
-  )
-  const email = isValidEmail ? emailParam.toLowerCase() : ''
+    emailParam.includes("@") &&
+    !emailParam.includes("{{");
+  const email = isValidEmail ? emailParam.toLowerCase() : "";
 
-  const [gateState, setGateState] = useState<GateState>('checking')
-  const [step, setStep] = useState(1)
-  const [einError, setEinError] = useState('')
-  const [submitError, setSubmitError] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [loadingMsg, setLoadingMsg] = useState(LOADING_MESSAGES[0])
-  const [msgIndex, setMsgIndex] = useState(0)
+  const [gateState, setGateState] = useState<GateState>("checking");
+  const [step, setStep] = useState(1);
+  const [einError, setEinError] = useState("");
+  const [submitError, setSubmitError] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [loadingMsg, setLoadingMsg] = useState(LOADING_MESSAGES[0]);
+  const [msgIndex, setMsgIndex] = useState(0);
 
   const [fields, setFields] = useState<Step1Fields>({
     email,
-    legalBusinessName: '',
-    ein: '',
-    businessType: 'LLC',
-    businessAddress: '',
-    businessCity: '',
-    businessState: 'TX',
-    businessZip: '',
-    businessPhone: '',
-    businessEmail: '',
-    websiteUrl: '',
-    targetMarket: '',
-  })
+    legalBusinessName: "",
+    ein: "",
+    businessType: "LLC",
+    businessAddress: "",
+    businessCity: "",
+    businessState: "TX",
+    businessZip: "",
+    businessPhone: "",
+    businessEmail: "",
+    websiteUrl: "",
+    targetMarket: "",
+  });
 
   const [compliance, setCompliance] = useState({
     check1: false,
     check2: false,
     check3: false,
-  })
+  });
 
   useEffect(() => {
-    if (!email) return
+    if (!email) return;
     fetch(`/api/onboarding/status?email=${encodeURIComponent(email)}`)
       .then(async (res) => {
-        if (res.status === 404) { setGateState('not_found'); return }
-        if (!res.ok) { setGateState('not_found'); return }
-        const data = await res.json()
-        const s: string = data.status
-        if (s === 'active') setGateState('active')
-        else if (s === 'onboarding_complete' || s === 'provisioning') setGateState('onboarding_complete')
-        else setGateState('pending_onboarding')
+        if (res.status === 404) {
+          setGateState("not_found");
+          return;
+        }
+        if (!res.ok) {
+          setGateState("not_found");
+          return;
+        }
+        const data = await res.json();
+        const s: string = data.status;
+        if (s === "active") setGateState("active");
+        else if (s === "onboarding_complete" || s === "provisioning")
+          setGateState("onboarding_complete");
+        else setGateState("pending_onboarding");
       })
-      .catch(() => setGateState('not_found'))
-  }, [email])
+      .catch(() => setGateState("not_found"));
+  }, [email]);
 
   useEffect(() => {
-    if (!loading) return
+    if (!loading) return;
     const interval = setInterval(() => {
       setMsgIndex((i) => {
-        const next = (i + 1) % LOADING_MESSAGES.length
-        setLoadingMsg(LOADING_MESSAGES[next])
-        return next
-      })
-    }, 2000)
-    return () => clearInterval(interval)
-  }, [loading])
+        const next = (i + 1) % LOADING_MESSAGES.length;
+        setLoadingMsg(LOADING_MESSAGES[next]);
+        return next;
+      });
+    }, 2000);
+    return () => clearInterval(interval);
+  }, [loading]);
 
   function setField(key: keyof Step1Fields) {
     return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
-      setFields((prev) => ({ ...prev, [key]: e.target.value }))
+      setFields((prev) => ({ ...prev, [key]: e.target.value }));
   }
 
   function validateStep1() {
     const required: (keyof Step1Fields)[] = [
-      'legalBusinessName', 'ein', 'businessType', 'businessAddress',
-      'businessCity', 'businessState', 'businessZip', 'businessPhone',
-      'businessEmail', 'targetMarket',
-    ]
-    return required.every((k) => fields[k].trim() !== '')
+      "legalBusinessName",
+      "ein",
+      "businessType",
+      "businessAddress",
+      "businessCity",
+      "businessState",
+      "businessZip",
+      "businessPhone",
+      "businessEmail",
+      "targetMarket",
+    ];
+    return required.every((k) => fields[k].trim() !== "");
   }
 
   function formatEIN(value: string): string {
-    const digits = value.replace(/\D/g, '')
-    if (digits.length <= 2) return digits
-    return `${digits.slice(0, 2)}-${digits.slice(2, 9)}`
+    const digits = value.replace(/\D/g, "");
+    if (digits.length <= 2) return digits;
+    return `${digits.slice(0, 2)}-${digits.slice(2, 9)}`;
   }
 
   function handleEinBlur() {
     if (fields.ein && !/^\d{2}-\d{7}$/.test(fields.ein)) {
-      setEinError('EIN must be in format XX-XXXXXXX')
+      setEinError("EIN must be in format XX-XXXXXXX");
     } else {
-      setEinError('')
+      setEinError("");
     }
   }
 
   function advanceToStep2() {
-    if (!validateStep1() || einError) return
-    setStep(2)
-    window.scrollTo(0, 0)
+    if (!validateStep1() || einError) return;
+    setStep(2);
+    window.scrollTo(0, 0);
   }
 
   function advanceToStep3() {
-    setStep(3)
-    window.scrollTo(0, 0)
+    setStep(3);
+    window.scrollTo(0, 0);
   }
 
   async function handleSubmit() {
-    setSubmitError('')
-    setLoading(true)
-    setLoadingMsg(LOADING_MESSAGES[0])
-    setMsgIndex(0)
+    setSubmitError("");
+    setLoading(true);
+    setLoadingMsg(LOADING_MESSAGES[0]);
+    setMsgIndex(0);
 
     try {
-      const res = await fetch('/api/onboarding/submit', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const res = await fetch("/api/onboarding/submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ ...fields, smsComplianceAgreed: true }),
-      })
+      });
 
       if (res.ok) {
-        router.push('/onboarding/success')
+        router.push("/onboarding/success");
       } else {
-        const data = await res.json()
-        setSubmitError(data.error || 'Something went wrong. Please try again.')
-        setLoading(false)
+        const data = await res.json();
+        setSubmitError(data.error || "Something went wrong. Please try again.");
+        setLoading(false);
       }
     } catch {
-      setSubmitError('Network error. Please try again.')
-      setLoading(false)
+      setSubmitError("Network error. Please try again.");
+      setLoading(false);
     }
   }
 
   // No valid email — show verification flow
-  if (!email) return <VerificationFlow />
+  if (!email) return <VerificationFlow />;
 
-  const inputClass = 'bg-[#1C1C1C] border-[#2A2A2A] text-white focus:border-gold'
+  const inputClass =
+    "bg-[#1C1C1C] border-[#2A2A2A] text-white focus:border-gold";
 
-  if (gateState === 'checking') {
+  if (gateState === "checking") {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
       </div>
-    )
+    );
   }
 
-  if (gateState === 'not_found') {
+  if (gateState === "not_found") {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
         <div className="max-w-md w-full">
-          <div className="flex justify-center mb-8"><LogoStacked size={72} /></div>
+          <div className="flex justify-center mb-8">
+            <LogoStacked size={72} />
+          </div>
           <div className="bg-[#141414] border border-[#2A2A2A] rounded-2xl p-8 text-center">
-            <h2 className="text-white font-semibold text-lg mb-3">Your payment is still processing</h2>
+            <h2 className="text-white font-semibold text-lg mb-3">
+              Your payment is still processing
+            </h2>
             <p className="text-white/60 text-sm leading-relaxed mb-6">
-              This usually takes less than a minute. Please refresh the page or check your welcome email for the setup link.
+              This usually takes less than a minute. Please refresh the page or
+              check your welcome email for the setup link.
             </p>
             <button
               onClick={() => window.location.reload()}
@@ -604,21 +714,35 @@ function OnboardingContent() {
           </div>
         </div>
       </div>
-    )
+    );
   }
 
-  if (gateState === 'active') {
+  if (gateState === "active") {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
         <div className="max-w-md w-full">
-          <div className="flex justify-center mb-8"><LogoStacked size={72} /></div>
+          <div className="flex justify-center mb-8">
+            <LogoStacked size={72} />
+          </div>
           <div className="bg-[#141414] border border-[#2A2A2A] rounded-2xl p-8 text-center">
             <div className="w-14 h-14 rounded-full bg-gold/10 border-2 border-gold flex items-center justify-center mx-auto mb-6">
-              <svg className="w-7 h-7 text-gold" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+              <svg
+                className="w-7 h-7 text-gold"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2.5}
+                  d="M5 13l4 4L19 7"
+                />
               </svg>
             </div>
-            <h2 className="text-white font-bold text-xl mb-6">Your account is already set up!</h2>
+            <h2 className="text-white font-bold text-xl mb-6">
+              Your account is already set up!
+            </h2>
             <a
               href={GHL_APP_URL}
               className="block w-full bg-gold text-black font-bold text-lg py-4 rounded-xl hover:bg-gold-hover transition-colors"
@@ -628,23 +752,29 @@ function OnboardingContent() {
           </div>
         </div>
       </div>
-    )
+    );
   }
 
-  if (gateState === 'onboarding_complete') {
+  if (gateState === "onboarding_complete") {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
         <div className="max-w-md w-full">
-          <div className="flex justify-center mb-8"><LogoStacked size={72} /></div>
+          <div className="flex justify-center mb-8">
+            <LogoStacked size={72} />
+          </div>
           <div className="bg-[#141414] border border-[#2A2A2A] rounded-2xl p-8 text-center">
-            <h2 className="text-white font-bold text-xl mb-3">Your information has been submitted</h2>
+            <h2 className="text-white font-bold text-xl mb-3">
+              Your information has been submitted
+            </h2>
             <p className="text-white/60 text-sm leading-relaxed">
-              Your information has been submitted and is being reviewed. You&apos;ll receive an email with your login credentials within 24 hours.
+              Your information has been submitted and is being reviewed.
+              You&apos;ll receive an email with your login credentials within 24
+              hours.
             </p>
           </div>
         </div>
       </div>
-    )
+    );
   }
 
   // gateState === 'pending_onboarding' — full form
@@ -655,8 +785,12 @@ function OnboardingContent() {
           <LogoStacked size={72} />
         </div>
 
-        <h1 className="text-2xl font-bold text-center mb-2">Set Up Your Account</h1>
-        <p className="text-white/40 text-center text-sm mb-8">Complete your business info to get your REIblast workspace.</p>
+        <h1 className="text-2xl font-bold text-center mb-2">
+          Set Up Your Account
+        </h1>
+        <p className="text-white/40 text-center text-sm mb-8">
+          Complete your business info to get your REIblast workspace.
+        </p>
 
         <StepIndicator step={step} />
 
@@ -670,17 +804,27 @@ function OnboardingContent() {
                   type="email"
                   value={fields.email}
                   readOnly={isValidEmail}
-                  onChange={isValidEmail ? undefined : setField('email')}
+                  onChange={isValidEmail ? undefined : setField("email")}
                   className={`w-full rounded-lg border px-4 py-3 outline-none transition-colors pr-10 ${
                     isValidEmail
-                      ? 'bg-[#1C1C1C]/50 border-gold/30 text-white opacity-75 cursor-not-allowed'
+                      ? "bg-[#1C1C1C]/50 border-gold/30 text-white opacity-75 cursor-not-allowed"
                       : inputClass
                   }`}
                 />
                 {isValidEmail && (
                   <div className="absolute inset-y-0 right-3 flex items-center pointer-events-none">
-                    <svg className="w-4 h-4 text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
+                    <svg
+                      className="w-4 h-4 text-green-400"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2.5}
+                        d="M5 13l4 4L19 7"
+                      />
                     </svg>
                   </div>
                 )}
@@ -691,7 +835,14 @@ function OnboardingContent() {
                 </p>
               )}
             </div>
-            <Input label="Legal Business Name" type="text" required placeholder="Acme Properties LLC" value={fields.legalBusinessName} onChange={setField('legalBusinessName')} />
+            <Input
+              label="Legal Business Name"
+              type="text"
+              required
+              placeholder="Acme Properties LLC"
+              value={fields.legalBusinessName}
+              onChange={setField("legalBusinessName")}
+            />
             <div>
               <Input
                 label="EIN"
@@ -702,42 +853,94 @@ function OnboardingContent() {
                 maxLength={10}
                 value={fields.ein}
                 onChange={(e) => {
-                  const formatted = formatEIN(e.target.value)
-                  setFields((prev) => ({ ...prev, ein: formatted }))
+                  const formatted = formatEIN(e.target.value);
+                  setFields((prev) => ({ ...prev, ein: formatted }));
                 }}
                 onBlur={handleEinBlur}
                 error={einError}
               />
             </div>
             <div className="flex flex-col gap-1">
-              <label className="text-sm font-medium text-white/80">Business Type</label>
+              <label className="text-sm font-medium text-white/80">
+                Business Type
+              </label>
               <select
                 value={fields.businessType}
-                onChange={setField('businessType')}
+                onChange={setField("businessType")}
                 className="bg-[#1C1C1C] text-white rounded-lg border border-[#2A2A2A] focus:border-gold px-4 py-3 outline-none transition-colors"
               >
-                {BUSINESS_TYPES.map((t) => <option key={t}>{t}</option>)}
+                {BUSINESS_TYPES.map((t) => (
+                  <option key={t}>{t}</option>
+                ))}
               </select>
             </div>
-            <Input label="Business Address" type="text" required placeholder="123 Main St" value={fields.businessAddress} onChange={setField('businessAddress')} />
+            <Input
+              label="Business Address"
+              type="text"
+              required
+              placeholder="123 Main St"
+              value={fields.businessAddress}
+              onChange={setField("businessAddress")}
+            />
             <div className="grid grid-cols-2 gap-4">
-              <Input label="City" type="text" required value={fields.businessCity} onChange={setField('businessCity')} />
+              <Input
+                label="City"
+                type="text"
+                required
+                value={fields.businessCity}
+                onChange={setField("businessCity")}
+              />
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-white/80">State</label>
+                <label className="text-sm font-medium text-white/80">
+                  State
+                </label>
                 <select
                   value={fields.businessState}
-                  onChange={setField('businessState')}
+                  onChange={setField("businessState")}
                   className="bg-[#1C1C1C] text-white rounded-lg border border-[#2A2A2A] focus:border-gold px-4 py-3 outline-none transition-colors"
                 >
-                  {US_STATES.map((s) => <option key={s}>{s}</option>)}
+                  {US_STATES.map((s) => (
+                    <option key={s}>{s}</option>
+                  ))}
                 </select>
               </div>
             </div>
-            <Input label="Zip Code" type="text" required value={fields.businessZip} onChange={setField('businessZip')} />
-            <Input label="Business Phone" type="tel" required value={fields.businessPhone} onChange={setField('businessPhone')} />
-            <Input label="Business Email" type="email" required value={fields.businessEmail} onChange={setField('businessEmail')} />
-            <Input label="Website URL" type="url" placeholder="Leave blank if you don't have one yet" value={fields.websiteUrl} onChange={setField('websiteUrl')} />
-            <Input label="Target Market" type="text" required placeholder="e.g. Tampa FL, Phoenix AZ" value={fields.targetMarket} onChange={setField('targetMarket')} />
+            <Input
+              label="Zip Code"
+              type="text"
+              required
+              value={fields.businessZip}
+              onChange={setField("businessZip")}
+            />
+            <Input
+              label="Business Phone"
+              type="tel"
+              required
+              value={fields.businessPhone}
+              onChange={setField("businessPhone")}
+            />
+            <Input
+              label="Business Email"
+              type="email"
+              required
+              value={fields.businessEmail}
+              onChange={setField("businessEmail")}
+            />
+            <Input
+              label="Website URL"
+              type="url"
+              placeholder="Leave blank if you don't have one yet"
+              value={fields.websiteUrl}
+              onChange={setField("websiteUrl")}
+            />
+            <Input
+              label="Target Market"
+              type="text"
+              required
+              placeholder="e.g. Tampa FL, Phoenix AZ"
+              value={fields.targetMarket}
+              onChange={setField("targetMarket")}
+            />
 
             <Button
               variant="primary"
@@ -767,27 +970,55 @@ function OnboardingContent() {
 
             <div className="space-y-4">
               {[
-                { key: 'check1' as const, text: 'All contacts I message are property owners being contacted about purchasing their property. I am not texting random consumers.' },
-                { key: 'check2' as const, text: 'I will honor all STOP opt-out requests immediately and maintain a do-not-contact list.' },
-                { key: 'check3' as const, text: 'I understand that misuse of the REIblast SMS system may result in immediate account suspension.' },
+                {
+                  key: "check1" as const,
+                  text: "All contacts I message are property owners being contacted about purchasing their property. I am not texting random consumers.",
+                },
+                {
+                  key: "check2" as const,
+                  text: "I will honor all STOP opt-out requests immediately and maintain a do-not-contact list.",
+                },
+                {
+                  key: "check3" as const,
+                  text: "I understand that misuse of the REIblast SMS system may result in immediate account suspension.",
+                },
               ].map(({ key, text }) => (
                 <label key={key} className="flex gap-3 cursor-pointer group">
                   <div className="relative mt-0.5 shrink-0">
                     <input
                       type="checkbox"
                       checked={compliance[key]}
-                      onChange={(e) => setCompliance((prev) => ({ ...prev, [key]: e.target.checked }))}
+                      onChange={(e) =>
+                        setCompliance((prev) => ({
+                          ...prev,
+                          [key]: e.target.checked,
+                        }))
+                      }
                       className="sr-only"
                     />
-                    <div className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${compliance[key] ? 'bg-gold border-gold' : 'border-white/20 bg-transparent'}`}>
+                    <div
+                      className={`w-5 h-5 rounded border-2 flex items-center justify-center transition-colors ${compliance[key] ? "bg-gold border-gold" : "border-white/20 bg-transparent"}`}
+                    >
                       {compliance[key] && (
-                        <svg className="w-3 h-3 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        <svg
+                          className="w-3 h-3 text-black"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={3}
+                            d="M5 13l4 4L19 7"
+                          />
                         </svg>
                       )}
                     </div>
                   </div>
-                  <span className="text-sm text-white/70 leading-relaxed">{text}</span>
+                  <span className="text-sm text-white/70 leading-relaxed">
+                    {text}
+                  </span>
                 </label>
               ))}
             </div>
@@ -797,7 +1028,9 @@ function OnboardingContent() {
               size="lg"
               className="w-full"
               onClick={advanceToStep3}
-              disabled={!compliance.check1 || !compliance.check2 || !compliance.check3}
+              disabled={
+                !compliance.check1 || !compliance.check2 || !compliance.check3
+              }
             >
               Continue →
             </Button>
@@ -809,23 +1042,35 @@ function OnboardingContent() {
           <div className="space-y-6">
             <div className="bg-[#141414] border border-[#2A2A2A] rounded-xl p-6 space-y-3 text-sm">
               <div className="flex justify-between items-center border-b border-[#2A2A2A] pb-3">
-                <span className="font-semibold text-white text-base">Account Summary</span>
-                <button onClick={() => setStep(1)} className="text-gold text-xs hover:underline">Edit</button>
+                <span className="font-semibold text-white text-base">
+                  Account Summary
+                </span>
+                <button
+                  onClick={() => setStep(1)}
+                  className="text-gold text-xs hover:underline"
+                >
+                  Edit
+                </button>
               </div>
               {[
-                ['Email', fields.email],
-                ['Business Name', fields.legalBusinessName],
-                ['EIN', fields.ein],
-                ['Business Type', fields.businessType],
-                ['Address', `${fields.businessAddress}, ${fields.businessCity}, ${fields.businessState} ${fields.businessZip}`],
-                ['Phone', fields.businessPhone],
-                ['Business Email', fields.businessEmail],
-                ['Website', fields.websiteUrl || '—'],
-                ['Target Market', fields.targetMarket],
+                ["Email", fields.email],
+                ["Business Name", fields.legalBusinessName],
+                ["EIN", fields.ein],
+                ["Business Type", fields.businessType],
+                [
+                  "Address",
+                  `${fields.businessAddress}, ${fields.businessCity}, ${fields.businessState} ${fields.businessZip}`,
+                ],
+                ["Phone", fields.businessPhone],
+                ["Business Email", fields.businessEmail],
+                ["Website", fields.websiteUrl || "—"],
+                ["Target Market", fields.targetMarket],
               ].map(([label, value]) => (
                 <div key={label} className="flex justify-between gap-4">
                   <span className="text-white/40 shrink-0">{label}</span>
-                  <span className="text-white text-right break-all">{value}</span>
+                  <span className="text-white text-right break-all">
+                    {value}
+                  </span>
                 </div>
               ))}
               <div className="flex justify-between border-t border-[#2A2A2A] pt-3">
@@ -846,7 +1091,12 @@ function OnboardingContent() {
                 <p className="text-gold text-sm font-medium">{loadingMsg}</p>
               </div>
             ) : (
-              <Button variant="primary" size="lg" className="w-full" onClick={handleSubmit}>
+              <Button
+                variant="primary"
+                size="lg"
+                className="w-full"
+                onClick={handleSubmit}
+              >
                 Submit My Information
               </Button>
             )}
@@ -854,7 +1104,7 @@ function OnboardingContent() {
         )}
       </div>
     </div>
-  )
+  );
 }
 
 export default function OnboardingPage() {
@@ -862,5 +1112,5 @@ export default function OnboardingPage() {
     <Suspense>
       <OnboardingContent />
     </Suspense>
-  )
+  );
 }

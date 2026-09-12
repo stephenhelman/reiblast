@@ -63,4 +63,19 @@ export const ONBOARDING_OTP_VISIBILITY_FIELD = "otp_code";
 
 export const TOOLS_SESSION_COOKIE = "reiblast_tools_session";
 export const TOOLS_SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
+
+// Onboarding-identity cookie (marketing host: onboarding -> /welcome -> /discovery).
+// Separate from TOOLS_SESSION_COOKIE — that one gates the tools.* subdomain post-a2p;
+// this one just carries {contactId,name,email,phone} across the pre-a2p marketing
+// funnel, which is all one host (no domain attribute needed, see lib/onboardingSession.ts).
+export const ONBOARDING_COOKIE = "reiblast_onboarding";
+export const ONBOARDING_COOKIE_MAX_AGE_SECONDS = 14 * 24 * 60 * 60;
+
+// Discovery terminal-action sinks — CONFIG PLACEHOLDERS. Real endpoint values,
+// mapping, opp creation, tag writes, and the HQ custom-field write are a
+// separate chat; this chat only assembles + stub-fires the two payloads.
+export const DISCOVERY_HQ_UPDATE_CONTACT_URL =
+  process.env.DISCOVERY_HQ_UPDATE_CONTACT_URL || "https://config-placeholder.invalid/hq/update-contact";
+export const DISCOVERY_OPWS_INBOUND_WEBHOOK_URL =
+  process.env.DISCOVERY_OPWS_INBOUND_WEBHOOK_URL || "https://config-placeholder.invalid/opws/inbound";
 export const TOOLS_OTP_SEND_COOLDOWN_MS = 60 * 1000;

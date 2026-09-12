@@ -8,9 +8,8 @@ import StatusDot from '@/components/shared/StatusDot'
 import CreditCoin from '@/components/shared/CreditCoin'
 import Tag from '@/components/shared/Tag'
 import { getBrandAssets } from '@/lib/brandAssets'
-import { cardStatus, resolveAllowance } from '@/lib/pricing'
 import { buildStoreLink } from '@/lib/storeLink'
-import type { Bundle, Member, SoloPlan, Tool } from '@/types/catalog'
+import type { LauncherTool } from '@/types/launcher'
 
 function LockIcon({ className = '' }: { className?: string }) {
   return (
@@ -31,51 +30,43 @@ function ClockIcon({ className = '' }: { className?: string }) {
 }
 
 interface ToolCardProps {
-  tool: Tool
-  member: Member
-  bundle: Bundle | null
-  soloPlans: SoloPlan[]
-  onKeepGoing: (tool: Tool) => void
+  tool: LauncherTool
+  onKeepGoing: (tool: LauncherTool) => void
 }
 
-export default function ToolCard({ tool, member, bundle, soloPlans, onKeepGoing }: ToolCardProps) {
-  const status = cardStatus(tool, member, bundle, soloPlans)
-  const assets = getBrandAssets(tool.slug)
+export default function ToolCard({ tool, onKeepGoing }: ToolCardProps) {
+  const assets = getBrandAssets(tool.brandSlug)
 
-  const isLiveGroup = status === 'in-plan' || status === 'free' || status === 'on-credits'
-  const isGated = status === 'out-of-credits'
-  const isComingSoon = status === 'coming-soon'
-  const showGreenDot = isLiveGroup || isGated
+  const isComingSoon = tool.cardStatus === 'coming-soon'
+  const isLocked = tool.cardStatus === 'locked'
+  const isAccessible = tool.cardStatus === 'accessible'
+  const isGated = isAccessible && tool.accessibleState === 'out-of-credits'
+  const showGreenDot = isAccessible
   const bodyBlurred = isGated || isComingSoon
 
   let infoLine: React.ReactNode = null
 
-  if (status === 'in-plan') {
-    const { allowance } = resolveAllowance(tool, member, bundle, soloPlans)
-    const used = member.entitlements.allowanceUsed[tool.slug] ?? 0
-    const metered = allowance !== null && Number.isFinite(allowance)
-
-    infoLine = metered ? (
+  if (isAccessible && tool.accessibleState === 'meter') {
+    const allowance = tool.allowance as number
+    infoLine = (
       <div className="w-full">
         <div className="flex items-center justify-between text-[12.2px] text-silver mb-1.75">
           <span>
-            {used} / {allowance} {tool.unit}s
+            {tool.used} / {allowance} {tool.unit}
           </span>
         </div>
         <div className="h-1.5 w-full rounded-full bg-black overflow-hidden">
           <div
             className="h-full rounded-full bg-gold"
-            style={{ width: `${Math.min(100, (used / (allowance as number)) * 100)}%` }}
+            style={{ width: `${Math.min(100, (tool.used / allowance) * 100)}%` }}
           />
         </div>
       </div>
-    ) : (
-      <Tag tone="gold">Unlimited with your plan</Tag>
     )
-  } else if (status === 'free') {
-    infoLine = <Tag tone="green">Free</Tag>
-  } else if (status === 'on-credits' || status === 'out-of-credits') {
-    infoLine = <CreditCoin value={`${member.entitlements.creditBalance} credits`} size="sm" />
+  } else if (isAccessible && tool.accessibleState === 'unlimited') {
+    infoLine = <Tag tone="green">Included · no credits used</Tag>
+  } else if (isAccessible && (tool.accessibleState === 'credits' || tool.accessibleState === 'out-of-credits')) {
+    infoLine = <CreditCoin value="Using credits" size="sm" />
   }
 
   const blurClasses = bodyBlurred ? 'blur-sm opacity-50 pointer-events-none select-none' : ''
@@ -84,7 +75,7 @@ export default function ToolCard({ tool, member, bundle, soloPlans, onKeepGoing 
     <Card className="relative flex flex-col rounded-[15px]! px-5! py-4.5! min-h-48.5 overflow-hidden">
       {/* status strip — never blurred, even when the body is gated/coming-soon */}
       <div className="flex items-center justify-between h-4 mb-3.5">
-        {status === 'locked' ? (
+        {isLocked ? (
           <StatusDot color="red" label="Not in your plan" />
         ) : isComingSoon ? (
           <span className="flex items-center gap-2 text-[11.5px] text-silver">
@@ -96,7 +87,7 @@ export default function ToolCard({ tool, member, bundle, soloPlans, onKeepGoing 
         ) : (
           <span />
         )}
-        {status === 'locked' && <LockIcon className="h-4 w-4 text-red" />}
+        {isLocked && <LockIcon className="h-4 w-4 text-red" />}
       </div>
 
       <div className={`flex flex-col flex-1 ${blurClasses}`}>
@@ -114,7 +105,7 @@ export default function ToolCard({ tool, member, bundle, soloPlans, onKeepGoing 
         <div className="mt-3.75 min-h-8 flex flex-col justify-center">{infoLine}</div>
 
         <div className="mt-auto pt-4">
-          {(isLiveGroup || isGated) && (
+          {(isAccessible || isGated) && (
             <Link href={tool.href} tabIndex={isGated ? -1 : undefined}>
               <Button variant="gold" size="sm" className="w-full">
                 Open
@@ -122,7 +113,7 @@ export default function ToolCard({ tool, member, bundle, soloPlans, onKeepGoing 
             </Link>
           )}
 
-          {status === 'locked' && (
+          {isLocked && (
             <Link href={buildStoreLink({ from: tool.slug, intent: 'learn' })}>
               <Button variant="gold-outline" size="sm" className="w-full">
                 Learn more

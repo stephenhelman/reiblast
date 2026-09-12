@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { moveToStage, updateHQContact } from '@/lib/ghl'
-import { ONBOARDING_STAGES, SUPPORT_EMAIL } from '@/lib/constants'
+import { ONBOARDING_STAGES, SUPPORT_EMAIL, ONBOARDING_COOKIE, ONBOARDING_COOKIE_MAX_AGE_SECONDS } from '@/lib/constants'
+import { signOnboardingCookie } from '@/lib/onboardingSession'
 
 const REQUIRED_FIELDS = [
   'email', 'legalBusinessName', 'ein', 'businessType',
@@ -92,7 +93,32 @@ export async function POST(req: NextRequest) {
       console.error('[onboarding/submit] moveToStage failed:', stageErr)
     }
 
-    return NextResponse.json({ success: true })
+    const response = NextResponse.json({ success: true })
+
+    // Mint the signed onboarding-identity cookie on the success path —
+    // discovery reads this to autofill its info modal. Same helper, cookie
+    // name, and options as app/marketing/discovery/actions.ts's
+    // setOnboardingCookieAction, so both mint paths produce an identical
+    // cookie. contactId is the SAME ghlContactId updateHQContact used above
+    // (the HQ-targetable id) — never User.id, never email. Phone comes from
+    // `body.businessPhone` (the value just validated + written to the DB),
+    // not the pre-update `user.businessPhone`, which is still null the first
+    // time this route ever sets it.
+    const onboardingToken = await signOnboardingCookie({
+      contactId,
+      name: contactName,
+      email,
+      phone: (body.businessPhone as string) || '',
+    })
+    response.cookies.set(ONBOARDING_COOKIE, onboardingToken, {
+      httpOnly: true,
+      secure: true,
+      sameSite: 'lax',
+      maxAge: ONBOARDING_COOKIE_MAX_AGE_SECONDS,
+      path: '/',
+    })
+
+    return response
   } catch (err) {
     console.error('[onboarding/submit] error:', err)
     return NextResponse.json(

@@ -9,25 +9,23 @@ import ToolCard from '@/components/tools/ToolCard'
 import ChoiceModal from '@/components/tools/ChoiceModal'
 import { buildStoreLink } from '@/lib/storeLink'
 import { portalBrand } from '@/lib/brandAssets'
-import type { Bundle, Member, SoloPlan, Tool } from '@/types/catalog'
+import type { LauncherMember, LauncherTool } from '@/types/launcher'
 
 interface ToolsLauncherClientProps {
-  member: Member
-  tools: Tool[]
-  bundle: Bundle | null
-  soloPlans: SoloPlan[]
+  member: LauncherMember
+  tools: LauncherTool[]
 }
 
-/** Presentational shell + interaction state (choice modal). Data is resolved server-side by app/tools/page.tsx via getMember(). */
-export default function ToolsLauncherClient({ member, tools, bundle, soloPlans }: ToolsLauncherClientProps) {
-  const [choiceTool, setChoiceTool] = useState<Tool | null>(null)
+/** Presentational shell + interaction state (choice modal). Data is resolved server-side by app/tools/page.tsx via getLauncherData(). */
+export default function ToolsLauncherClient({ member, tools }: ToolsLauncherClientProps) {
+  const [choiceTool, setChoiceTool] = useState<LauncherTool | null>(null)
   const firstName = member.name.split(' ')[0]
 
   return (
     <main className="min-h-screen bg-black text-white">
       <AppHeader
         brandSlot={<Image src={portalBrand.wordmark} alt="REI/tools" height={30} width={140} style={{ height: 30, width: 'auto' }} />}
-        account={{ name: member.name, creditBalance: member.entitlements.creditBalance }}
+        account={{ name: member.name, creditBalance: member.walletBalance }}
         actionSlot={
           <Link href={buildStoreLink({ from: 'launcher', intent: 'credits' })}>
             <Button variant="gold" size="sm">
@@ -49,13 +47,7 @@ export default function ToolsLauncherClient({ member, tools, bundle, soloPlans }
               key={tool.slug}
               className={`animate-fade-rise ${index === 1 ? '[animation-delay:100ms]' : ''}`}
             >
-              <ToolCard
-                tool={tool}
-                member={member}
-                bundle={bundle}
-                soloPlans={soloPlans}
-                onKeepGoing={setChoiceTool}
-              />
+              <ToolCard tool={tool} onKeepGoing={setChoiceTool} />
             </div>
           ))}
         </div>
