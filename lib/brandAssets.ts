@@ -18,6 +18,13 @@ export const portalBrand: BrandAssets = {
   iconPng: "/brand/icons/rei-tools-icon.png",
 };
 
+/** Credit packs aren't a catalog Tool (no feature/entitlement), so this lives outside the ToolSlug-keyed record below — same reason portalBrand does. */
+export const creditsBrand: BrandAssets = {
+  wordmark: "/brand/wordmarks/rei-credits.png",
+  iconSvg: "/brand/icons/rei-credits.svg",
+  iconPng: "/brand/icons/rei-credits.png",
+};
+
 export const brandAssets: Record<ToolSlug, BrandAssets> = {
   "rei-score": {
     wordmark: "/brand/wordmarks/rei-score.png",

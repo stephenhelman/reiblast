@@ -17,6 +17,9 @@ const DB_SLUG_TO_BRAND_SLUG: Record<string, ToolSlug> = {
 
 export function brandSlugFor(dbSlug: string): ToolSlug {
   const brandSlug = DB_SLUG_TO_BRAND_SLUG[dbSlug];
-  if (!brandSlug) throw new Error(`brandSlugFor: no brand slug mapped for DB tool slug "${dbSlug}"`);
+  if (!brandSlug)
+    throw new Error(
+      `brandSlugFor: no brand slug mapped for DB tool slug "${dbSlug}"`,
+    );
   return brandSlug;
 }

@@ -104,28 +104,27 @@ export async function mintCheckout(userId: string, priceIds: string[]): Promise<
 
   const session = await stripe.checkout.sessions.create({
     mode,
-    ui_mode: "embedded_page",
+    ui_mode: "elements",
     line_items: priceIds.map((priceId) => ({ price: priceId, quantity: 1 })),
     client_reference_id: userId,
     customer: customerId,
     metadata,
-    redirect_on_completion: "if_required",
+    // redirect_on_completion (used under ui_mode: 'embedded_page' to avoid a
+    // redirect for non-3DS payments) is rejected outright under ui_mode:
+    // 'elements' — confirmed against a real "can only be used with ui_mode:
+    // embedded_page" API error. The client now calls actions.confirm()
+    // itself and only redirects to return_url when session.status is
+    // 'complete' (see CheckoutForm.tsx), so this isn't a regression, just a
+    // move of the "skip the redirect when possible" decision to the client.
     return_url: `${toolsUrl}/tools/store?checkout=complete`,
-    // REItools branding for this OP Web Studio-run Stripe account — per-request,
-    // not the Stripe Dashboard default, since REItools is one brand among
-    // others this Stripe account may serve. branding_settings is the only
-    // customization surface for ui_mode: 'embedded_page' (the full `appearance`
-    // API is elements-only, a different integration). NOTE: `logo` is rejected
-    // by the live API for ui_mode: 'embedded_page' despite the SDK's types
-    // allowing it (confirmed against a real Stripe error, not just docs) —
-    // color/border/font/name only for this ui_mode.
-    branding_settings: {
-      background_color: "#0A0A0A",
-      button_color: "#F5C842",
-      border_style: "rounded",
-      display_name: "REI/tools",
-      font_family: "inter",
-    },
+    // Was branding_settings (background/button color, border, display name,
+    // font) under ui_mode: 'embedded_page' — that param is rejected outright
+    // by the live API once ui_mode is 'elements' (confirmed against the
+    // Stripe Node SDK's type comments, which flag branding_settings as
+    // "not allowed if ui_mode is `elements`"). Full dark-mode control (input
+    // fields, labels, Link module included) now comes from the client-side
+    // Appearance API instead — see EmbeddedCheckout.tsx's `appearance` object,
+    // passed into `stripe.initCheckoutElementsSdk`.
     ...(mode === "subscription" ? { subscription_data: { metadata: { userId } } } : {}),
   });
 
