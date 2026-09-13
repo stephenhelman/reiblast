@@ -78,4 +78,9 @@ export const DISCOVERY_HQ_UPDATE_CONTACT_URL =
   process.env.DISCOVERY_HQ_UPDATE_CONTACT_URL || "https://config-placeholder.invalid/hq/update-contact";
 export const DISCOVERY_OPWS_INBOUND_WEBHOOK_URL =
   process.env.DISCOVERY_OPWS_INBOUND_WEBHOOK_URL || "https://config-placeholder.invalid/opws/inbound";
+// Account surface "Update my subscription" sink — CONFIG PLACEHOLDER, same
+// best-effort/failure-swallowing pattern as the discovery sinks above. No
+// in-app cancel/upgrade; this only routes the request to OPWS.
+export const ACCOUNT_SUBSCRIPTION_UPDATE_OPWS_URL =
+  process.env.ACCOUNT_SUBSCRIPTION_UPDATE_OPWS_URL || "https://config-placeholder.invalid/opws/subscription-update";
 export const TOOLS_OTP_SEND_COOLDOWN_MS = 60 * 1000;
