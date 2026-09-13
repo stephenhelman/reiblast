@@ -13,5 +13,8 @@ export default async function StorePage({ searchParams }: StorePageProps) {
   const arrival = parseStoreLink(params)
   const store = await getStoreData()
 
-  return <StoreClient store={store} arrival={arrival} />
+  const stripePublishableKey = process.env.STRIPE_PUBLISHABLE_KEY
+  if (!stripePublishableKey) throw new Error('StorePage: STRIPE_PUBLISHABLE_KEY is not set')
+
+  return <StoreClient store={store} arrival={arrival} stripePublishableKey={stripePublishableKey} />
 }

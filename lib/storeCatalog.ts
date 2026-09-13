@@ -2,13 +2,12 @@
 // tables and the same 2-axis rule, reshaped for the store's four tabs. The
 // launcher's own files are untouched; this is a new, independent accessor.
 
-import { cookies } from "next/headers";
 import type { Feature, PrismaClient, Tier, Tool as PrismaTool } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resolveFeature } from "@/lib/engine/resolver";
 import { isEntitled, getCurrentBundleSlug, hasHigherTier } from "@/lib/entitlement";
-import { verifyToolsSession } from "@/lib/toolsSession";
-import { TOOLS_SESSION_COOKIE, CORE_PRICE, PLATFORM_NAME } from "@/lib/constants";
+import { resolveSessionUserId } from "@/lib/toolsSession";
+import { CORE_PRICE, PLATFORM_NAME } from "@/lib/constants";
 import { brandSlugFor } from "@/lib/brandSlug";
 import {
   STORE_TOOL_COPY,
@@ -35,6 +34,7 @@ async function buildStoreTool(tool: ToolWithFeatureAndTiers, userId: string): Pr
     name: deriveTierName(tool.name, tier),
     priceCents: tier.priceCents,
     allowance: tier.allowance,
+    stripePriceId: tier.stripePriceId,
   }));
 
   // The "upgrade" honesty check — only meaningful once the tool is live;
@@ -77,6 +77,7 @@ function buildStoreBundle(bundle: BundleWithCoverage): StoreBundle {
     name: bundle.name,
     level: bundle.level,
     priceCents: bundle.priceCents,
+    stripePriceId: bundle.stripePriceId,
     tagline: copy.tagline,
     bestValue: copy.bestValue,
     available,
@@ -99,19 +100,6 @@ function buildCoreBaseline(
   });
 
   return { name: "Core", tagline: STORE_CORE_TAGLINE, coverageLines };
-}
-
-async function resolveSessionUserId(): Promise<string | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(TOOLS_SESSION_COOKIE)?.value;
-  if (!token) return null;
-
-  const session = await verifyToolsSession(token);
-  if (!session) return null;
-
-  // Mirrors lib/launcherCatalog.ts / lib/catalog.ts — real session -> User
-  // lookup isn't wired up for the tools portal yet.
-  return null;
 }
 
 async function getRealStoreData(userId: string, client: PrismaClient): Promise<StoreData> {
@@ -143,6 +131,7 @@ async function getRealStoreData(userId: string, client: PrismaClient): Promise<S
     slug: pack.slug,
     credits: pack.credits,
     priceCents: pack.priceCents,
+    stripePriceId: pack.stripePriceId,
     bestValue: pack.slug === STORE_PACK_BEST_VALUE_SLUG,
   }));
 
@@ -162,7 +151,7 @@ async function getRealStoreData(userId: string, client: PrismaClient): Promise<S
 }
 
 export async function getStoreData(): Promise<StoreData> {
-  const userId = await resolveSessionUserId();
+  const userId = await resolveSessionUserId(prisma);
 
   // PREVIEW-ONLY FALLBACK — see config/store.mock.ts. Same opt-in gate as the
   // launcher's; never substitutes for the session check above.

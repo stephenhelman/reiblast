@@ -17,6 +17,7 @@ import type { CartItem, LearnMoreSubject } from './cartTypes'
 interface StoreClientProps {
   store: StoreData
   arrival: ParsedStoreLink
+  stripePublishableKey: string
 }
 
 const TABS: { id: StoreTab; label: string }[] = [
@@ -37,7 +38,7 @@ function CartIcon({ className = '' }: { className?: string }) {
   )
 }
 
-export default function StoreClient({ store, arrival }: StoreClientProps) {
+export default function StoreClient({ store, arrival, stripePublishableKey }: StoreClientProps) {
   const { member, tools, packs, bundles, coreBaseline, addons, membership } = store
 
   // Resolved once against the fetched catalog (hasHigherTier is precomputed
@@ -64,7 +65,14 @@ export default function StoreClient({ store, arrival }: StoreClientProps) {
   const applySwap = (bundle: StoreBundle) => {
     setCart((prev) => [
       ...prev.filter((i) => !i.featureSlug || !bundle.coversFeatureSlugs.includes(i.featureSlug)),
-      { id: bundle.id, kind: 'sub', name: `${bundle.name} bundle`, priceCents: bundle.priceCents, bundleSlug: bundle.slug },
+      {
+        id: bundle.id,
+        kind: 'sub',
+        name: `${bundle.name} bundle`,
+        priceCents: bundle.priceCents,
+        stripePriceId: bundle.stripePriceId,
+        bundleSlug: bundle.slug,
+      },
     ])
   }
 
@@ -183,6 +191,7 @@ export default function StoreClient({ store, arrival }: StoreClientProps) {
         membershipName={membership.name}
         onRemove={removeFromCart}
         onApplySwap={applySwap}
+        stripePublishableKey={stripePublishableKey}
       />
     </main>
   )

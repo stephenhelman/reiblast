@@ -7,11 +7,10 @@
 // resolveMemberFromSession() comment below for the current state of real
 // member resolution vs. the preview-only mock fallback.
 
-import { cookies } from "next/headers";
 import { catalog } from "@/config/catalog";
 import { mockMember } from "@/config/member.mock";
-import { verifyToolsSession } from "@/lib/toolsSession";
-import { TOOLS_SESSION_COOKIE } from "@/lib/constants";
+import { prisma } from "@/lib/prisma";
+import { resolveSessionUserId } from "@/lib/toolsSession";
 import type {
   Bundle,
   BundleSlug,
@@ -75,24 +74,21 @@ export function getMembership(): Catalog["membership"] {
 /**
  * Verifies the session cookie and resolves it to a real member + entitlements.
  *
- * Today this can only get as far as the verified {userId, locationId} — there
- * is no member/entitlement lookup wired up yet (the CatalogTool/Bundle/...
- * and MemberEntitlement Prisma models in prisma/schema.prisma exist as the
- * target shape but nothing reads from them). So a verified session currently
- * still resolves to `null` here; once that lookup is built, this is the only
- * function that changes — getMember() and every call site stay the same.
+ * resolveSessionUserId() (lib/toolsSession.ts) now gets us the real User.id.
+ * What's still unbuilt is mapping that id to this file's const-seed-era
+ * `Member` shape — the CatalogTool/Bundle/... and MemberEntitlement Prisma
+ * models this type mirrors were superseded by the Feature/Tool/Tier engine
+ * (see lib/launcherCatalog.ts / lib/storeCatalog.ts, which read the engine
+ * directly and don't go through this `Member` type at all). This function
+ * has no live callers today; left resolving to `null` until/unless something
+ * needs the legacy Member shape built from the engine.
  */
 async function resolveMemberFromSession(): Promise<Member | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(TOOLS_SESSION_COOKIE)?.value;
-  if (!token) return null;
+  const userId = await resolveSessionUserId(prisma);
+  if (!userId) return null;
 
-  const session = await verifyToolsSession(token);
-  if (!session) return null;
-
-  // TODO: look up the real Member + MemberEntitlements by session.locationId
-  // once that Prisma wiring exists. Until then, a verified session still
-  // yields no member here.
+  // TODO: map the real User (id: userId) to this file's legacy Member shape
+  // once/if a caller needs it — see comment above.
   return null;
 }
 

@@ -114,7 +114,15 @@ export function CreditsPanel({ tools, packs, initialToolSlug, upgradeMaxedToolSl
                 variant={pack.bestValue ? 'gold' : 'gold-outline'}
                 size="sm"
                 className="mt-3.5"
-                onClick={() => onAddToCart({ id: pack.id, kind: 'credits', name: `${pack.credits} credits`, priceCents: pack.priceCents })}
+                onClick={() =>
+                  onAddToCart({
+                    id: pack.id,
+                    kind: 'credits',
+                    name: `${pack.credits} credits`,
+                    priceCents: pack.priceCents,
+                    stripePriceId: pack.stripePriceId,
+                  })
+                }
               >
                 Add to cart
               </Button>

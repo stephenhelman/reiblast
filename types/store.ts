@@ -16,6 +16,8 @@ export interface StoreTier {
   priceCents: number;
   /** null = unlimited. */
   allowance: number | null;
+  /** Stripe test-mode Price id backfilled onto the Tier row; null for membership-granted base tiers. */
+  stripePriceId: string | null;
 }
 
 export interface StoreTool {
@@ -48,6 +50,8 @@ export interface StorePack {
   priceCents: number;
   /** Presentation-only flag, no DB column — see config/storeCopy.ts. */
   bestValue?: boolean;
+  /** Stripe test-mode Price id backfilled onto the CreditPack row. */
+  stripePriceId: string | null;
 }
 
 export interface StoreBundle {
@@ -56,6 +60,8 @@ export interface StoreBundle {
   name: string;
   level: "plus" | "pro";
   priceCents: number;
+  /** Stripe test-mode Price id backfilled onto the Bundle row. */
+  stripePriceId: string | null;
   /** Static selling copy — see config/storeCopy.ts deferral note. */
   tagline: string;
   bestValue?: boolean;

@@ -9,13 +9,11 @@
 //            not entitled -> locked; entitled -> accessible, sub-state from
 //            remaining/balance (meter / unlimited / credits / out-of-credits).
 
-import { cookies } from "next/headers";
 import type { Feature, PrismaClient, Tool as PrismaTool } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resolveFeature } from "@/lib/engine/resolver";
 import { isEntitled, hasHigherTier } from "@/lib/entitlement";
-import { verifyToolsSession } from "@/lib/toolsSession";
-import { TOOLS_SESSION_COOKIE } from "@/lib/constants";
+import { resolveSessionUserId } from "@/lib/toolsSession";
 import { brandSlugFor } from "@/lib/brandSlug";
 import { mockLauncherMember, mockLauncherTools } from "@/config/launcher.mock";
 import type { AccessibleState, LauncherData, LauncherTool } from "@/types/launcher";
@@ -82,24 +80,6 @@ async function buildLauncherTool(tool: ToolWithFeature, userId: string): Promise
   };
 }
 
-/**
- * Mirrors lib/catalog.ts's resolveMemberFromSession(): a verified session
- * cookie only gets you {userId, locationId} today — there is no real
- * session -> User lookup wired up for the tools portal yet. Once it exists,
- * this is the only function that changes.
- */
-async function resolveSessionUserId(): Promise<string | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(TOOLS_SESSION_COOKIE)?.value;
-  if (!token) return null;
-
-  const session = await verifyToolsSession(token);
-  if (!session) return null;
-
-  // TODO: look up the real User by session.locationId once that wiring exists.
-  return null;
-}
-
 async function getRealLauncherData(userId: string, client: PrismaClient): Promise<LauncherData> {
   const [user, wallet, tools] = await Promise.all([
     client.user.findUniqueOrThrow({ where: { id: userId } }),
@@ -121,7 +101,7 @@ async function getRealLauncherData(userId: string, client: PrismaClient): Promis
 }
 
 export async function getLauncherData(): Promise<LauncherData> {
-  const userId = await resolveSessionUserId();
+  const userId = await resolveSessionUserId(prisma);
 
   // PREVIEW-ONLY FALLBACK — see config/launcher.mock.ts. Gated on an explicit
   // opt-in env var (not just NODE_ENV) so it can't silently activate in a

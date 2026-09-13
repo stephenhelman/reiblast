@@ -33,9 +33,9 @@ export const mockStoreData: StoreData = {
       meteringShape: "per_cycle",
       status: "in-plan",
       tiers: [
-        { id: "score-base", level: "base", name: "REIscore", priceCents: 0, allowance: 10 },
-        { id: "score-plus", level: "plus", name: "REIscore+", priceCents: 2500, allowance: 50 },
-        { id: "score-pro", level: "pro", name: "REIscore Pro", priceCents: 6900, allowance: 175 },
+        { id: "score-base", level: "base", name: "REIscore", priceCents: 0, allowance: 10, stripePriceId: null },
+        { id: "score-plus", level: "plus", name: "REIscore+", priceCents: 2500, allowance: 50, stripePriceId: null },
+        { id: "score-pro", level: "pro", name: "REIscore Pro", priceCents: 6900, allowance: 175, stripePriceId: null },
       ],
       hasHigherTier: true,
     },
@@ -54,7 +54,7 @@ export const mockStoreData: StoreData = {
       unitsPerDebit: 1,
       meteringShape: "none",
       status: "in-plan",
-      tiers: [{ id: "scrub-base", level: "base", name: "REIscrub", priceCents: 0, allowance: null }],
+      tiers: [{ id: "scrub-base", level: "base", name: "REIscrub", priceCents: 0, allowance: null, stripePriceId: null }],
       hasHigherTier: false,
     },
     {
@@ -74,7 +74,7 @@ export const mockStoreData: StoreData = {
       unitsPerDebit: 1,
       meteringShape: "per_cycle",
       status: "available",
-      tiers: [{ id: "pack-base", level: "base", name: "REIpack", priceCents: 1900, allowance: 150 }],
+      tiers: [{ id: "pack-base", level: "base", name: "REIpack", priceCents: 1900, allowance: 150, stripePriceId: null }],
       hasHigherTier: false,
     },
     {
@@ -133,9 +133,9 @@ export const mockStoreData: StoreData = {
     },
   ],
   packs: [
-    { id: "preview-pack-100", slug: "pack-100", credits: 100, priceCents: 1800 },
-    { id: "preview-pack-250", slug: "pack-250", credits: 250, priceCents: 4000 },
-    { id: "preview-pack-600", slug: "pack-600", credits: 600, priceCents: 9000, bestValue: true },
+    { id: "preview-pack-100", slug: "pack-100", credits: 100, priceCents: 1800, stripePriceId: null },
+    { id: "preview-pack-250", slug: "pack-250", credits: 250, priceCents: 4000, stripePriceId: null },
+    { id: "preview-pack-600", slug: "pack-600", credits: 600, priceCents: 9000, stripePriceId: null, bestValue: true },
   ],
   bundles: [
     {
@@ -146,6 +146,7 @@ export const mockStoreData: StoreData = {
       name: "REItools+",
       level: "plus",
       priceCents: 4900,
+      stripePriceId: null,
       tagline: "Placeholder tagline: for active dispo.",
       available: false,
       coverageLines: ["REIscore — 50 analyses/mo", "REIask — 500 queries/mo", "REIpack — 150 packets/mo"],
@@ -157,6 +158,7 @@ export const mockStoreData: StoreData = {
       name: "REItools Pro",
       level: "pro",
       priceCents: 14900,
+      stripePriceId: null,
       tagline: "Placeholder tagline: full pipeline coverage.",
       bestValue: true,
       available: false,

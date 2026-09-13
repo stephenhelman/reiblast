@@ -1,5 +1,7 @@
 import { SignJWT, jwtVerify } from "jose";
-import { TOOLS_SESSION_MAX_AGE_SECONDS } from "@/lib/constants";
+import { cookies } from "next/headers";
+import type { PrismaClient } from "@prisma/client";
+import { TOOLS_SESSION_COOKIE, TOOLS_SESSION_MAX_AGE_SECONDS } from "@/lib/constants";
 
 export type ToolsSessionPayload = {
   userId: string;
@@ -55,6 +57,44 @@ export async function verifyToolsSession(token: string): Promise<ToolsSessionPay
     );
     return null;
   }
+}
+
+/**
+ * The single session -> real member bridge. Reads the tools session cookie,
+ * verifies it, and validates the embedded userId still resolves to a real
+ * User row — fail-closed (a deleted/bad user resolves to null, not a stale
+ * id) rather than trusting the token payload blindly. signToolsSession()
+ * already sets `userId` to the real User.id at /enter time (see
+ * app/tools/enter/actions.ts), so no further locationId -> User lookup is
+ * needed here.
+ *
+ * lib/catalog.ts, lib/launcherCatalog.ts, and lib/storeCatalog.ts each used
+ * to stub this out independently with a "not wired up yet" TODO; this is the
+ * one place all three now point at, restoring the single-member-source intent.
+ *
+ * Split into a cookie-reading wrapper and a token-only core so the core can
+ * be exercised in tests without a Next.js request scope (cookies() throws
+ * outside one).
+ */
+export async function resolveUserIdFromToken(
+  prisma: PrismaClient,
+  token: string | undefined,
+): Promise<string | null> {
+  if (!token) return null;
+
+  const session = await verifyToolsSession(token);
+  if (!session) return null;
+
+  const user = await prisma.user.findUnique({ where: { id: session.userId } });
+  if (!user) return null;
+
+  return user.id;
+}
+
+export async function resolveSessionUserId(prisma: PrismaClient): Promise<string | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(TOOLS_SESSION_COOKIE)?.value;
+  return resolveUserIdFromToken(prisma, token);
 }
 
 /**

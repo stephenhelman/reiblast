@@ -15,6 +15,7 @@ interface Tier {
   line: string
   priceCents: number
   per: 'mo' | 'once'
+  stripePriceId: string | null
 }
 
 interface LearnMoreModalProps {
@@ -64,6 +65,7 @@ export default function LearnMoreModal({
           line: tier.allowance === null ? `Unlimited ${tool.unit} / mo` : `${tier.allowance} ${tool.unit} included / mo`,
           priceCents: tier.priceCents,
           per: 'mo',
+          stripePriceId: tier.stripePriceId,
         }))
       note = 'Or get it inside a bundle with a higher shared allowance.'
     }
@@ -73,7 +75,16 @@ export default function LearnMoreModal({
       name = bundle.name
       hook = bundle.tagline
       compareCopy = bundle.coverageLines
-      tiers = [{ id: bundle.id, name: `${bundle.name} bundle`, line: bundle.coverageLines[0] ?? '', priceCents: bundle.priceCents, per: 'mo' }]
+      tiers = [
+        {
+          id: bundle.id,
+          name: `${bundle.name} bundle`,
+          line: bundle.coverageLines[0] ?? '',
+          priceCents: bundle.priceCents,
+          per: 'mo',
+          stripePriceId: bundle.stripePriceId,
+        },
+      ]
       note = `On top of your ${membershipName} membership. Replaces any lower bundle or solo subscriptions it covers.`
     }
   } else if (subject?.kind === 'service') {
@@ -83,7 +94,19 @@ export default function LearnMoreModal({
       name = service.name
       hook = service.hook
       compareCopy = service.compareCopy
-      tiers = [{ id: service.id, name: service.name, line: service.compareCopy[0] ?? '', priceCents: service.priceCents, per: 'once' }]
+      // Op-direct services are config-only (no DB row, no Stripe Price) —
+      // stripePriceId stays null, which blocks checkout on this item (see
+      // CartDrawer). They sell via book-a-call, never inline checkout.
+      tiers = [
+        {
+          id: service.id,
+          name: service.name,
+          line: service.compareCopy[0] ?? '',
+          priceCents: service.priceCents,
+          per: 'once',
+          stripePriceId: null,
+        },
+      ]
       note = 'Distributed by OP Web Studio.'
     }
   }
@@ -104,6 +127,7 @@ export default function LearnMoreModal({
       kind: tier.per === 'once' ? 'once' : 'sub',
       name: tier.name,
       priceCents: tier.priceCents,
+      stripePriceId: tier.stripePriceId,
       featureSlug: subject.kind === 'tool' ? subjectFeatureSlug : undefined,
       bundleSlug: subject.kind === 'bundle' ? subject.bundleSlug : undefined,
     }

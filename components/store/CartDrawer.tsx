@@ -1,9 +1,12 @@
 'use client'
 
+import { useState } from 'react'
 import Drawer from '@/components/shared/Drawer'
 import Button from '@/components/shared/Button'
 import { formatCents } from '@/lib/money'
 import { smartCartSuggestion } from '@/lib/storeCart'
+import { startCheckoutAction } from '@/app/tools/store/actions'
+import EmbeddedCheckout from './EmbeddedCheckout'
 import type { StoreBundle } from '@/types/store'
 import type { CartItem } from './cartTypes'
 
@@ -15,6 +18,7 @@ interface CartDrawerProps {
   membershipName: string
   onRemove: (id: string) => void
   onApplySwap: (bundle: StoreBundle) => void
+  stripePublishableKey: string
 }
 
 const KIND_LABEL: Record<CartItem['kind'], string> = {
@@ -23,7 +27,39 @@ const KIND_LABEL: Record<CartItem['kind'], string> = {
   credits: 'Credit pack',
 }
 
-export default function CartDrawer({ open, onClose, cart, bundles, membershipName, onRemove, onApplySwap }: CartDrawerProps) {
+export default function CartDrawer({
+  open,
+  onClose,
+  cart,
+  bundles,
+  membershipName,
+  onRemove,
+  onApplySwap,
+  stripePublishableKey,
+}: CartDrawerProps) {
+  const [checkoutError, setCheckoutError] = useState<string | null>(null)
+  const [checkoutLoading, setCheckoutLoading] = useState(false)
+  const [clientSecret, setClientSecret] = useState<string | null>(null)
+
+  const priceIds = cart.map((item) => item.stripePriceId)
+  const allItemsCheckoutEligible = cart.length > 0 && priceIds.every((id): id is string => !!id)
+
+  const handleCheckout = async () => {
+    if (!allItemsCheckoutEligible) return
+    setCheckoutLoading(true)
+    setCheckoutError(null)
+    const result = await startCheckoutAction(priceIds as string[])
+    setCheckoutLoading(false)
+    if ('error' in result) {
+      setCheckoutError(result.error)
+      return
+    }
+    setClientSecret(result.clientSecret)
+    // One dialog on screen at a time — the checkout modal takes over from here
+    // (it's portaled independently, so it stays mounted after this closes).
+    onClose()
+  }
+
   const smartCartCandidates = cart.filter(
     (item): item is CartItem & { featureSlug: string } => !!item.featureSlug && !item.bundleSlug,
   )
@@ -38,7 +74,8 @@ export default function CartDrawer({ open, onClose, cart, bundles, membershipNam
   const oneTimeCents = cart.filter((i) => i.kind !== 'sub').reduce((sum, i) => sum + i.priceCents, 0)
 
   return (
-    <Drawer open={open} onClose={onClose} side="right" className="flex! flex-col p-0! max-w-105!">
+    <>
+      <Drawer open={open} onClose={onClose} side="right" className="flex! flex-col p-0! max-w-105!">
       <div className="flex items-center justify-between px-5.5 py-5 border-b border-border-default">
         <h2 className="text-lg font-semibold font-display">Your cart</h2>
         <button onClick={onClose} aria-label="Close" className="text-gray hover:text-white text-2xl leading-none px-1.5">
@@ -95,11 +132,27 @@ export default function CartDrawer({ open, onClose, cart, bundles, membershipNam
             <span>{formatCents(monthlyCents + oneTimeCents)}</span>
           </div>
           <p className="text-[11.5px] text-gray mb-3">Recurring items are billed on top of your {membershipName} membership.</p>
-          <Button variant="gold" size="sm" className="w-full" disabled>
-            Checkout (stubbed)
+          {checkoutError && <p className="text-[11.5px] text-red mb-2">{checkoutError}</p>}
+          <Button
+            variant="gold"
+            size="sm"
+            className="w-full"
+            disabled={!allItemsCheckoutEligible || checkoutLoading}
+            onClick={handleCheckout}
+          >
+            {checkoutLoading ? 'Starting checkout…' : 'Checkout'}
           </Button>
         </div>
       )}
     </Drawer>
+
+    {clientSecret && (
+      <EmbeddedCheckout
+        publishableKey={stripePublishableKey}
+        clientSecret={clientSecret}
+        onClose={() => setClientSecret(null)}
+      />
+    )}
+    </>
   )
 }
