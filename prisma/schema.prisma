@@ -331,6 +331,7 @@ model Feature {
   tiers         Tier[]
   surfaces      Tool[]
   ledgerEntries LedgerEntry[]
+  subscriptions Subscription[]
 }
 
 // Render surface / card. Owns per-card identity and THE activation gate.
@@ -416,8 +417,20 @@ model CreditPack {
 }
 
 // Transmorphic: points at a Tier (tool_sub) or a Bundle (bundle); stores no
-// numbers. NOT yet enforced here (deferred to the logic-layer chat): one
-// active tool_sub per (user, feature), and type matching tierId/bundleId.
+// numbers. Chat B activates: featureId (denormalized, for the partial unique
+// index below) + a hand-written partial unique index on (userId, featureId)
+// WHERE status='active' AND type='tool_sub' (one active tool_sub per user per
+// feature), and a hand-written CHECK that tierId/bundleId match type — both
+// added by a follow-up migration since neither is schema.prisma-expressible.
+//
+// stripeSubscriptionId is NOT globally unique: the store cart can add
+// multiple solo tool-subs before checkout, which mints ONE Stripe
+// subscription with multiple recurring items — one stripeSubscriptionId
+// spans multiple rows here, one per item. The real per-item uniqueness is
+// two hand-written partial indexes ((stripeSubscriptionId, tierId) and
+// (stripeSubscriptionId, bundleId), each WHERE both columns NOT NULL),
+// added alongside the two constraints above — also not schema.prisma-
+// expressible, so also hand-written in the same follow-up migration.
 model Subscription {
   id                   String             @id @default(cuid())
   userId               String
@@ -427,14 +440,26 @@ model Subscription {
   tier                 Tier?              @relation(fields: [tierId], references: [id], onDelete: Restrict)
   bundleId             String?            // set for bundle
   bundle               Bundle?            @relation(fields: [bundleId], references: [id], onDelete: Restrict)
+  featureId            String?            // denormalized from tier.featureId for tool_sub rows; null for bundle
+  feature              Feature?           @relation(fields: [featureId], references: [id], onDelete: Restrict)
   status               SubscriptionStatus
   periodStart          DateTime           // current billing period = the allowance window
   periodEnd            DateTime
-  stripeSubscriptionId String?
+  stripeSubscriptionId String?            // NOT @unique — see model comment; per-item uniqueness is a hand-written partial index
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
   @@index([userId])
+  @@index([stripeSubscriptionId])
+}
+
+// Idempotency marker for the Stripe webhook — one row per processed
+// Stripe event id. Insert-first (unique PK violation = already processed);
+// inserted inside the same transaction as the event's effect so a mid-handler
+// failure rolls the marker back too (never "mark, then maybe process").
+model ProcessedStripeEvent {
+  id        String   @id
+  createdAt DateTime @default(now())
 }
 
 // The single shared credit balance — the one materialized number.
