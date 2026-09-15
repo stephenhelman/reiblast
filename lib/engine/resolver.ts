@@ -36,24 +36,15 @@ export async function resolveFeature(
 
   const activeSubs = await prisma.subscription.findMany({
     where: { userId, status: 'active' },
-    include: {
-      tier: true,
-      bundle: { include: { tiers: { include: { tier: true } } } },
-    },
+    include: { tier: true },
   })
 
-  // Gather every tier row (across solo tool_subs and expanded bundle tiers) that
-  // covers this feature; extra/duplicate active subs are harmless — max(level)
-  // neutralizes them (the resolver tolerates the unconstrained sub table).
+  // Every active sub is a tool_sub; gather the ones covering this feature.
+  // Extra/duplicate active subs are harmless — max(level) neutralizes them
+  // (the resolver tolerates the unconstrained sub table).
   const coveringTiers: { level: TierLevel; sub: (typeof activeSubs)[number] }[] = []
   for (const sub of activeSubs) {
-    if (sub.type === 'tool_sub' && sub.tier && sub.tier.featureId === feature.id) {
-      coveringTiers.push({ level: sub.tier.level, sub })
-    } else if (sub.type === 'bundle' && sub.bundle) {
-      for (const bt of sub.bundle.tiers) {
-        if (bt.tier.featureId === feature.id) coveringTiers.push({ level: bt.tier.level, sub })
-      }
-    }
+    if (sub.tier.featureId === feature.id) coveringTiers.push({ level: sub.tier.level, sub })
   }
 
   let winningTier: { level: TierLevel; allowance: number | null } | null = null

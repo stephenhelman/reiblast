@@ -8,11 +8,11 @@ datasource db {
 }
 
 model User {
-  id                  String   @id @default(cuid())
-  email               String   @unique
-  name                String?
-  passwordHash        String?
-  plan                String   @default("core")
+  id           String  @id @default(cuid())
+  email        String  @unique
+  name         String?
+  passwordHash String?
+  plan         String  @default("core")
   // Status values:
   // pending_onboarding — paid, form not submitted
   // onboarding_complete — form submitted, awaiting review
@@ -20,8 +20,8 @@ model User {
   // active — fully provisioned and active
   // inactive — cancelled or deactivated
   // suspended — payment issue or violation
-  status              String   @default("pending_onboarding")
-  warningCount        Int      @default(0)
+  status       String  @default("pending_onboarding")
+  warningCount Int     @default(0)
 
   // Business / A2P info
   businessName        String?
@@ -31,23 +31,23 @@ model User {
   businessCity        String?
   businessState       String?
   businessZip         String?
-  businessPhone       String?   // Member's self-entered business phone from onboarding — NOT the A2P number.
+  businessPhone       String? // Member's self-entered business phone from onboarding — NOT the A2P number.
   businessEmail       String?
-  a2pPhone            String?   // KYC-assigned A2P sending number, written by the custom-values webhook; null = not yet provisioned. This is the field the tools /enter gate reads.
+  a2pPhone            String? // KYC-assigned A2P sending number, written by the custom-values webhook; null = not yet provisioned. This is the field the tools /enter gate reads.
   websiteUrl          String?
   targetMarket        String?
-  smsComplianceAgreed Boolean  @default(false)
-  onboardingComplete  Boolean  @default(false)
+  smsComplianceAgreed Boolean @default(false)
+  onboardingComplete  Boolean @default(false)
 
   // Addons
-  addons               String[]  @default([])
-  a2pAddonPurchasedAt  DateTime?
+  addons              String[]  @default([])
+  a2pAddonPurchasedAt DateTime?
 
   // OTP verification
-  otpCode                   String?
-  otpExpiry                 DateTime?
-  otpAttempts               Int       @default(0)
-  otpLastSentAt             DateTime? // Send cooldown timestamp — set on every successful mint/resend/redeliver, independent of otpExpiry.
+  otpCode       String?
+  otpExpiry     DateTime?
+  otpAttempts   Int       @default(0)
+  otpLastSentAt DateTime? // Send cooldown timestamp — set on every successful mint/resend/redeliver, independent of otpExpiry.
 
   // GHL
   ghlContactId              String?
@@ -59,8 +59,8 @@ model User {
   // Note: ONBOARDING_COMPLETE stage ID must be added to GHL_STAGE_* env vars
   onboardingStage           String?
 
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Stripe identity anchor — alongside the ghl* identity fields above.
   stripeCustomerId String? @unique
@@ -98,13 +98,13 @@ model PromoCode {
 }
 
 model GhlToken {
-  id            String   @id @default(cuid())
-  locationId    String   @unique
-  accessToken   String
-  refreshToken  String
-  expiresAt     DateTime
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(cuid())
+  locationId   String   @unique
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model Deal {
@@ -145,35 +145,35 @@ model Deal {
 }
 
 model PropertyRecord {
-  id                String    @id @default(cuid())
+  id String @id @default(cuid())
 
   // Identity
-  address           String
-  formattedAddress  String    @unique
-  lat               Float?
-  lng               Float?
+  address          String
+  formattedAddress String @unique
+  lat              Float?
+  lng              Float?
 
   // Property details
-  propertyType      String?
-  beds              Int?
-  baths             Float?
-  sqft              Int?
-  lotSizeSqft       Int?
-  lotSizeAcres      Float?
-  yearBuilt         Int?
-  zoning            String?
-  subdivision       String?
+  propertyType String?
+  beds         Int?
+  baths        Float?
+  sqft         Int?
+  lotSizeSqft  Int?
+  lotSizeAcres Float?
+  yearBuilt    Int?
+  zoning       String?
+  subdivision  String?
 
   // Features
-  garage            Boolean?
-  garageSpaces      Int?
-  carport           Boolean?
-  pool              Boolean?
+  garage       Boolean?
+  garageSpaces Int?
+  carport      Boolean?
+  pool         Boolean?
 
   // Sale data
-  lastSalePrice     Int?
-  lastSaleDate      DateTime?
-  priceSource       String?
+  lastSalePrice Int?
+  lastSaleDate  DateTime?
+  priceSource   String?
 
   // Tax data
   assessedValue     Int?
@@ -189,10 +189,10 @@ model PropertyRecord {
   estimatedValueMax Int?
 
   // Source tracking
-  source            String
-  lastVerified      DateTime  @default(now())
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  source       String
+  lastVerified DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([lat, lng])
   @@index([source])
@@ -284,11 +284,6 @@ enum BundleLevel {
   pro
 }
 
-enum SubscriptionType {
-  tool_sub
-  bundle
-}
-
 enum SubscriptionStatus {
   active
   past_due
@@ -320,18 +315,19 @@ model Feature {
   slug             String        @unique
   bucket           FeatureBucket
   meteringShape    MeteringShape
-  creditCost       Int           // credits per debit
+  creditCost       Int // credits per debit
   unitsPerDebit    Int           @default(1) // REIask: 1 credit per 5 units
   consumptionEvent String
-  unifiedName      String?       // shown only when ALL surfaces are active (REIclose)
+  unifiedName      String? // shown only when ALL surfaces are active (REIclose)
   unifiedTagline   String?
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
-  tiers         Tier[]
-  surfaces      Tool[]
-  ledgerEntries LedgerEntry[]
-  subscriptions Subscription[]
+  tiers          Tier[]
+  surfaces       Tool[]
+  ledgerEntries  LedgerEntry[]
+  subscriptions  Subscription[]
+  priceOverrides BundlePriceOverride[]
 }
 
 // Render surface / card. Owns per-card identity and THE activation gate.
@@ -346,7 +342,7 @@ model Tool {
   icon         String
   wordmark     String
   category     String
-  unit         String   // translator unit ("analyses", "handoffs")
+  unit         String // translator unit ("analyses", "handoffs")
   active       Boolean  @default(false) // per-surface gate — activation is a data change, not a deploy
   launchable   Boolean
   launchTarget String
@@ -362,9 +358,9 @@ model Tier {
   featureId     String
   feature       Feature   @relation(fields: [featureId], references: [id], onDelete: Restrict)
   level         TierLevel
-  displayName   String?   // optional override; default derives from name + level suffix
-  priceCents    Int       // 0 for membership-granted base tiers
-  allowance     Int?      // included units per period; null = unlimited
+  displayName   String? // optional override; default derives from name + level suffix
+  priceCents    Int // 0 for membership-granted base tiers
+  allowance     Int? // included units per period; null = unlimited
   stripePriceId String?   @unique // null for membership-granted base tiers
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
@@ -377,18 +373,20 @@ model Tier {
 
 // No `active` — availability derives from all covered surfaces being active.
 // No base bundle: "included in Core" is display-only, never a row.
+// Definition-only: which named bundle a set of tool_subs derives into, and
+// its display price. Never a Stripe object and never a subscription target
+// — see BundlePriceOverride for the per-line in-bundle Stripe Prices.
 model Bundle {
-  id            String      @id @default(cuid())
-  slug          String      @unique
-  name          String
-  level         BundleLevel
-  priceCents    Int
-  stripePriceId String? @unique
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  id         String      @id @default(cuid())
+  slug       String      @unique
+  name       String
+  level      BundleLevel
+  priceCents Int
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
 
-  tiers         BundleTier[]
-  subscriptions Subscription[]
+  tiers          BundleTier[]
+  priceOverrides BundlePriceOverride[]
 }
 
 // Which specific tier rows a bundle covers. Insert/delete only.
@@ -403,49 +401,69 @@ model BundleTier {
   @@unique([bundleId, tierId])
 }
 
+// Sparse in-bundle price override: one row ONLY where in-bundle price !=
+// à-la-carte (checkout/webhook/resolver fall back to the tier's own
+// stripePriceId when no row matches). Unique on the triple, not on
+// (featureId, level) alone — each (feature, level) sits in ≤1 bundle today,
+// but bundleSlug is kept so a future collision is an INSERT, not a
+// migration. bundleSlug (not bundleId) so this survives independent of
+// Bundle row churn and reads directly off the slug the qualification
+// function already returns.
+model BundlePriceOverride {
+  id            String    @id @default(cuid())
+  featureId     String
+  feature       Feature   @relation(fields: [featureId], references: [id], onDelete: Restrict)
+  level         TierLevel
+  bundleSlug    String
+  bundle        Bundle    @relation(fields: [bundleSlug], references: [slug], onDelete: Restrict)
+  stripePriceId String?   // null until Pass 2 mints the real in-bundle Stripe Price
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@unique([featureId, level, bundleSlug])
+}
+
 // Universal wallet top-up — not per-tool.
 model CreditPack {
   id            String   @id @default(cuid())
   slug          String   @unique
   credits       Int
   priceCents    Int
-  stripePriceId String? @unique
+  stripePriceId String?  @unique
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   fundingEntries LedgerEntry[]
 }
 
-// Transmorphic: points at a Tier (tool_sub) or a Bundle (bundle); stores no
-// numbers. Chat B activates: featureId (denormalized, for the partial unique
-// index below) + a hand-written partial unique index on (userId, featureId)
-// WHERE status='active' AND type='tool_sub' (one active tool_sub per user per
-// feature), and a hand-written CHECK that tierId/bundleId match type — both
-// added by a follow-up migration since neither is schema.prisma-expressible.
+// Always a tool_sub: bundle membership is DERIVED (see lib/bundleQualify.ts),
+// never stored here — a bundle member is N of these rows, one per tool, at
+// in-bundle prices (BundlePriceOverride). Chat B activates: featureId
+// (denormalized, for the partial unique index below) + a hand-written
+// partial unique index on (userId, featureId) WHERE status='active' (one
+// active tool_sub per user per feature) — added by a follow-up migration
+// since it's not schema.prisma-expressible.
 //
 // stripeSubscriptionId is NOT globally unique: the store cart can add
-// multiple solo tool-subs before checkout, which mints ONE Stripe
-// subscription with multiple recurring items — one stripeSubscriptionId
-// spans multiple rows here, one per item. The real per-item uniqueness is
-// two hand-written partial indexes ((stripeSubscriptionId, tierId) and
-// (stripeSubscriptionId, bundleId), each WHERE both columns NOT NULL),
-// added alongside the two constraints above — also not schema.prisma-
-// expressible, so also hand-written in the same follow-up migration.
+// multiple tool-subs before checkout, which mints ONE Stripe subscription
+// with multiple recurring items — one stripeSubscriptionId spans multiple
+// rows here, one per item. The real per-item uniqueness is a hand-written
+// partial unique index on (stripeSubscriptionId, tierId) WHERE
+// stripeSubscriptionId IS NOT NULL, added alongside the constraint above —
+// also not schema.prisma-expressible, so also hand-written in the same
+// follow-up migration.
 model Subscription {
   id                   String             @id @default(cuid())
   userId               String
   user                 User               @relation(fields: [userId], references: [id], onDelete: Restrict)
-  type                 SubscriptionType
-  tierId               String?            // set for tool_sub
-  tier                 Tier?              @relation(fields: [tierId], references: [id], onDelete: Restrict)
-  bundleId             String?            // set for bundle
-  bundle               Bundle?            @relation(fields: [bundleId], references: [id], onDelete: Restrict)
-  featureId            String?            // denormalized from tier.featureId for tool_sub rows; null for bundle
-  feature              Feature?           @relation(fields: [featureId], references: [id], onDelete: Restrict)
+  tierId               String
+  tier                 Tier               @relation(fields: [tierId], references: [id], onDelete: Restrict)
+  featureId            String // denormalized from tier.featureId
+  feature              Feature            @relation(fields: [featureId], references: [id], onDelete: Restrict)
   status               SubscriptionStatus
-  periodStart          DateTime           // current billing period = the allowance window
+  periodStart          DateTime // current billing period = the allowance window
   periodEnd            DateTime
-  stripeSubscriptionId String?            // NOT @unique — see model comment; per-item uniqueness is a hand-written partial index
+  stripeSubscriptionId String? // NOT @unique — see model comment; per-item uniqueness is a hand-written partial index
   createdAt            DateTime           @default(now())
   updatedAt            DateTime           @updatedAt
 
@@ -487,15 +505,15 @@ model LedgerEntry {
   reason       FundingReason?
   creditPackId String?
   creditPack   CreditPack?    @relation(fields: [creditPackId], references: [id], onDelete: Restrict)
-  refId        String?        // Stripe / Transaction handle for non-pack funding
+  refId        String? // Stripe / Transaction handle for non-pack funding
 
   // consumption
-  toolId           String?             // which surface ran the unit
+  toolId           String? // which surface ran the unit
   tool             Tool?               @relation(fields: [toolId], references: [id], onDelete: Restrict)
-  featureId        String?             // which pool it drew from — group-by key for allowance-used
+  featureId        String? // which pool it drew from — group-by key for allowance-used
   feature          Feature?            @relation(fields: [featureId], references: [id], onDelete: Restrict)
   unitCount        Int?
-  vendorCostCents  Int?                // logged even at zero debit and on fail
+  vendorCostCents  Int? // logged even at zero debit and on fail
   creditsDebited   Int?
   allowanceCovered Boolean?
   outcome          ConsumptionOutcome?
