@@ -6,10 +6,11 @@
 // selected in the ledger query below — it cannot leak into this surface's
 // payload because it's never fetched, not just never rendered.
 
-import type { FundingReason, PrismaClient, Subscription, Bundle, Tier } from "@prisma/client";
+import type { FundingReason, PrismaClient, Subscription, Tier } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resolveSessionUserId } from "@/lib/toolsSession";
 import { resolveFeature } from "@/lib/engine/resolver";
+import { getCurrentBundleSlug } from "@/lib/entitlement";
 import { brandSlugFor } from "@/lib/brandSlug";
 import { deriveTierName } from "@/lib/catalogDerive";
 import { mockAccountData } from "@/config/account.mock";
@@ -29,45 +30,26 @@ const FUNDING_REASON_LABEL: Record<FundingReason, string> = {
 };
 
 type FeatureWithSurfaces = { unifiedName: string | null; surfaces: { name: string; unit: string }[] };
-type SubWithTierBundle = Subscription & {
-  tier: (Tier & { feature: FeatureWithSurfaces }) | null;
-  bundle: (Bundle & { tiers: { tier: Tier & { feature: FeatureWithSurfaces } }[] }) | null;
-};
+type SubWithTier = Subscription & { tier: Tier & { feature: FeatureWithSurfaces } };
 
-function buildSubscription(sub: SubWithTierBundle): AccountSubscription {
-  if (sub.type === "tool_sub" && sub.tier) {
-    const toolName = sub.tier.feature.surfaces[0]?.name ?? sub.tier.feature.unifiedName ?? "Tool";
-    const name = deriveTierName(toolName, sub.tier);
-    const allowanceText = sub.tier.allowance === null ? "Unlimited" : `${sub.tier.allowance}`;
-    return {
-      id: sub.id,
-      kind: "tool_sub",
-      displayName: name,
-      grants: [`${allowanceText} included this period`],
-      status: sub.status,
-      periodEnd: sub.periodEnd.toISOString(),
-    };
-  }
-
-  if (sub.type === "bundle" && sub.bundle) {
-    const grants = sub.bundle.tiers.map((bt) => {
-      const feature = bt.tier.feature;
-      const label = feature.unifiedName ?? feature.surfaces[0]?.name ?? "Feature";
-      const unit = feature.surfaces[0]?.unit ?? "units";
-      const allowanceText = bt.tier.allowance === null ? "Unlimited" : `${bt.tier.allowance}`;
-      return `${label} — ${allowanceText} ${unit}/mo`;
-    });
-    return {
-      id: sub.id,
-      kind: "bundle",
-      displayName: sub.bundle.name,
-      grants,
-      status: sub.status,
-      periodEnd: sub.periodEnd.toISOString(),
-    };
-  }
-
-  throw new Error(`accountData: subscription ${sub.id} has neither a tool_sub tier nor a bundle`);
+// Every row is a tool_sub now — bundle membership is derived (see
+// getCurrentBundleSlug), never stored, so a bundle member shows as their N
+// individual tool_sub lines. AccountData.currentBundleSlug (set in
+// getRealAccountData below) carries the "part of Bundle Pro" grouping
+// separately, for a caller that wants to label these lines together without
+// needing a fake per-row bundle kind.
+function buildSubscription(sub: SubWithTier): AccountSubscription {
+  const toolName = sub.tier.feature.surfaces[0]?.name ?? sub.tier.feature.unifiedName ?? "Tool";
+  const name = deriveTierName(toolName, sub.tier);
+  const allowanceText = sub.tier.allowance === null ? "Unlimited" : `${sub.tier.allowance}`;
+  return {
+    id: sub.id,
+    kind: "tool_sub",
+    displayName: name,
+    grants: [`${allowanceText} included this period`],
+    status: sub.status,
+    periodEnd: sub.periodEnd.toISOString(),
+  };
 }
 
 async function buildMeteredFeatures(prisma: PrismaClient, userId: string): Promise<AccountMeteredFeature[]> {
@@ -172,17 +154,15 @@ async function buildLedger(prisma: PrismaClient, userId: string): Promise<Accoun
 }
 
 async function getRealAccountData(userId: string, client: PrismaClient): Promise<AccountData> {
-  const [user, wallet, subs] = await Promise.all([
+  const [user, wallet, subs, currentBundleSlug] = await Promise.all([
     client.user.findUniqueOrThrow({ where: { id: userId } }),
     client.wallet.findUnique({ where: { userId } }),
     client.subscription.findMany({
       where: { userId, status: { in: ["active", "past_due"] } },
-      include: {
-        tier: { include: { feature: { include: { surfaces: true } } } },
-        bundle: { include: { tiers: { include: { tier: { include: { feature: { include: { surfaces: true } } } } } } } },
-      },
+      include: { tier: { include: { feature: { include: { surfaces: true } } } } },
       orderBy: { createdAt: "asc" },
     }),
+    getCurrentBundleSlug(client, userId),
   ]);
 
   const [meteredFeatures, ledger] = await Promise.all([
@@ -191,6 +171,7 @@ async function getRealAccountData(userId: string, client: PrismaClient): Promise
   ]);
 
   return {
+    currentBundleSlug,
     member: {
       id: user.id,
       name: user.name ?? user.email,

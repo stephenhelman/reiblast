@@ -7,7 +7,7 @@
 // signToolsSession() and prints the cookie to paste into devtools.
 //
 // Requires prisma/seed-catalog.ts to have already been run against the same
-// target DB (score/ask/pack/bots features, tiers, bundle-plus, pack-250 must exist).
+// target DB (score/ask/pack/bots features, tiers, pack-250 must exist).
 //
 // Usage:
 //   npx tsx prisma/seed-preview-account.ts
@@ -53,7 +53,13 @@ async function main() {
   const scorePlusTier = await prisma.tier.findUniqueOrThrow({
     where: { featureId_level: { featureId: scoreFeature.id, level: 'plus' } },
   })
-  const bundlePlus = await prisma.bundle.findUniqueOrThrow({ where: { slug: 'bundle-plus' } })
+  // Bundle Plus member preview: N tool_subs, not a bundle-type row (retired
+  // — see lib/bundleQualify.ts). score/plus is seeded active above; ask/base
+  // here, past_due, so the account page shows a real dunning state on one of
+  // the bundle's two lines.
+  const askBaseTier = await prisma.tier.findUniqueOrThrow({
+    where: { featureId_level: { featureId: askFeature.id, level: 'base' } },
+  })
   const pack250 = await prisma.creditPack.findUniqueOrThrow({ where: { slug: 'pack-250' } })
 
   const user = await prisma.user.upsert({
@@ -88,8 +94,8 @@ async function main() {
   await prisma.subscription.create({
     data: {
       userId: user.id,
-      type: 'tool_sub',
       tierId: scorePlusTier.id,
+      featureId: scoreFeature.id,
       status: 'active',
       periodStart,
       periodEnd: periodEndActive,
@@ -99,8 +105,8 @@ async function main() {
   await prisma.subscription.create({
     data: {
       userId: user.id,
-      type: 'bundle',
-      bundleId: bundlePlus.id,
+      tierId: askBaseTier.id,
+      featureId: askFeature.id,
       status: 'past_due',
       periodStart: periodStartPastDue,
       periodEnd: periodEndPastDue,

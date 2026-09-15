@@ -416,7 +416,7 @@ model BundlePriceOverride {
   level         TierLevel
   bundleSlug    String
   bundle        Bundle    @relation(fields: [bundleSlug], references: [slug], onDelete: Restrict)
-  stripePriceId String?   // null until Pass 2 mints the real in-bundle Stripe Price
+  stripePriceId String?   @unique // null until Pass 2 mints the real in-bundle Stripe Price; unique so checkout/webhook can reverse-lookup a line's Price the same way Tier.stripePriceId does
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
 

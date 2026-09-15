@@ -66,41 +66,50 @@ async function handlePackPurchase(tx: TxClient, session: Stripe.Checkout.Session
   }
 }
 
-type SubscriptionEventType =
+export type SubscriptionEventType =
   | "customer.subscription.created"
   | "customer.subscription.updated"
   | "customer.subscription.deleted";
 
 interface ResolvedItem {
-  tierId?: string;
-  bundleId?: string;
-  featureId: string | null;
+  tierId: string;
+  featureId: string;
 }
 
-// Reverse-lookup a subscription item's Price ID → the owning Tier or Bundle,
-// via the @unique stripePriceId seam (same seam mintCheckout's resolvePrice
-// uses forward). Takes tx; never opens its own $transaction (Step 4 lesson —
-// every engine/lookup helper the webhook calls must be transaction-composable).
+// Reverse-lookup a subscription item's Price ID → its Tier, via the @unique
+// stripePriceId seam (same seam mintCheckout's resolvePrice uses forward).
+// An in-bundle line's Price lives on a BundlePriceOverride row, not the
+// Tier's own stripePriceId — check both; either way the item lands as a
+// tool_sub against the underlying Tier (bundle membership is DERIVED, see
+// lib/bundleQualify.ts, never stored on the Subscription row itself). Takes
+// tx; never opens its own $transaction (Step 4 lesson — every engine/lookup
+// helper the webhook calls must be transaction-composable).
 async function resolveSubscriptionItemPrice(tx: TxClient, priceId: string): Promise<ResolvedItem> {
-  const [tier, bundle] = await Promise.all([
+  const [tier, override] = await Promise.all([
     tx.tier.findUnique({ where: { stripePriceId: priceId } }),
-    tx.bundle.findUnique({ where: { stripePriceId: priceId } }),
+    tx.bundlePriceOverride.findUnique({ where: { stripePriceId: priceId } }),
   ]);
 
   if (tier) return { tierId: tier.id, featureId: tier.featureId };
-  if (bundle) return { bundleId: bundle.id, featureId: null };
+  if (override) {
+    const overrideTier = await tx.tier.findUniqueOrThrow({
+      where: { featureId_level: { featureId: override.featureId, level: override.level } },
+    });
+    return { tierId: overrideTier.id, featureId: overrideTier.featureId };
+  }
 
-  throw new Error(`[stripe webhook] subscription item priceId "${priceId}" does not resolve to any Tier or Bundle row`);
+  throw new Error(`[stripe webhook] subscription item priceId "${priceId}" does not resolve to any Tier or BundlePriceOverride row`);
 }
 
 // Subscription purchase → entitlement (LOCKED #1/#5/#6). One Subscription
-// row per subscription ITEM, upserted on (stripeSubscriptionId, tierId) or
-// (stripeSubscriptionId, bundleId) — the store cart can add multiple solo
-// tool-subs before checkout, so one Stripe subscription can carry multiple
-// recurring items spanning multiple features (see the per-item-uniqueness
-// migration). NEVER calls fund() — allowance is derived from the period
-// window; only pack purchases fund the wallet.
-async function handleSubscriptionEvent(
+// row per subscription ITEM, upserted on (stripeSubscriptionId, tierId) — a
+// bundle member is N tool_sub rows (one per tool), never a stored bundle
+// row; the store cart can also add multiple solo tool-subs before checkout,
+// so either way one Stripe subscription can carry multiple recurring items
+// spanning multiple features (see the per-item-uniqueness migration). NEVER
+// calls fund() — allowance is derived from the period window; only pack
+// purchases fund the wallet.
+export async function handleSubscriptionEvent(
   tx: TxClient,
   subscription: Stripe.Subscription,
   eventType: SubscriptionEventType,
@@ -126,9 +135,12 @@ async function handleSubscriptionEvent(
     throw new Error(`[stripe webhook] ${eventType} ${subscription.id} has no items`);
   }
 
+  const processedTierIds: string[] = [];
+
   for (const item of items) {
     const priceId = item.price.id;
     const resolved = await resolveSubscriptionItemPrice(tx, priceId);
+    processedTierIds.push(resolved.tierId);
 
     // current_period_start/end live on the ITEM under this SDK/API version
     // (2026-08-26.dahlia removed them from the top-level Subscription
@@ -138,9 +150,7 @@ async function handleSubscriptionEvent(
 
     const data = {
       userId,
-      type: (resolved.tierId ? "tool_sub" : "bundle") as "tool_sub" | "bundle",
-      tierId: resolved.tierId ?? null,
-      bundleId: resolved.bundleId ?? null,
+      tierId: resolved.tierId,
       featureId: resolved.featureId,
       status,
       periodStart,
@@ -153,9 +163,9 @@ async function handleSubscriptionEvent(
     // upsert() — safe here because this whole handler already runs inside
     // the outer per-event transaction (the ProcessedStripeEvent marker),
     // so there's no cross-request race on this find+write pair.
-    const existing = resolved.tierId
-      ? await tx.subscription.findFirst({ where: { stripeSubscriptionId: subscription.id, tierId: resolved.tierId } })
-      : await tx.subscription.findFirst({ where: { stripeSubscriptionId: subscription.id, bundleId: resolved.bundleId } });
+    const existing = await tx.subscription.findFirst({
+      where: { stripeSubscriptionId: subscription.id, tierId: resolved.tierId },
+    });
 
     if (existing) {
       await tx.subscription.update({ where: { id: existing.id }, data });
@@ -163,6 +173,21 @@ async function handleSubscriptionEvent(
       await tx.subscription.create({ data });
     }
   }
+
+  // Downgrade/line-removal reconciliation: an item dropped from the
+  // subscription (e.g. a Pro -> Plus downgrade removing the close/base line)
+  // never reappears in `items` again, so the loop above would otherwise
+  // leave its row silently active forever — an orphaned entitlement. Cancel
+  // every row for this stripeSubscriptionId that the current item set didn't
+  // just touch. Rows are kept (never deleted), same as the .deleted branch.
+  await tx.subscription.updateMany({
+    where: {
+      stripeSubscriptionId: subscription.id,
+      tierId: { notIn: processedTierIds },
+      status: { not: "canceled" },
+    },
+    data: { status: "canceled" },
+  });
 }
 
 // Runs INSIDE the same transaction as the ProcessedStripeEvent marker insert
@@ -216,10 +241,18 @@ export async function POST(req: NextRequest) {
   // first, then process" as two steps, or a mid-handler failure drops the
   // event with no retry (the marker would already say done).
   try {
-    await prisma.$transaction(async (tx) => {
-      await tx.processedStripeEvent.create({ data: { id: event.id } });
-      await handleEvent(tx, event);
-    });
+    // Explicit timeout: a multi-item subscription (N tool_sub upserts + the
+    // downgrade-reconciliation query) can exceed Prisma's 5s interactive-
+    // transaction default under real network latency, which would abort the
+    // transaction mid-handler — not a business failure, just not enough
+    // clock. 20s covers a realistic worst-case item count with margin.
+    await prisma.$transaction(
+      async (tx) => {
+        await tx.processedStripeEvent.create({ data: { id: event.id } });
+        await handleEvent(tx, event);
+      },
+      { timeout: 20_000 },
+    );
   } catch (err) {
     // The marker's own P2002 (already processed) is the ONLY case that
     // short-circuits to 200 with no retry. Anything else — including a

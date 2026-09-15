@@ -18,22 +18,32 @@ interface ResolvedPrice {
   priceId: string;
   mode: CheckoutMode;
   tierId?: string;
-  bundleId?: string;
   creditPackId?: string;
 }
 
+// Bundle has no Price of its own (retired — a bundle is N tool_sub lines at
+// in-bundle Prices, see lib/bundlePricing.ts#composeBundleLines). A cart
+// item's Price is either a Tier's own à-la-carte stripePriceId, or an
+// in-bundle line's stripePriceId living on a BundlePriceOverride row (which
+// still resolves back to that line's Tier — the cart never carries a
+// "bundle" concept, only priced tool_sub lines) or a CreditPack's.
 async function resolvePrice(priceId: string): Promise<ResolvedPrice> {
-  const [tier, bundle, pack] = await Promise.all([
+  const [tier, override, pack] = await Promise.all([
     prisma.tier.findUnique({ where: { stripePriceId: priceId } }),
-    prisma.bundle.findUnique({ where: { stripePriceId: priceId } }),
+    prisma.bundlePriceOverride.findUnique({ where: { stripePriceId: priceId } }),
     prisma.creditPack.findUnique({ where: { stripePriceId: priceId } }),
   ]);
 
   if (tier) return { priceId, mode: "subscription", tierId: tier.id };
-  if (bundle) return { priceId, mode: "subscription", bundleId: bundle.id };
+  if (override) {
+    const overrideTier = await prisma.tier.findUniqueOrThrow({
+      where: { featureId_level: { featureId: override.featureId, level: override.level } },
+    });
+    return { priceId, mode: "subscription", tierId: overrideTier.id };
+  }
   if (pack) return { priceId, mode: "payment", creditPackId: pack.id };
 
-  throw new Error(`mintCheckout: priceId "${priceId}" does not resolve to any Tier, Bundle, or CreditPack row`);
+  throw new Error(`mintCheckout: priceId "${priceId}" does not resolve to any Tier, BundlePriceOverride, or CreditPack row`);
 }
 
 /**
@@ -66,11 +76,6 @@ export async function mintCheckout(userId: string, priceIds: string[]): Promise<
     );
   }
 
-  const bundleIds = resolved.flatMap((row) => (row.bundleId ? [row.bundleId] : []));
-  if (bundleIds.length > 1) {
-    throw new Error("mintCheckout: more than one bundle in a single cart is not supported — pass a single bundleId");
-  }
-
   await Promise.all(resolved.map((row) => assertPriceModeMatches(row.priceId, mode)));
 
   const user = await prisma.user.findUniqueOrThrow({ where: { id: userId } });
@@ -91,9 +96,13 @@ export async function mintCheckout(userId: string, priceIds: string[]): Promise<
   const tierIds = resolved.flatMap((row) => (row.tierId ? [row.tierId] : []));
   const creditPackIds = resolved.flatMap((row) => (row.creditPackId ? [row.creditPackId] : []));
 
+  // bundleId is retired — a bundle is never a checkout-time concept, only N
+  // priced tool_sub lines (see lib/bundlePricing.ts#composeBundleLines).
+  // tierIds is non-load-bearing: the webhook reconstructs everything by
+  // reverse-looking-up each Stripe subscription item's own Price, kept here
+  // only for debugging/observability.
   const metadata: Record<string, string> = { userId };
   if (tierIds.length > 0) metadata.tierIds = tierIds.join(",");
-  if (bundleIds.length === 1) metadata.bundleId = bundleIds[0];
   if (creditPackIds.length > 0) metadata.creditPackIds = creditPackIds.join(",");
 
   // /tools/store is served under the tools host (see middleware.ts), not the

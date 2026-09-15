@@ -18,6 +18,7 @@ import {
 } from "@/config/storeCopy";
 import { mockStoreData } from "@/config/store.mock";
 import { deriveTierName, deriveBundleCoverage, type BundleWithCoverage } from "@/lib/catalogDerive";
+import { resolveStripePriceId } from "@/lib/bundlePricing";
 import type { StoreData, StoreTier, StoreTool, StoreBundle, StoreCoreBaseline } from "@/types/store";
 
 type ToolWithFeatureAndTiers = PrismaTool & { feature: Feature & { tiers: Tier[] } };
@@ -65,11 +66,29 @@ async function buildStoreTool(tool: ToolWithFeatureAndTiers, userId: string): Pr
   };
 }
 
-function buildStoreBundle(bundle: BundleWithCoverage): StoreBundle {
+async function buildStoreBundle(bundle: BundleWithCoverage): Promise<StoreBundle> {
   const copy = STORE_BUNDLE_COPY[bundle.slug];
   if (!copy) throw new Error(`storeCatalog: no STORE_BUNDLE_COPY entry for bundle slug "${bundle.slug}"`);
 
   const { available, coverageLines, coversFeatureSlugs } = deriveBundleCoverage(bundle);
+
+  // Bundle carries no Price of its own — a purchase expands into these N
+  // lines, each priced override-else-à-la-carte (lib/bundlePricing.ts).
+  // priceCents here is the Tier's own à-la-carte price: BundlePriceOverride
+  // (by design, Pass 1) stores only the in-bundle stripePriceId, not a
+  // separate in-bundle priceCents — the DB has no lower number to show yet.
+  const lines = await Promise.all(
+    bundle.tiers.map(async (bt) => ({
+      featureSlug: bt.tier.feature.slug,
+      level: bt.tier.level,
+      priceCents: bt.tier.priceCents,
+      stripePriceId: await resolveStripePriceId(prisma, {
+        featureId: bt.tier.featureId,
+        level: bt.tier.level,
+        bundleSlug: bundle.slug,
+      }),
+    })),
+  );
 
   return {
     id: bundle.id,
@@ -77,7 +96,7 @@ function buildStoreBundle(bundle: BundleWithCoverage): StoreBundle {
     name: bundle.name,
     level: bundle.level,
     priceCents: bundle.priceCents,
-    stripePriceId: bundle.stripePriceId,
+    lines,
     tagline: copy.tagline,
     bestValue: copy.bestValue,
     available,
@@ -123,7 +142,7 @@ async function getRealStoreData(userId: string, client: PrismaClient): Promise<S
   ]);
 
   const storeTools = await Promise.all(tools.map((tool) => buildStoreTool(tool, userId)));
-  const storeBundles = bundles.map(buildStoreBundle);
+  const storeBundles = await Promise.all(bundles.map(buildStoreBundle));
   const coreBaseline = buildCoreBaseline(coreFeatures);
 
   const storePacks = packs.map((pack) => ({

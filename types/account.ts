@@ -15,7 +15,10 @@ export interface AccountMeteredFeature {
   periodEnd: string; // ISO
 }
 
-export type AccountSubscriptionKind = "tool_sub" | "bundle";
+// "bundle" retired — bundle membership is derived (see currentBundleSlug on
+// AccountData below), never a stored subscription row. Every row here is a
+// tool_sub.
+export type AccountSubscriptionKind = "tool_sub";
 export type AccountSubscriptionStatus = "active" | "past_due" | "canceled";
 
 export interface AccountSubscription {
@@ -65,4 +68,6 @@ export interface AccountData {
   meteredFeatures: AccountMeteredFeature[];
   subscriptions: AccountSubscription[];
   ledger: AccountLedgerRow[];
+  /** Derived (lib/entitlement.ts#getCurrentBundleSlug) — for grouping/labeling the tool_sub lines above ("part of Bundle Pro"), not a stored row. */
+  currentBundleSlug: string | null;
 }

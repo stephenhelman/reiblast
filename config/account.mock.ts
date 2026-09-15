@@ -146,6 +146,9 @@ export const mockAccountData: AccountData = {
       periodEnd: new Date(now + 9 * 24 * 60 * 60 * 1000).toISOString(),
     },
   ],
+  // A bundle member is N tool_sub rows now — Bundle Plus previewed here as
+  // its two lines (score/plus + ask/base), grouped via currentBundleSlug
+  // below rather than a fake per-row "bundle" kind.
   subscriptions: [
     {
       id: "mock-sub-score-plus",
@@ -156,13 +159,14 @@ export const mockAccountData: AccountData = {
       periodEnd: new Date(now + 9 * 24 * 60 * 60 * 1000).toISOString(),
     },
     {
-      id: "mock-sub-bundle-plus",
-      kind: "bundle",
-      displayName: "REItools+",
-      grants: ["REIscore — 50 analyses/mo", "REIask — 500 queries/mo", "REIpack — 150 packets/mo"],
+      id: "mock-sub-ask-base",
+      kind: "tool_sub",
+      displayName: "REIask",
+      grants: ["500 included this period"],
       status: "past_due",
       periodEnd: new Date(now - 3 * 24 * 60 * 60 * 1000).toISOString(),
     },
   ],
+  currentBundleSlug: "bundle-plus",
   ledger: withRunningBalance(rawRows),
 };

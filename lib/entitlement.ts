@@ -6,9 +6,9 @@
 // hasn't subscribed to (addon features: pack/ask/bots). This fills that gap
 // without touching resolver.ts.
 
-import type { BundleLevel, Feature, PrismaClient, TierLevel } from "@prisma/client";
+import type { Feature, PrismaClient, TierLevel } from "@prisma/client";
+import { qualifyBundle, type QualifyingTiers } from "@/lib/bundleQualify";
 
-const BUNDLE_LEVEL_ORDER: BundleLevel[] = ["plus", "pro"];
 const TIER_LEVEL_ORDER: TierLevel[] = ["base", "plus", "pro"];
 
 export async function isEntitled(
@@ -20,50 +20,44 @@ export async function isEntitled(
   // the resolver's base-tier fallthrough IS the entitlement.
   if (feature.bucket === "core_included") return true;
 
+  // Every active sub is a tool_sub now — bundle membership is derived, never
+  // stored (see lib/bundleQualify.ts), so the resolver's own tool_sub walk
+  // already covers what the old bundle branch here duplicated.
   const activeSubs = await prisma.subscription.findMany({
     where: { userId, status: "active" },
-    include: {
-      tier: true,
-      bundle: { include: { tiers: { include: { tier: true } } } },
-    },
+    include: { tier: true },
   });
 
-  for (const sub of activeSubs) {
-    if (sub.type === "tool_sub" && sub.tier?.featureId === feature.id) return true;
-    if (sub.type === "bundle" && sub.bundle) {
-      for (const bundleTier of sub.bundle.tiers) {
-        if (bundleTier.tier.featureId === feature.id) return true;
-      }
-    }
-  }
-
-  return false;
+  return activeSubs.some((sub) => sub.tier.featureId === feature.id);
 }
 
 /**
  * The store's "Your current plan" bundle highlight — a display-only lookup,
  * not an entitlement/allowance decision (that's still resolveFeature's job
- * per feature). Replace-not-stack means at most one bundle sub should ever be
- * active; if the table is ever messy, highest level wins rather than throwing.
+ * per feature). Derives the qualifying bundle from the member's active
+ * tool_subs via qualifyBundle() — there is no stored bundle row anymore.
+ * Return shape unchanged (string | null) so callers don't need to change.
  */
 export async function getCurrentBundleSlug(
   prisma: PrismaClient,
   userId: string,
 ): Promise<string | null> {
-  const activeBundleSubs = await prisma.subscription.findMany({
-    where: { userId, status: "active", type: "bundle" },
-    include: { bundle: true },
+  const activeSubs = await prisma.subscription.findMany({
+    where: { userId, status: "active" },
+    include: { tier: { include: { feature: true } } },
   });
 
-  let winner: { slug: string; level: BundleLevel } | null = null;
-  for (const sub of activeBundleSubs) {
-    if (!sub.bundle) continue;
-    if (!winner || BUNDLE_LEVEL_ORDER.indexOf(sub.bundle.level) > BUNDLE_LEVEL_ORDER.indexOf(winner.level)) {
-      winner = { slug: sub.bundle.slug, level: sub.bundle.level };
+  const tiers: QualifyingTiers = {};
+  for (const sub of activeSubs) {
+    const slug = sub.tier.feature.slug;
+    if (slug !== "score" && slug !== "ask" && slug !== "bots") continue;
+    const current = tiers[slug];
+    if (!current || TIER_LEVEL_ORDER.indexOf(sub.tier.level) > TIER_LEVEL_ORDER.indexOf(current)) {
+      tiers[slug] = sub.tier.level;
     }
   }
 
-  return winner?.slug ?? null;
+  return qualifyBundle(tiers);
 }
 
 /**

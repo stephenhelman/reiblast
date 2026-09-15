@@ -54,14 +54,25 @@ export interface StorePack {
   stripePriceId: string | null;
 }
 
+/** One priced tool_sub line that makes up a bundle (lib/bundlePricing.ts#composeBundleLines) — a bundle is never one Price, only N of these. */
+export interface StoreBundleLine {
+  featureSlug: string;
+  level: "base" | "plus" | "pro";
+  /** In-bundle price if this line has an override, else the tier's own à-la-carte price. */
+  priceCents: number;
+  /** Stripe test-mode Price id for this specific line (override-else-à-la-carte); null until backfilled. */
+  stripePriceId: string | null;
+}
+
 export interface StoreBundle {
   id: string;
   slug: string;
   name: string;
   level: "plus" | "pro";
+  /** Display sub-total of the in-bundle lines below — never a Bundle Stripe Price (retired; Bundle carries no Price of its own). */
   priceCents: number;
-  /** Stripe test-mode Price id backfilled onto the Bundle row. */
-  stripePriceId: string | null;
+  /** The priced tool_sub lines a purchase of this bundle expands into. */
+  lines: StoreBundleLine[];
   /** Static selling copy — see config/storeCopy.ts deferral note. */
   tagline: string;
   bestValue?: boolean;

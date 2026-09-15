@@ -139,36 +139,42 @@ export const mockStoreData: StoreData = {
   ],
   bundles: [
     {
-      // Coming-soon: covers ask/pack, both inactive in this fixture (matches
-      // real launch data — no forcing needed to demonstrate this state).
+      // Coming-soon: covers ask, inactive in this fixture (matches real
+      // launch data — no forcing needed to demonstrate this state).
       id: "preview-bundle-plus",
       slug: "bundle-plus",
       name: "REItools+",
       level: "plus",
-      priceCents: 4900,
-      stripePriceId: null,
+      priceCents: 4600,
+      lines: [
+        { featureSlug: "score", level: "plus", priceCents: 2900, stripePriceId: null },
+        { featureSlug: "ask", level: "base", priceCents: 2900, stripePriceId: null },
+      ],
       tagline: "Placeholder tagline: for active dispo.",
       available: false,
-      coverageLines: ["REIscore — 50 analyses/mo", "REIask — 500 queries/mo", "REIpack — 150 packets/mo"],
-      coversFeatureSlugs: ["score", "ask", "pack"],
+      coverageLines: ["REIscore — 50 analyses/mo", "REIask — 500 queries/mo"],
+      coversFeatureSlugs: ["score", "ask"],
     },
     {
       id: "preview-bundle-pro",
       slug: "bundle-pro",
       name: "REItools Pro",
       level: "pro",
-      priceCents: 14900,
-      stripePriceId: null,
+      priceCents: 17300,
+      lines: [
+        { featureSlug: "score", level: "pro", priceCents: 4900, stripePriceId: null },
+        { featureSlug: "ask", level: "plus", priceCents: 4900, stripePriceId: null },
+        { featureSlug: "bots", level: "base", priceCents: 9900, stripePriceId: null },
+      ],
       tagline: "Placeholder tagline: full pipeline coverage.",
       bestValue: true,
       available: false,
       coverageLines: [
         "REIscore — 175 analyses/mo",
-        "REIask — 500 queries/mo",
-        "REIpack — 150 packets/mo",
+        "REIask — 1,500 queries/mo",
         "REIclose — 60 handoffs/mo",
       ],
-      coversFeatureSlugs: ["score", "ask", "pack", "bots"],
+      coversFeatureSlugs: ["score", "ask", "bots"],
     },
   ],
   coreBaseline: {

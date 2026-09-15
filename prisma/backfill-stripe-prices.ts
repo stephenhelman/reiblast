@@ -21,31 +21,40 @@ if (!url) {
 const prisma = new PrismaClient({ datasourceUrl: url })
 
 // Natural keys per prisma/seed-catalog.ts: Tiers are keyed (featureSlug, level);
-// Bundles and CreditPacks by slug.
+// BundlePriceOverride rows by (featureSlug, level, bundleSlug) — a bundle
+// itself carries no Price (retired, see lib/bundlePricing.ts); CreditPacks
+// by slug. No 'bundle' key anymore — Bundle.stripePriceId is gone.
 type TierKey = { kind: 'tier'; featureSlug: string; level: 'base' | 'plus' | 'pro' }
-type BundleKey = { kind: 'bundle'; slug: string }
+type OverrideKey = { kind: 'override'; featureSlug: string; level: 'base' | 'plus' | 'pro'; bundleSlug: string }
 type CreditPackKey = { kind: 'creditPack'; slug: string }
-type RowKey = TierKey | BundleKey | CreditPackKey
+type RowKey = TierKey | OverrideKey | CreditPackKey
 
+// 2026-09-14 AUTHORITATIVE PRICING (.claude/docs/REItools-Architecture.md).
+// Minted via prisma/create-stripe-prices.ts (test mode) — see that script's
+// output for provenance. No CreditPack Prices here (deferred; SKUs locked
+// but Price creation stays deferred until we say). score/base + scrub/base
+// stay null (membership-granted, never sold).
 const backfill: { key: RowKey; stripePriceId: string }[] = [
-  { key: { kind: 'tier', featureSlug: 'score', level: 'plus' }, stripePriceId: 'price_1UF2CCDBmAikSXyuZR0LgjSX' },
-  { key: { kind: 'tier', featureSlug: 'score', level: 'pro' }, stripePriceId: 'price_1UF2CVDBmAikSXyuYzLJTk5n' },
-  { key: { kind: 'tier', featureSlug: 'ask', level: 'base' }, stripePriceId: 'price_1UF2CsDBmAikSXyuNC3JrJQD' },
-  { key: { kind: 'tier', featureSlug: 'pack', level: 'base' }, stripePriceId: 'price_1UF2DUDBmAikSXyui9Y5bR4C' },
-  { key: { kind: 'tier', featureSlug: 'bots', level: 'base' }, stripePriceId: 'price_1UF2EMDBmAikSXyucVTdfJhW' },
-  { key: { kind: 'bundle', slug: 'bundle-plus' }, stripePriceId: 'price_1UF2EnDBmAikSXyuKGe6pO6R' },
-  { key: { kind: 'bundle', slug: 'bundle-pro' }, stripePriceId: 'price_1UF2F7DBmAikSXyu1yKcGMBo' },
-  { key: { kind: 'creditPack', slug: 'pack-100' }, stripePriceId: 'price_1UF2FODBmAikSXyuD2QLT5rs' },
-  { key: { kind: 'creditPack', slug: 'pack-250' }, stripePriceId: 'price_1UF2FhDBmAikSXyuWKrnuueE' },
-  { key: { kind: 'creditPack', slug: 'pack-600' }, stripePriceId: 'price_1UF2FyDBmAikSXyuocduvRd2' },
+  { key: { kind: 'tier', featureSlug: 'score', level: 'plus' }, stripePriceId: 'price_1UFocaDBmAikSXyuOaDqZcfm' },
+  { key: { kind: 'tier', featureSlug: 'score', level: 'pro' }, stripePriceId: 'price_1UFocbDBmAikSXyukr5TolrV' },
+  { key: { kind: 'tier', featureSlug: 'ask', level: 'base' }, stripePriceId: 'price_1UFoccDBmAikSXyu7ORiWmZP' },
+  { key: { kind: 'tier', featureSlug: 'ask', level: 'plus' }, stripePriceId: 'price_1UFocdDBmAikSXyu7oaAaXWY' },
+  { key: { kind: 'tier', featureSlug: 'bots', level: 'base' }, stripePriceId: 'price_1UFoceDBmAikSXyugKknohv6' },
+  { key: { kind: 'tier', featureSlug: 'bots', level: 'plus' }, stripePriceId: 'price_1UFocfDBmAikSXyu154HjOxv' },
+  { key: { kind: 'tier', featureSlug: 'bots', level: 'pro' }, stripePriceId: 'price_1UFocgDBmAikSXyuRvkBpZgt' },
+  { key: { kind: 'override', featureSlug: 'score', level: 'plus', bundleSlug: 'bundle-plus' }, stripePriceId: 'price_1UFocgDBmAikSXyu0LVcfHa8' },
+  { key: { kind: 'override', featureSlug: 'ask', level: 'base', bundleSlug: 'bundle-plus' }, stripePriceId: 'price_1UFochDBmAikSXyuyximqqJV' },
+  { key: { kind: 'override', featureSlug: 'score', level: 'pro', bundleSlug: 'bundle-pro' }, stripePriceId: 'price_1UFochDBmAikSXyuH7CBxNuY' },
+  { key: { kind: 'override', featureSlug: 'ask', level: 'plus', bundleSlug: 'bundle-pro' }, stripePriceId: 'price_1UFochDBmAikSXyuvPraBAyR' },
+  { key: { kind: 'override', featureSlug: 'bots', level: 'base', bundleSlug: 'bundle-pro' }, stripePriceId: 'price_1UFociDBmAikSXyu9AT35N3j' },
 ]
 
 function describeKey(key: RowKey): string {
   switch (key.kind) {
     case 'tier':
       return `Tier(${key.featureSlug}/${key.level})`
-    case 'bundle':
-      return `Bundle(${key.slug})`
+    case 'override':
+      return `BundlePriceOverride(${key.featureSlug}/${key.level}·${key.bundleSlug})`
     case 'creditPack':
       return `CreditPack(${key.slug})`
   }
@@ -72,10 +81,14 @@ async function resolveTierId(featureSlug: string, level: TierKey['level']): Prom
   return tier.id
 }
 
-async function resolveBundleId(slug: string): Promise<string> {
-  const bundle = await prisma.bundle.findUnique({ where: { slug } })
-  if (!bundle) throw new Error(`No seeded Bundle with slug ${slug} — orphan Price with nowhere to land`)
-  return bundle.id
+async function resolveOverrideId(featureSlug: string, level: TierKey['level'], bundleSlug: string): Promise<string> {
+  const feature = await prisma.feature.findUnique({ where: { slug: featureSlug } })
+  if (!feature) throw new Error(`Unknown feature slug: ${featureSlug} (BundlePriceOverride(${featureSlug}/${level}·${bundleSlug}) does not resolve — orphan Price with nowhere to land)`)
+  const override = await prisma.bundlePriceOverride.findUnique({
+    where: { featureId_level_bundleSlug: { featureId: feature.id, level, bundleSlug } },
+  })
+  if (!override) throw new Error(`No seeded BundlePriceOverride for (${featureSlug}, ${level}, ${bundleSlug}) — orphan Price with nowhere to land`)
+  return override.id
 }
 
 async function resolveCreditPackId(slug: string): Promise<string> {
@@ -93,8 +106,8 @@ async function main() {
     const id =
       entry.key.kind === 'tier'
         ? await resolveTierId(entry.key.featureSlug, entry.key.level)
-        : entry.key.kind === 'bundle'
-          ? await resolveBundleId(entry.key.slug)
+        : entry.key.kind === 'override'
+          ? await resolveOverrideId(entry.key.featureSlug, entry.key.level, entry.key.bundleSlug)
           : await resolveCreditPackId(entry.key.slug)
     resolved.push({ key: entry.key, id, stripePriceId: entry.stripePriceId })
   }
@@ -104,8 +117,8 @@ async function main() {
     for (const { key, id, stripePriceId } of resolved) {
       if (key.kind === 'tier') {
         await tx.tier.update({ where: { id }, data: { stripePriceId } })
-      } else if (key.kind === 'bundle') {
-        await tx.bundle.update({ where: { id }, data: { stripePriceId } })
+      } else if (key.kind === 'override') {
+        await tx.bundlePriceOverride.update({ where: { id }, data: { stripePriceId } })
       } else {
         await tx.creditPack.update({ where: { id }, data: { stripePriceId } })
       }
