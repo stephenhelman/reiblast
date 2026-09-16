@@ -36,7 +36,6 @@ export const GATED_PREFIXES = [
   "/ari-special", // promo-gated checkout (30-day trial form)
   "/signup", // funnel entry, links straight to the payment link
   "/onboarding", // covers /onboarding and /onboarding/success
-  "/onboarding-complete", // post-submit confirmation, same funnel
 ] as const;
 
 /** Where blocked visitors land. Must never itself be gated (redirect loop). */
