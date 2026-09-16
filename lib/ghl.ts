@@ -292,6 +292,64 @@ export async function moveToStage(
   }
 }
 
+/**
+ * Move (or create) an opportunity for a contact into a specific stage of a
+ * specific pipeline, given directly by id. Unlike moveToStage(), this isn't
+ * tied to the onboarding pipeline/stage map — used by callers (e.g. the chat
+ * widget's lead capture) that target a different pipeline, such as sales.
+ */
+export async function moveOpportunityToStage(
+  contactId: string,
+  pipelineId: string,
+  stageId: string,
+  contactName?: string,
+): Promise<boolean> {
+  const searchRes = await fetch(
+    `${GHL_BASE_URL}/opportunities/search?location_id=${process.env.GHL_HQ_LOCATION_ID}&pipeline_id=${pipelineId}&contact_id=${contactId}`,
+    { headers: hqHeaders() },
+  );
+
+  const searchData = await searchRes.json();
+  const opportunity = searchData?.opportunities?.[0];
+
+  if (opportunity) {
+    const updateRes = await fetch(
+      `${GHL_BASE_URL}/opportunities/${opportunity.id}`,
+      {
+        method: "PUT",
+        headers: hqHeaders(),
+        body: JSON.stringify({
+          name: contactName || opportunity.name || "New Lead",
+          pipelineStageId: stageId,
+        }),
+      },
+    );
+    if (!updateRes.ok) {
+      const err = await updateRes.text();
+      console.error("[GHL] moveOpportunityToStage PUT failed:", err);
+    }
+    return updateRes.ok;
+  } else {
+    const createRes = await fetch(`${GHL_BASE_URL}/opportunities/`, {
+      method: "POST",
+      headers: hqHeaders(),
+      body: JSON.stringify({
+        pipelineId,
+        locationId: process.env.GHL_HQ_LOCATION_ID,
+        pipelineStageId: stageId,
+        name: contactName || "New Lead",
+        contactId,
+        status: "open",
+      }),
+    });
+    if (!createRes.ok) {
+      const err = await createRes.text();
+      console.error("[GHL] moveOpportunityToStage POST failed:", err);
+    }
+    return createRes.ok;
+  }
+}
+
 export async function provisionSubAccount(
   name: string,
   email: string,

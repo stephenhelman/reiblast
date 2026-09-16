@@ -1,6 +1,8 @@
 import type { Metadata } from 'next'
 import Nav from '@/components/marketing/Nav'
 import Footer from '@/components/marketing/Footer'
+import ChatWidget from '@/components/chat/ChatWidget'
+import { chatConfig, chatColors, chatFonts } from '@/components/chat/reiblastChatConfig'
 
 export const metadata: Metadata = {
   title: 'REIblast — From List to Blast',
@@ -14,11 +16,7 @@ export default function MarketingLayout({ children }: { children: React.ReactNod
       <Nav />
       <main>{children}</main>
       <Footer />
-      <script
-        src="https://widgets.leadconnectorhq.com/loader.js"
-        data-resources-url="https://widgets.leadconnectorhq.com/chat-widget/loader.js"
-        data-widget-id="6a91db99bde3d5bf50985574"
-      ></script>
+      <ChatWidget config={chatConfig} colors={chatColors} fonts={chatFonts} />
     </>
   )
 }

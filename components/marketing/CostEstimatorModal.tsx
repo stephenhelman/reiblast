@@ -1,18 +1,19 @@
 "use client";
 
 import { useMemo, useState } from "react";
-
-const CORE_PRICE = 57;
-const PHONE_PRICE = 1.265;
-const A2P_SETUP = 23.5;
-const A2P_MONTHLY_SOLE = 2.1;
-const A2P_MONTHLY_LLC = 10.5;
-const TEXT_RATE = 0.0091;
-const DAILY_CAP_SOLE = 3000;
-const DAILY_CAP_LLC = 6000;
-const SEND_DAYS = 22;
-const RAMP_RUNGS = [500, 750, 1000, 1500, 2000, 3500, 5000];
-const TRIAL_DAYS = 5;
+import {
+  CORE_PRICE,
+  PHONE_PRICE,
+  A2P_SETUP,
+  A2P_MONTHLY_SOLE,
+  A2P_MONTHLY_LLC,
+  TEXT_RATE,
+  DAILY_CAP_SOLE,
+  DAILY_CAP_LLC,
+  SEND_DAYS,
+  RAMP_RUNGS,
+  TRIAL_DAYS,
+} from "@/lib/pricing";
 
 type AccountType = "sole" | "llc";
 
