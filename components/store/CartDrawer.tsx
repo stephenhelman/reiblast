@@ -5,12 +5,13 @@ import Image from "next/image";
 import Drawer from "@/components/shared/Drawer";
 import Button from "@/components/shared/Button";
 import { formatCents } from "@/lib/money";
-import { smartCartSuggestion } from "@/lib/storeCart";
 import { startCheckoutAction } from "@/app/tools/store/actions";
 import CheckoutForm from "./CheckoutForm";
+import BundleNudgeModal from "./BundleNudgeModal";
+import { computeBundleNudge } from "./bundleNudge";
 import { getBrandAssets, portalBrand, creditsBrand } from "@/lib/brandAssets";
 import { brandSlugFor } from "@/lib/brandSlug";
-import type { StoreBundle } from "@/types/store";
+import type { StoreBundle, StorePack, StoreTool } from "@/types/store";
 import type { CartItem } from "./cartTypes";
 
 // Solo tool subs carry a featureSlug that maps 1:1 to a brand wordmark;
@@ -27,6 +28,8 @@ interface CartDrawerProps {
   onClose: () => void;
   cart: CartItem[];
   bundles: StoreBundle[];
+  tools: StoreTool[];
+  packs: StorePack[];
   membershipName: string;
   onRemove: (id: string) => void;
   onApplySwap: (bundle: StoreBundle) => void;
@@ -44,6 +47,8 @@ export default function CartDrawer({
   onClose,
   cart,
   bundles,
+  tools,
+  packs,
   membershipName,
   onRemove,
   onApplySwap,
@@ -52,8 +57,12 @@ export default function CartDrawer({
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
+  const [nudgeOpen, setNudgeOpen] = useState(false);
 
-  const priceIds = cart.map((item) => item.stripePriceId);
+  // A bundle cart item fans out to N tool_sub lines (never one Price) —
+  // checkout needs every line's own priceId, not the group item's (which is
+  // null; its Price lives on `lines`).
+  const priceIds = cart.flatMap((item) => (item.lines ? item.lines.map((l) => l.stripePriceId) : [item.stripePriceId]));
   const allItemsCheckoutEligible =
     cart.length > 0 && priceIds.every((id): id is string => !!id);
 
@@ -73,23 +82,7 @@ export default function CartDrawer({
     onClose();
   };
 
-  const smartCartCandidates = cart.filter(
-    (item): item is CartItem & { featureSlug: string } =>
-      !!item.featureSlug && !item.bundleSlug,
-  );
-  const suggestedBundle = smartCartSuggestion(
-    smartCartCandidates.map((item) => ({
-      featureSlug: item.featureSlug,
-      priceCents: item.priceCents,
-    })),
-    bundles,
-  );
-  const soloSumCents = suggestedBundle
-    ? smartCartCandidates.reduce((sum, item) => sum + item.priceCents, 0)
-    : 0;
-  const savingsCents = suggestedBundle
-    ? soloSumCents - suggestedBundle.priceCents
-    : 0;
+  const nudge = computeBundleNudge(cart, bundles, packs);
 
   const monthlyCents = cart
     .filter((i) => i.kind === "sub")
@@ -123,57 +116,92 @@ export default function CartDrawer({
               Your cart is empty.
             </div>
           ) : (
-            cart.map((item) => (
-              <div
-                key={item.id}
-                className="flex items-center gap-3 rounded-xl border border-border-default bg-black px-3.5 py-3.25"
-              >
-                <div className="flex items-center gap-2">
-                  <Image
-                    src={wordmarkFor(item)}
-                    alt={item.name}
-                    height={14}
-                    width={90}
-                    style={{ height: 14, width: "auto" }}
-                  />
-                  <span className="text-[11.8px] text-silver">
-                    {KIND_LABEL[item.kind]}
-                  </span>
-                </div>
-                <div className="ml-auto font-bold font-display text-sm whitespace-nowrap">
-                  {item.kind === "sub"
-                    ? `+${formatCents(item.priceCents)}/mo`
-                    : formatCents(item.priceCents)}
-                </div>
-                <button
-                  onClick={() => onRemove(item.id)}
-                  className="text-gray hover:text-red text-base px-1"
+            cart.map((item) =>
+              item.lines ? (
+                <div
+                  key={item.id}
+                  className="rounded-xl border border-gold-hover bg-gold/5 px-3.5 py-3.25"
                 >
-                  ×
-                </button>
-              </div>
-            ))
+                  <div className="flex items-center gap-2.5">
+                    <Image
+                      src={wordmarkFor(item)}
+                      alt={item.name}
+                      height={14}
+                      width={90}
+                      style={{ height: 14, width: "auto" }}
+                    />
+                    <span className="text-[11.8px] font-medium text-gold">
+                      REItools+ · bundle pricing applied
+                    </span>
+                    <div className="ml-auto font-bold font-display text-sm whitespace-nowrap">
+                      +{formatCents(item.priceCents)}/mo
+                    </div>
+                    <button
+                      onClick={() => onRemove(item.id)}
+                      className="text-gray hover:text-red text-base px-1"
+                    >
+                      ×
+                    </button>
+                  </div>
+                  <div className="mt-2.5 flex flex-col gap-1.5 pl-1 border-l border-gold-hover/40 ml-1">
+                    {item.lines.map((line) => (
+                      <div
+                        key={line.featureSlug}
+                        className="flex items-center justify-between pl-2.5 text-[12px]"
+                      >
+                        <span className="text-silver">{line.name}</span>
+                        <span className="text-white font-medium whitespace-nowrap">
+                          {formatCents(line.priceCents)}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div
+                  key={item.id}
+                  className="flex items-center gap-3 rounded-xl border border-border-default bg-black px-3.5 py-3.25"
+                >
+                  <div className="flex items-center gap-2">
+                    <Image
+                      src={wordmarkFor(item)}
+                      alt={item.name}
+                      height={14}
+                      width={90}
+                      style={{ height: 14, width: "auto" }}
+                    />
+                    <span className="text-[11.8px] text-silver">
+                      {KIND_LABEL[item.kind]}
+                    </span>
+                  </div>
+                  <div className="ml-auto font-bold font-display text-sm whitespace-nowrap">
+                    {item.kind === "sub"
+                      ? `+${formatCents(item.priceCents)}/mo`
+                      : formatCents(item.priceCents)}
+                  </div>
+                  <button
+                    onClick={() => onRemove(item.id)}
+                    className="text-gray hover:text-red text-base px-1"
+                  >
+                    ×
+                  </button>
+                </div>
+              ),
+            )
           )}
 
-          {suggestedBundle && savingsCents > 0 && (
-            <div className="rounded-xl border border-gold-hover bg-gold/10 px-3.75 py-3.5">
+          {nudge && (
+            <button
+              onClick={() => setNudgeOpen(true)}
+              className="text-left rounded-xl border border-gold-hover bg-gold/10 px-3.75 py-3.25 hover:bg-gold/15 transition-colors"
+            >
               <div className="flex items-center gap-2 font-semibold text-sm text-gold">
-                Smart cart
+                {nudge.type === "A" ? "Complete the bundle" : "Upgrade to Pro"}
               </div>
-              <p className="text-[12.4px] mt-1.5 leading-relaxed">
-                The <b className="text-white">{suggestedBundle.name}</b> bundle
-                covers what you've added for less than buying it piece by piece.
+              <p className="text-[12.4px] mt-1 leading-relaxed text-silver">
+                One more line gets you into <b className="text-white">{nudge.bundle.name}</b> — see the details.
               </p>
-              <Button
-                variant="gold"
-                size="sm"
-                className="w-full mt-2.5"
-                onClick={() => onApplySwap(suggestedBundle)}
-              >
-                Swap to {suggestedBundle.name} · save{" "}
-                {formatCents(savingsCents)}/mo
-              </Button>
-            </div>
+            </button>
           )}
         </div>
 
@@ -218,6 +246,13 @@ export default function CartDrawer({
           onClose={() => setClientSecret(null)}
         />
       )}
+
+      <BundleNudgeModal
+        nudge={nudgeOpen ? nudge : null}
+        tools={tools}
+        onClose={() => setNudgeOpen(false)}
+        onApplySwap={onApplySwap}
+      />
     </>
   );
 }

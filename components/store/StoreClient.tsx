@@ -12,7 +12,7 @@ import type { StoreBundle, StoreData } from '@/types/store'
 import { CreditsPanel, ToolsPanel, BundlesPanel, AddonsPanel } from './panels'
 import LearnMoreModal from './LearnMoreModal'
 import CartDrawer from './CartDrawer'
-import type { CartItem, LearnMoreSubject } from './cartTypes'
+import { composeBundleCartItem, type CartItem, type LearnMoreSubject } from './cartTypes'
 
 interface StoreClientProps {
   store: StoreData
@@ -62,17 +62,11 @@ export default function StoreClient({ store, arrival, stripePublishableKey }: St
     setCartOpen(true)
   }
   const removeFromCart = (id: string) => setCart((prev) => prev.filter((i) => i.id !== id))
+  const toolNames = Object.fromEntries(tools.map((t) => [t.featureSlug, t.name]))
   const applySwap = (bundle: StoreBundle) => {
     setCart((prev) => [
       ...prev.filter((i) => !i.featureSlug || !bundle.coversFeatureSlugs.includes(i.featureSlug)),
-      {
-        id: bundle.id,
-        kind: 'sub',
-        name: `${bundle.name} bundle`,
-        priceCents: bundle.priceCents,
-        stripePriceId: bundle.stripePriceId,
-        bundleSlug: bundle.slug,
-      },
+      composeBundleCartItem(bundle, toolNames),
     ])
   }
 
@@ -188,6 +182,8 @@ export default function StoreClient({ store, arrival, stripePublishableKey }: St
         onClose={() => setCartOpen(false)}
         cart={cart}
         bundles={bundles}
+        tools={tools}
+        packs={packs}
         membershipName={membership.name}
         onRemove={removeFromCart}
         onApplySwap={applySwap}

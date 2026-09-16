@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type Stripe from 'stripe'
 import { Prisma } from '@prisma/client'
-import { handleSubscriptionEvent } from '../../../app/api/webhooks/stripe/route'
+import { handleSubscriptionEvent } from '../../stripe/webhookHandlers'
 import { resolveStripePriceId } from '../../bundlePricing'
 import { getCurrentBundleSlug } from '../../entitlement'
 import { createDisposableUser, teardownDisposableUser, testPrisma } from './testDb'

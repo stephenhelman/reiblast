@@ -45,7 +45,7 @@ export default function AccountClient({ account }: AccountClientProps) {
         </div>
 
         <WalletZone member={account.member} meteredFeatures={account.meteredFeatures} />
-        <SubscriptionsZone subscriptions={account.subscriptions} />
+        <SubscriptionsZone subscriptions={account.subscriptions} currentBundleSlug={account.currentBundleSlug} />
         <LedgerZone ledger={account.ledger} />
       </div>
     </main>

@@ -7,7 +7,7 @@ import Button from '@/components/shared/Button'
 import { getBrandAssets, portalBrand } from '@/lib/brandAssets'
 import { formatCents } from '@/lib/money'
 import type { StoreAddonService, StoreBundle, StoreTool } from '@/types/store'
-import type { CartItem, LearnMoreSubject } from './cartTypes'
+import { composeBundleCartItem, type CartItem, type LearnMoreSubject } from './cartTypes'
 
 interface Tier {
   id: string
@@ -75,6 +75,9 @@ export default function LearnMoreModal({
       name = bundle.name
       hook = bundle.tagline
       compareCopy = bundle.coverageLines
+      // A bundle has no Price of its own (it's N priced tool_sub lines, see
+      // composeBundleCartItem) — the selectable "tier" row here is display-only,
+      // pricing the bundle as a whole; stripePriceId is never read off it.
       tiers = [
         {
           id: bundle.id,
@@ -82,7 +85,7 @@ export default function LearnMoreModal({
           line: bundle.coverageLines[0] ?? '',
           priceCents: bundle.priceCents,
           per: 'mo',
-          stripePriceId: bundle.stripePriceId,
+          stripePriceId: null,
         },
       ]
       note = `On top of your ${membershipName} membership. Replaces any lower bundle or solo subscriptions it covers.`
@@ -119,8 +122,21 @@ export default function LearnMoreModal({
   }, [subject])
 
   const handleAdd = () => {
+    if (!subject) return
+
+    if (subject.kind === 'bundle') {
+      const bundle = bundles.find((b) => b.slug === subject.bundleSlug)
+      if (!bundle) return
+      const toolNames = Object.fromEntries(tools.map((t) => [t.featureSlug, t.name]))
+      onAddToCart(composeBundleCartItem(bundle, toolNames))
+      onClose()
+      return
+    }
+
     const tier = tiers.find((t) => t.id === activeTierId)
-    if (!tier || !subject) return
+    if (!tier) return
+
+    const subjectStoreTier = subject.kind === 'tool' ? tools.find((t) => t.slug === subject.toolSlug)?.tiers.find((t) => t.id === tier.id) : undefined
 
     const item: CartItem = {
       id: tier.id,
@@ -129,7 +145,7 @@ export default function LearnMoreModal({
       priceCents: tier.priceCents,
       stripePriceId: tier.stripePriceId,
       featureSlug: subject.kind === 'tool' ? subjectFeatureSlug : undefined,
-      bundleSlug: subject.kind === 'bundle' ? subject.bundleSlug : undefined,
+      level: subjectStoreTier?.level,
     }
     onAddToCart(item)
     onClose()

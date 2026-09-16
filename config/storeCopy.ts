@@ -53,6 +53,16 @@ export const STORE_BUNDLE_COPY: Record<string, { tagline: string; bestValue?: bo
   "bundle-pro": { tagline: "Placeholder tagline: full pipeline coverage.", bestValue: true },
 };
 
+// The Pack perk GRANT (crediting free packets each period) is unbuilt on the
+// lib side — this is display-only, advertising a catalog value in the
+// smart-cart modal. free packs/mo per bundle; pack_price is never hardcoded
+// against it — the modal multiplies this count by a real StorePack.priceCents
+// (STORE_PACK_BEST_VALUE_SLUG) read from the DB-backed catalog.
+export const STORE_BUNDLE_FREE_PACK_COUNT: Record<string, number> = {
+  "bundle-plus": 5,
+  "bundle-pro": 10,
+};
+
 export const STORE_PACK_BEST_VALUE_SLUG = "pack-600";
 
 export const STORE_CORE_TAGLINE = "Placeholder tagline: your baseline REIblast membership access.";

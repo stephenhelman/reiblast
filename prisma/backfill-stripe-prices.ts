@@ -37,16 +37,27 @@ type RowKey = TierKey | OverrideKey | CreditPackKey
 const backfill: { key: RowKey; stripePriceId: string }[] = [
   { key: { kind: 'tier', featureSlug: 'score', level: 'plus' }, stripePriceId: 'price_1UFocaDBmAikSXyuOaDqZcfm' },
   { key: { kind: 'tier', featureSlug: 'score', level: 'pro' }, stripePriceId: 'price_1UFocbDBmAikSXyukr5TolrV' },
-  { key: { kind: 'tier', featureSlug: 'ask', level: 'base' }, stripePriceId: 'price_1UFoccDBmAikSXyu7ORiWmZP' },
-  { key: { kind: 'tier', featureSlug: 'ask', level: 'plus' }, stripePriceId: 'price_1UFocdDBmAikSXyu7oaAaXWY' },
+  { key: { kind: 'tier', featureSlug: 'ask', level: 'base' }, stripePriceId: 'price_1UG3a4DBmAikSXyu5XGUmxof' },
+  { key: { kind: 'tier', featureSlug: 'ask', level: 'plus' }, stripePriceId: 'price_1UG4CrDBmAikSXyunaP4EuN3' },
   { key: { kind: 'tier', featureSlug: 'bots', level: 'base' }, stripePriceId: 'price_1UFoceDBmAikSXyugKknohv6' },
   { key: { kind: 'tier', featureSlug: 'bots', level: 'plus' }, stripePriceId: 'price_1UFocfDBmAikSXyu154HjOxv' },
   { key: { kind: 'tier', featureSlug: 'bots', level: 'pro' }, stripePriceId: 'price_1UFocgDBmAikSXyuRvkBpZgt' },
   { key: { kind: 'override', featureSlug: 'score', level: 'plus', bundleSlug: 'bundle-plus' }, stripePriceId: 'price_1UFocgDBmAikSXyu0LVcfHa8' },
-  { key: { kind: 'override', featureSlug: 'ask', level: 'base', bundleSlug: 'bundle-plus' }, stripePriceId: 'price_1UFochDBmAikSXyuyximqqJV' },
+  { key: { kind: 'override', featureSlug: 'ask', level: 'base', bundleSlug: 'bundle-plus' }, stripePriceId: 'price_1UG3aVDBmAikSXyuK1yfkxoV' },
   { key: { kind: 'override', featureSlug: 'score', level: 'pro', bundleSlug: 'bundle-pro' }, stripePriceId: 'price_1UFochDBmAikSXyuH7CBxNuY' },
-  { key: { kind: 'override', featureSlug: 'ask', level: 'plus', bundleSlug: 'bundle-pro' }, stripePriceId: 'price_1UFochDBmAikSXyuvPraBAyR' },
+  { key: { kind: 'override', featureSlug: 'ask', level: 'plus', bundleSlug: 'bundle-pro' }, stripePriceId: 'price_1UG3jiDBmAikSXyu4ojDctFz' },
   { key: { kind: 'override', featureSlug: 'bots', level: 'base', bundleSlug: 'bundle-pro' }, stripePriceId: 'price_1UFociDBmAikSXyu9AT35N3j' },
+  // 2026-09-15 — 4 in-bundle upgrade-cell overrides (additive, not in the 09-14 locked sheet;
+  // confirmed with Stephen before minting). score/pro·bundle-plus $47, ask/plus·bundle-plus $44,
+  // bots/plus·bundle-pro $159, bots/pro·bundle-pro $281.
+  // Also same-day: the 4 `ask` tier/override rows above were repointed off a drifted, partly-dead
+  // Stripe lineage (ask/plus à-la-carte's old Price was `type: one_time`, unusable for a sub) onto
+  // the current active `REIask`/`REIask Plus` products; a new recurring $49 ask/plus à-la-carte
+  // Price (price_1UG4CrDBmAikSXyunaP4EuN3) was minted since no valid one existed.
+  { key: { kind: 'override', featureSlug: 'score', level: 'pro', bundleSlug: 'bundle-plus' }, stripePriceId: 'price_1UG49DDBmAikSXyucNxggOAz' },
+  { key: { kind: 'override', featureSlug: 'ask', level: 'plus', bundleSlug: 'bundle-plus' }, stripePriceId: 'price_1UG49EDBmAikSXyuBZgSthW3' },
+  { key: { kind: 'override', featureSlug: 'bots', level: 'plus', bundleSlug: 'bundle-pro' }, stripePriceId: 'price_1UG49EDBmAikSXyu2sfBLLkW' },
+  { key: { kind: 'override', featureSlug: 'bots', level: 'pro', bundleSlug: 'bundle-pro' }, stripePriceId: 'price_1UG49EDBmAikSXyuaRyKqd94' },
 ]
 
 function describeKey(key: RowKey): string {

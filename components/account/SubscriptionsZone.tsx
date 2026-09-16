@@ -18,12 +18,22 @@ function StatusTag({ status }: { status: AccountSubscription['status'] }) {
   return <Tag tone="green">Active</Tag>
 }
 
+// Presentation-only, like config/storeCopy.ts's STORE_BUNDLE_COPY — the DB
+// bundle name isn't fetched onto AccountData (only its slug, for the derived
+// currentBundleSlug banner below), so this mirrors it here.
+const BUNDLE_DISPLAY_NAME: Record<string, string> = {
+  'bundle-plus': 'REItools+',
+  'bundle-pro': 'REItools Pro',
+}
+
 interface SubscriptionsZoneProps {
   subscriptions: AccountSubscription[]
+  /** Derived (lib/entitlement.ts#getCurrentBundleSlug), never a stored row — labels the tool_sub lines below as bundle membership without forcing a fake grouped row into the list. */
+  currentBundleSlug: string | null
 }
 
 /** ZONE 2 — subscriptions, display-only. No Stripe, no in-app cancel/upgrade — "Update my subscription" only routes to OPWS (app/tools/account/actions.ts). */
-export default function SubscriptionsZone({ subscriptions }: SubscriptionsZoneProps) {
+export default function SubscriptionsZone({ subscriptions, currentBundleSlug }: SubscriptionsZoneProps) {
   const [isPending, startTransition] = useTransition()
   const [toast, setToast] = useState<string | null>(null)
 
@@ -38,6 +48,17 @@ export default function SubscriptionsZone({ subscriptions }: SubscriptionsZonePr
   return (
     <div className="flex flex-col gap-3">
       <h2 className="text-lg font-semibold">Subscriptions</h2>
+
+      {currentBundleSlug && (
+        <Card className="border-gold-hover! bg-gold/5">
+          <div className="flex items-center gap-2 text-sm">
+            <Tag tone="gold">Bundle</Tag>
+            <span>
+              You're on <b>{BUNDLE_DISPLAY_NAME[currentBundleSlug] ?? currentBundleSlug}</b> — the lines below are priced at your in-bundle rate.
+            </span>
+          </div>
+        </Card>
+      )}
 
       {subscriptions.length === 0 ? (
         <Card className="text-sm text-silver">No active subscriptions — you're on the included Core plan.</Card>

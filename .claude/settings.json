@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(ls /Users/stephenhelman/Desktop/)",
-      "Read(//Users/stephenhelman/Desktop/**)"
+      "Read(//Users/stephenhelman/Desktop/**)",
+      "Bash(npx tsc *)"
     ]
   }
 }
