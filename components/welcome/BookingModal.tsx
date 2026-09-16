@@ -19,7 +19,7 @@ export default function BookingModal({ bookingSrc }: BookingModalProps) {
 
   return (
     <>
-      <Button variant="gold" size="lg" className="w-full sm:w-auto" onClick={() => setOpen(true)}>
+      <Button variant="primary" size="lg" className="w-full sm:w-auto" onClick={() => setOpen(true)}>
         Book Your Onboarding Call
       </Button>
 
