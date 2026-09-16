@@ -1,13 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHQContact, moveOpportunityToStage } from "@/lib/ghl";
+import { prisma } from "@/lib/prisma";
 import type { ChatLeadRequest } from "@/lib/chat/types";
 
-// GHL is the only sink for chat-widget leads. A local Lead table was tried
-// and reverted (2026-09-15) — it'll come back once the DB's migration-history
-// drift gets a proper reconciliation pass, not layered onto it ad hoc.
 export async function POST(req: NextRequest) {
   const body: ChatLeadRequest = await req.json();
-  const { lead } = body;
+  const { lead, smsConsent, consentedAt } = body;
 
   // The capture flow requires both phone and email before it reaches @capture's
   // final step, so both are expected here.
@@ -40,6 +38,25 @@ export async function POST(req: NextRequest) {
       { success: false, error: "Failed to log lead" },
       { status: 500 },
     );
+  }
+
+  // Secondary sink: local Lead table. Best-effort — a failure here must not
+  // lose the GHL lead that already succeeded above, so it's caught and logged
+  // rather than surfaced as a failed response to the widget.
+  try {
+    const consented = smsConsent === true;
+    await prisma.lead.create({
+      data: {
+        name: lead.name?.trim() || null,
+        phone,
+        email,
+        smsConsent: consented,
+        consentedAt: consented ? (consentedAt ? new Date(consentedAt) : new Date()) : null,
+        source: "chat_widget",
+      },
+    });
+  } catch (err) {
+    console.error("[chat/lead] Failed to persist Lead row (GHL write already succeeded):", err);
   }
 
   return NextResponse.json({ success: true });
