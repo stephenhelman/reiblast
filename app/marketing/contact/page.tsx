@@ -9,8 +9,8 @@ export const metadata: Metadata = {
 };
 
 const EMAIL = "support@reiblast.app";
-const PHONE_DISPLAY = "(832) 820-1980";
-const PHONE_HREF = "+18328201980";
+const PHONE_DISPLAY = "(915) 800-8266";
+const PHONE_HREF = "+19158008266";
 
 function ContactMethods() {
   return (
@@ -108,8 +108,7 @@ export default function ContactPage() {
             Common questions
           </h2>
           <p className="text-white/70 text-[17px] leading-[1.85] mb-8">
-            Billing, A2P registration, and account questions are answered on
-            our{" "}
+            Billing, A2P registration, and account questions are answered on our{" "}
             <Link
               href="/faq"
               className="text-gold hover:text-gold-hover underline underline-offset-4 transition-colors"
@@ -123,17 +122,16 @@ export default function ContactPage() {
               I received a text I did not sign up for.
             </p>
             <p className="text-white/70 text-[17px] leading-[1.85]">
-              Reply STOP to that message to opt out immediately and
-              permanently. If you want your information removed entirely,
-              email{" "}
+              Reply STOP to that message to opt out immediately and permanently.
+              If you want your information removed entirely, email{" "}
               <a
                 href={`mailto:${EMAIL}`}
                 className="text-gold hover:text-gold-hover underline underline-offset-4 transition-colors"
               >
                 {EMAIL}
               </a>{" "}
-              with the phone number and we will trace it to the sending
-              account and require removal. Details in Section 9 of our{" "}
+              with the phone number and we will trace it to the sending account
+              and require removal. Details in Section 9 of our{" "}
               <Link
                 href="/privacy"
                 className="text-gold hover:text-gold-hover underline underline-offset-4 transition-colors"

@@ -82,10 +82,10 @@ export default function Footer() {
             3223 Ashton Park Dr, Houston, TX 77082
             <br />
             <a
-              href="tel:+18328201980"
+              href="tel:+19158008266"
               className="hover:text-white transition-colors"
             >
-              (832) 820-1980
+              (915) 800-8266
             </a>{" "}
             ·{" "}
             <a
