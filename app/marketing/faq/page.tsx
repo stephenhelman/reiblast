@@ -2,10 +2,22 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import {
+  CORE_PRICE,
+  PHONE_PRICE,
+  A2P_SETUP,
+  A2P_MONTHLY_SOLE,
+  A2P_MONTHLY_LLC,
+  DAILY_CAP_SOLE,
+  DAILY_CAP_LLC,
+  RAMP_RUNGS,
+} from "@/lib/marketingPricing";
+
+const rampChain = RAMP_RUNGS.map((n) => n.toLocaleString("en-US")).join(" → ");
 
 const BILLING_FAQS = [
   {
-    q: "What does my $57/month membership cover?",
+    q: `What does my $${CORE_PRICE}/month membership cover?`,
     a: (
       <>
         The REIblast platform: CRM, pipeline, SMS sequences, contracts and
@@ -19,10 +31,11 @@ const BILLING_FAQS = [
     q: "What do I have to pay for on top of my membership?",
     a: (
       <>
-        Phone number(s) at $1.265/number/month, a one-time A2P registration
-        fee of $23.50, an A2P monthly carrier fee ($2.10 for sole proprietors
-        / $10.50 for LLC/EIN), and usage (texts, calls, emails) at the posted
-        rates. These are billed from your wallet balance.
+        Phone number(s) at ${PHONE_PRICE}/number/month, a one-time A2P
+        registration fee of ${A2P_SETUP.toFixed(2)}, an A2P monthly carrier
+        fee (${A2P_MONTHLY_SOLE} for sole proprietors / ${A2P_MONTHLY_LLC} for
+        LLC/EIN), and usage (texts, calls, emails) at the posted rates. These
+        are billed from your wallet balance.
       </>
     ),
   },
@@ -75,10 +88,11 @@ const A2P_FAQS = [
     a: (
       <>
         You can start as a sole proprietor without an EIN, but it changes
-        your limits and fees: sole proprietors are capped at 3,000
-        segments/day on a single phone number with a $2.10/mo A2P fee, while
-        an LLC/EIN allows up to 6,000 segments/day, unlimited phone numbers,
-        and a $10.50/mo A2P fee.
+        your limits and fees: sole proprietors are capped at{" "}
+        {DAILY_CAP_SOLE.toLocaleString("en-US")} segments/day on a single
+        phone number with a ${A2P_MONTHLY_SOLE}/mo A2P fee, while an LLC/EIN
+        allows up to {DAILY_CAP_LLC.toLocaleString("en-US")} segments/day,
+        unlimited phone numbers, and a ${A2P_MONTHLY_LLC}/mo A2P fee.
       </>
     ),
   },
@@ -96,10 +110,10 @@ const A2P_FAQS = [
     q: "How does message ramp-up work?",
     a: (
       <>
-        New accounts start at 500 segments/day and step up (500 → 750 → 1,000
-        → 1,500 → 2,000 → 3,500 → 5,000 → your ceiling) each day you hit your
-        limit, until you reach your target or your account cap. This protects
-        deliverability.
+        New accounts start at {RAMP_RUNGS[0].toLocaleString("en-US")}{" "}
+        segments/day and step up ({rampChain} → your ceiling) each day you
+        hit your limit, until you reach your target or your account cap. This
+        protects deliverability.
       </>
     ),
   },
@@ -157,7 +171,10 @@ export default function FaqPage() {
       {/* FAQ list */}
       <section className="py-16 px-6">
         <div className="max-w-2xl mx-auto">
-          <p className="text-gold text-xs font-bold uppercase tracking-widest mb-4">
+          <p
+            id="billing"
+            className="text-gold text-xs font-bold uppercase tracking-widest mb-4 scroll-mt-24"
+          >
             Billing &amp; Charges
           </p>
           <div className="flex flex-col gap-4 mb-12">

@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { moveToStage, updateHQContact } from '@/lib/ghl'
 import { ONBOARDING_STAGES, SUPPORT_EMAIL, ONBOARDING_COOKIE, ONBOARDING_COOKIE_MAX_AGE_SECONDS } from '@/lib/constants'
+import { guardRegion } from '@/lib/geo'
 import { signOnboardingCookie } from '@/lib/onboardingSession'
+import { toolsOnboardingEnabled } from '@/lib/featureFlags'
 
 const REQUIRED_FIELDS = [
   'email', 'legalBusinessName', 'ein', 'businessType',
@@ -11,6 +13,11 @@ const REQUIRED_FIELDS = [
 ]
 
 export async function POST(req: NextRequest) {
+  // US-only funnel gate — mirrors the middleware page gate so the endpoint
+  // behind the form can't be called directly from a blocked region.
+  const blocked = guardRegion(req)
+  if (blocked) return blocked
+
   let body: Record<string, unknown>
   try {
     body = await req.json()
@@ -91,6 +98,14 @@ export async function POST(req: NextRequest) {
       console.log('[onboarding/submit] Stage moved successfully for', contactId)
     } catch (stageErr) {
       console.error('[onboarding/submit] moveToStage failed:', stageErr)
+    }
+
+    // TEMP launch gate — remove at tools launch, tools path becomes default.
+    // Flag off: identical to main's response (plain success, no cookie).
+    // Flag on: mint the onboarding-identity cookie the tools funnel
+    // (welcome -> discovery) reads to autofill its info modal.
+    if (!toolsOnboardingEnabled()) {
+      return NextResponse.json({ success: true })
     }
 
     const response = NextResponse.json({ success: true })

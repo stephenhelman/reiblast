@@ -73,6 +73,20 @@ model User {
   @@unique([ghlLocationId], map: "User_ghlLocationId_key")
 }
 
+// Prospect capture from the marketing chat widget — deliberately separate
+// from User (a paying member record). Not to be confused with
+// User.smsComplianceAgreed, which is a different, onboarding-specific consent.
+model Lead {
+  id          String    @id @default(cuid())
+  name        String?
+  phone       String
+  email       String
+  smsConsent  Boolean   @default(false)
+  consentedAt DateTime?
+  source      String    @default("chat_widget")
+  createdAt   DateTime  @default(now())
+}
+
 model Transaction {
   id            String   @id @default(cuid())
   userId        String

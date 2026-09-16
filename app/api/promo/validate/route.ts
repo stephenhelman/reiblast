@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { validatePromoCode } from '@/lib/promo'
+import { guardRegion } from '@/lib/geo'
 
 // Rate limit: simple in-memory store (resets on cold start)
 const attempts = new Map<string, { count: number; resetAt: number }>()
@@ -19,6 +20,11 @@ function isRateLimited(ip: string): boolean {
 }
 
 export async function POST(req: NextRequest) {
+  // US-only funnel gate — mirrors the middleware page gate so the endpoint
+  // behind the form can't be called directly from a blocked region.
+  const blocked = guardRegion(req)
+  if (blocked) return blocked
+
   const ip = req.headers.get('x-forwarded-for')?.split(',')[0].trim() ?? 'unknown'
 
   if (isRateLimited(ip)) {

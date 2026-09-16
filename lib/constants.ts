@@ -1,6 +1,7 @@
+export { CORE_PRICE } from "@/lib/marketingPricing";
+
 export const PLATFORM_NAME = "REIblast";
 export const TAGLINE = "From list to blast — close more deals, faster";
-export const CORE_PRICE = 57;
 export const PROMO_CODE = "ARISTUDENT";
 export const JV_SPLIT_CORE = "50/50";
 export const MAO_MULTIPLIER = 0.7;

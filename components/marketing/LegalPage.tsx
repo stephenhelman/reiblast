@@ -132,7 +132,7 @@ export function LegalContact() {
       <br />
       Houston, TX 77082
       <br />
-      <Tel display="(832) 820-1980" number="+18328201980" />
+      <Tel display="(915) 800-8266" number="+19158008266" />
       <br />
       <Mail address="support@reiblast.app" />
     </address>

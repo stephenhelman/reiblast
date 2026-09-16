@@ -75,8 +75,22 @@ const LOADING_MESSAGES = [
   "Almost ready...",
 ];
 
+const RECONCILE_MESSAGES = [
+  "Confirming your payment...",
+  "Creating your account...",
+  "Almost there...",
+];
+
+// Poll interval and max attempts for the post-checkout reconciliation
+// window — the GHL webhook that creates the User row lands async, on a
+// separate path from the checkout-form redirect, so the row may not exist
+// yet on first load.
+const RECONCILE_POLL_MS = 2500;
+const RECONCILE_MAX_ATTEMPTS = 24; // ~60s
+
 type GateState =
   | "checking"
+  | "waiting"
   | "not_found"
   | "active"
   | "onboarding_complete"
@@ -548,6 +562,8 @@ function OnboardingContent() {
   const [loading, setLoading] = useState(false);
   const [loadingMsg, setLoadingMsg] = useState(LOADING_MESSAGES[0]);
   const [msgIndex, setMsgIndex] = useState(0);
+  const [reconcileMsg, setReconcileMsg] = useState(RECONCILE_MESSAGES[0]);
+  const [reconcileAttempt, setReconcileAttempt] = useState(0);
 
   const [fields, setFields] = useState<Step1Fields>({
     email,
@@ -572,24 +588,51 @@ function OnboardingContent() {
 
   useEffect(() => {
     if (!email) return;
-    fetch(`/api/onboarding/status?email=${encodeURIComponent(email)}`)
-      .then(async (res) => {
+    let cancelled = false;
+    let attempt = 0;
+
+    async function poll() {
+      try {
+        const res = await fetch(
+          `/api/onboarding/status?email=${encodeURIComponent(email)}`,
+        );
+        if (cancelled) return;
+
         if (res.status === 404) {
-          setGateState("not_found");
+          attempt += 1;
+          if (attempt >= RECONCILE_MAX_ATTEMPTS) {
+            setGateState("not_found");
+            return;
+          }
+          setReconcileAttempt(attempt);
+          setReconcileMsg(
+            RECONCILE_MESSAGES[attempt % RECONCILE_MESSAGES.length],
+          );
+          setGateState("waiting");
+          setTimeout(poll, RECONCILE_POLL_MS);
           return;
         }
+
         if (!res.ok) {
           setGateState("not_found");
           return;
         }
+
         const data = await res.json();
         const s: string = data.status;
         if (s === "active") setGateState("active");
         else if (s === "onboarding_complete" || s === "provisioning")
           setGateState("onboarding_complete");
         else setGateState("pending_onboarding");
-      })
-      .catch(() => setGateState("not_found"));
+      } catch {
+        if (!cancelled) setGateState("not_found");
+      }
+    }
+
+    poll();
+    return () => {
+      cancelled = true;
+    };
   }, [email]);
 
   useEffect(() => {
@@ -686,6 +729,38 @@ function OnboardingContent() {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (gateState === "waiting") {
+    const pct = Math.min(
+      100,
+      Math.round((reconcileAttempt / RECONCILE_MAX_ATTEMPTS) * 100),
+    );
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center py-16 px-4">
+        <div className="max-w-md w-full">
+          <div className="flex justify-center mb-8">
+            <LogoStacked size={72} />
+          </div>
+          <div className="bg-[#141414] border border-[#2A2A2A] rounded-2xl p-8 text-center">
+            <div className="w-8 h-8 border-2 border-gold border-t-transparent rounded-full animate-spin mx-auto mb-6" />
+            <h2 className="text-white font-semibold text-lg mb-3">
+              {reconcileMsg}
+            </h2>
+            <p className="text-white/60 text-sm leading-relaxed mb-6">
+              We&apos;re finalizing your payment. This usually takes a few
+              seconds.
+            </p>
+            <div className="w-full h-1.5 bg-[#2A2A2A] rounded-full overflow-hidden">
+              <div
+                className="h-full bg-gold transition-all duration-500 ease-out"
+                style={{ width: `${pct}%` }}
+              />
+            </div>
+          </div>
+        </div>
       </div>
     );
   }

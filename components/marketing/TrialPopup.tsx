@@ -5,6 +5,8 @@ import Link from "next/link";
 import Button from "@/components/shared/Button";
 
 const DISMISS_KEY = "trial-popup-dismissed";
+const TRIAL_MODAL_SEEN_KEY = "reiblast_trial_modal_seen";
+const TRIAL_MODAL_SEEN_EVENT = "reiblast:trial-modal-seen";
 
 export default function TrialPopup() {
   const [open, setOpen] = useState(false);
@@ -29,6 +31,14 @@ export default function TrialPopup() {
     } catch {
       // ignore
     }
+    // Arms the chat widget's nudge (see ChatWidget.tsx's Nudge component) —
+    // it must not appear until this modal has had its turn.
+    try {
+      sessionStorage.setItem(TRIAL_MODAL_SEEN_KEY, "1");
+    } catch {
+      // ignore
+    }
+    window.dispatchEvent(new Event(TRIAL_MODAL_SEEN_EVENT));
   };
 
   if (!open) return null;
