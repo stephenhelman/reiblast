@@ -8,11 +8,11 @@ datasource db {
 }
 
 model User {
-  id                  String   @id @default(cuid())
-  email               String   @unique
-  name                String?
-  passwordHash        String?
-  plan                String   @default("core")
+  id           String  @id @default(cuid())
+  email        String  @unique
+  name         String?
+  passwordHash String?
+  plan         String  @default("core")
   // Status values:
   // pending_onboarding — paid, form not submitted
   // onboarding_complete — form submitted, awaiting review
@@ -20,8 +20,9 @@ model User {
   // active — fully provisioned and active
   // inactive — cancelled or deactivated
   // suspended — payment issue or violation
-  status              String   @default("pending_onboarding")
-  warningCount        Int      @default(0)
+  status       String  @default("pending_onboarding")
+  warningCount Int     @default(0)
+  role         Role    @default(user)
 
   // Business / A2P info
   businessName        String?
@@ -31,23 +32,23 @@ model User {
   businessCity        String?
   businessState       String?
   businessZip         String?
-  businessPhone       String?   // Member's self-entered business phone from onboarding — NOT the A2P number.
+  businessPhone       String? // Member's self-entered business phone from onboarding — NOT the A2P number.
   businessEmail       String?
-  a2pPhone            String?   // KYC-assigned A2P sending number, written by the custom-values webhook; null = not yet provisioned. This is the field the tools /enter gate reads.
+  a2pPhone            String? // KYC-assigned A2P sending number, written by the custom-values webhook; null = not yet provisioned. This is the field the tools /enter gate reads.
   websiteUrl          String?
   targetMarket        String?
-  smsComplianceAgreed Boolean  @default(false)
-  onboardingComplete  Boolean  @default(false)
+  smsComplianceAgreed Boolean @default(false)
+  onboardingComplete  Boolean @default(false)
 
   // Addons
-  addons               String[]  @default([])
-  a2pAddonPurchasedAt  DateTime?
+  addons              String[]  @default([])
+  a2pAddonPurchasedAt DateTime?
 
   // OTP verification
-  otpCode                   String?
-  otpExpiry                 DateTime?
-  otpAttempts               Int       @default(0)
-  otpLastSentAt             DateTime? // Send cooldown timestamp — set on every successful mint/resend/redeliver, independent of otpExpiry.
+  otpCode       String?
+  otpExpiry     DateTime?
+  otpAttempts   Int       @default(0)
+  otpLastSentAt DateTime? // Send cooldown timestamp — set on every successful mint/resend/redeliver, independent of otpExpiry.
 
   // GHL
   ghlContactId              String?
@@ -59,8 +60,8 @@ model User {
   // Note: ONBOARDING_COMPLETE stage ID must be added to GHL_STAGE_* env vars
   onboardingStage           String?
 
-  createdAt           DateTime @default(now())
-  updatedAt           DateTime @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   // Stripe identity anchor — alongside the ghl* identity fields above.
   stripeCustomerId String? @unique
@@ -69,6 +70,10 @@ model User {
   wallet        Wallet?
   subscriptions Subscription[]
   ledgerEntries LedgerEntry[]
+
+  // Admin-portal data layer back-relations — schema-only, no columns on User.
+  toolUses    ToolUse[]
+  creditHolds CreditHold[]
 
   @@unique([ghlLocationId], map: "User_ghlLocationId_key")
 }
@@ -85,6 +90,13 @@ model Lead {
   consentedAt DateTime?
   source      String    @default("chat_widget")
   createdAt   DateTime  @default(now())
+}
+
+enum Role {
+  user
+  admin
+  manager
+  team_lead
 }
 
 model Transaction {
@@ -112,13 +124,13 @@ model PromoCode {
 }
 
 model GhlToken {
-  id            String   @id @default(cuid())
-  locationId    String   @unique
-  accessToken   String
-  refreshToken  String
-  expiresAt     DateTime
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id           String   @id @default(cuid())
+  locationId   String   @unique
+  accessToken  String
+  refreshToken String
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 }
 
 model Deal {
@@ -159,35 +171,35 @@ model Deal {
 }
 
 model PropertyRecord {
-  id                String    @id @default(cuid())
+  id String @id @default(cuid())
 
   // Identity
-  address           String
-  formattedAddress  String    @unique
-  lat               Float?
-  lng               Float?
+  address          String
+  formattedAddress String @unique
+  lat              Float?
+  lng              Float?
 
   // Property details
-  propertyType      String?
-  beds              Int?
-  baths             Float?
-  sqft              Int?
-  lotSizeSqft       Int?
-  lotSizeAcres      Float?
-  yearBuilt         Int?
-  zoning            String?
-  subdivision       String?
+  propertyType String?
+  beds         Int?
+  baths        Float?
+  sqft         Int?
+  lotSizeSqft  Int?
+  lotSizeAcres Float?
+  yearBuilt    Int?
+  zoning       String?
+  subdivision  String?
 
   // Features
-  garage            Boolean?
-  garageSpaces      Int?
-  carport           Boolean?
-  pool              Boolean?
+  garage       Boolean?
+  garageSpaces Int?
+  carport      Boolean?
+  pool         Boolean?
 
   // Sale data
-  lastSalePrice     Int?
-  lastSaleDate      DateTime?
-  priceSource       String?
+  lastSalePrice Int?
+  lastSaleDate  DateTime?
+  priceSource   String?
 
   // Tax data
   assessedValue     Int?
@@ -203,10 +215,10 @@ model PropertyRecord {
   estimatedValueMax Int?
 
   // Source tracking
-  source            String
-  lastVerified      DateTime  @default(now())
-  createdAt         DateTime  @default(now())
-  updatedAt         DateTime  @updatedAt
+  source       String
+  lastVerified DateTime @default(now())
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([lat, lng])
   @@index([source])
@@ -215,6 +227,12 @@ model PropertyRecord {
   @@index([beds, baths, sqft])
 }
 
+// Vendor spend. One or more rows per ToolUse — one per actual vendor hit
+// (Melissa, Rentcast, Anthropic-Haiku, Anthropic-Sonnet). `resource` stays
+// the vendor; `model` is the Anthropic sub-model (Haiku vs Sonnet — different
+// rates), null for record-vendors. `toolUseId`/`tool`/`featureSlug` tie a
+// vendor hit back to the run that caused it; `isAdmin` mirrors ToolUse so
+// expense views can exclude admin testing by default.
 model ApiCall {
   id          String   @id @default(cuid())
   locationId  String
@@ -225,9 +243,25 @@ model ApiCall {
   durationMs  Int?
   createdAt   DateTime @default(now())
 
+  toolUseId    String?
+  toolUse      ToolUse? @relation(fields: [toolUseId], references: [id], onDelete: Restrict)
+  tool         String?
+  featureSlug  String?
+  model        String?
+  inputTokens  Int?
+  outputTokens Int?
+  isAdmin      Boolean  @default(false)
+  // Partial index (WHERE model IS NOT NULL) is hand-written into the
+  // migration SQL, not expressed here — same convention as the hand-written
+  // partial unique indexes noted on Subscription/BundlePriceOverride above,
+  // since Prisma's schema DSL can't declare a partial index predicate. Most
+  // rows (Melissa/Rentcast) have model = null; only the Anthropic rows the
+  // vendor-expense view actually groups by ("cost per model") need indexing.
+
   @@index([locationId])
   @@index([resource])
   @@index([createdAt])
+  @@index([toolUseId])
 }
 
 model LandDeal {
@@ -532,5 +566,117 @@ model LedgerEntry {
   allowanceCovered Boolean?
   outcome          ConsumptionOutcome?
 
+  // Admin-portal data layer: which run this consumption row settles. Null
+  // for funding/promo/credit rows — only consumption ties back to a run.
+  toolUseId String?
+  toolUse   ToolUse? @relation(fields: [toolUseId], references: [id], onDelete: Restrict)
+
   @@index([userId, featureId, createdAt])
+}
+
+// --- Admin portal data layer ----------------------------------------------
+// Spec: .claude/docs/REItools-Architecture.md, 2026-09-16 admin appendix.
+// Three-layer split: LedgerEntry = money, ToolUse = behavior, ApiCall =
+// vendor spend. A metered run is 1 ToolUse -> N ApiCall -> (if metered) 1
+// LedgerEntry, all correlated through toolUseId; ToolUse is the run/anchor,
+// no separate runId needed. Write-path (transactional/ordered write of
+// ToolUse + its ApiCalls + the LedgerEntry) is the metering engine's job —
+// this pass is the data layer only, nothing writes these tables yet.
+
+enum ToolOutcome {
+  success
+  fail
+  partial
+}
+
+enum HoldState {
+  open
+  committed
+  released
+}
+
+// One row per tool RUN — the analytics record ("who, which tool, how often,
+// outcome"). Grain is per-tool (see architecture doc table): REIscore = 1
+// analysis, REIask = 1 query, REIbots = 1 conversation, REIscrub = 1 scrub
+// run, REIpack = 1 packet. Both locationId and userId are required — userId
+// is also the correlation key that joins to LedgerEntry (which keys on
+// userId, not locationId). lib/toolsSession.ts's session payload carries
+// both, but resolveSessionUserId() currently only surfaces userId and the
+// analyzer routes currently only capture locationId (from the request body)
+// — closing that gap so both are available at write time is the metering
+// chat's job, not this pass's; the columns are deliberately non-null.
+model ToolUse {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+
+  locationId String
+  userId     String
+  user       User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  // Frozen at write time — NOT derived from User.role at read time. Freezing
+  // it keeps historical expense math stable if a user's role changes later
+  // (e.g. someone promoted to admin shouldn't retroactively make their past
+  // member usage disappear from expense totals, nor vice versa).
+  isAdmin Boolean @default(false)
+
+  featureSlug String // polymorphic tool identity (REIscore, REIask, ...)
+  kind        String // per-tool run subtype (e.g. SFR | Land for REIscore)
+  outcome     ToolOutcome
+
+  // Promoted behavioral columns — queried/grouped by admin analytics views,
+  // so real columns rather than JSON. Populated per-tool; null where a given
+  // tool doesn't produce that signal.
+  compSource         String? // fresh | cache (REIscore)
+  propertyDataSource String? // fresh | cache (REIscore)
+  escalated          Boolean? // Haiku -> Sonnet, bool (REIbots)
+  turnCount          Int? // REIbots
+  hitTokenMax        Boolean? // REIask
+  retrievalHit       Boolean? // RAG found context vs not (REIask)
+  recordCount        Int? // list size — the volume driver (REIscrub)
+  regenerated        Boolean? // first generate vs re-render (REIpack)
+
+  // Typed per-tool long-tail detail — NOT the queried fields above. Plain
+  // Json? matching this codebase's existing loose-JSON-parsed-on-read
+  // convention (cf. Deal.compsJson/compsRawJson), keyed by featureSlug via a
+  // discriminated-union TS type + runtime guards in lib/toolUseDetail.ts
+  // (written by the metering chat, once rows actually get populated).
+  detail Json?
+
+  apiCalls      ApiCall[]
+  ledgerEntries LedgerEntry[]
+  creditHolds   CreditHold[]
+
+  @@index([locationId, createdAt])
+  @@index([userId, createdAt])
+}
+
+// Pending credit reservation — the bots cost-protection layer. Model only;
+// lifecycle (open on start, commit/release on settle) is the metering
+// engine's job, not this pass's.
+//
+// Available balance = Wallet.balance - sum(open holds). The ledger stays
+// ACTUAL-only (never a pending row); holds carry PENDING separately. Member
+// history display aggregates settled ledger rows + open holds at READ time
+// (a later design-chat concern) — never a table merge. Bounded to ~6 open
+// holds per subscription, which is why this table stays small.
+model CreditHold {
+  id        String   @id @default(cuid())
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userId     String
+  user       User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+  locationId String
+
+  toolUseId String
+  toolUse   ToolUse @relation(fields: [toolUseId], references: [id], onDelete: Restrict)
+
+  reservedCredits Int
+  state           HoldState @default(open)
+
+  // Ref to the LedgerEntry this hold converts into on commit (audit trail:
+  // reserved 5 -> charged 4). Null while open/released.
+  settledLedgerEntryId String?
+
+  @@index([userId, state])
 }
