@@ -75,6 +75,9 @@ model User {
   toolUses    ToolUse[]
   creditHolds CreditHold[]
 
+  // Admin audit trail back-relation — schema-only, no columns on User.
+  adminActions AdminAction[] @relation("AdminActions")
+
   @@unique([ghlLocationId], map: "User_ghlLocationId_key")
 }
 
@@ -727,4 +730,47 @@ model CreditHold {
   settledLedgerEntryId String?
 
   @@index([userId, state])
+}
+
+enum AdminActionType {
+  tool_activate
+  tool_deactivate
+  credit_grant
+  credit_adjust
+  // extend as write features are added (subscription_comp, etc.)
+}
+
+// Admin write-action audit trail. ADMIN-EYES (never surfaced to members) and
+// APPEND-ONLY (an admin action is a historical fact — same discipline as
+// LedgerEntry): the admin data-access layer must expose no update/delete path
+// for this model. Built once, shared across all admin write features — first
+// consumers are tool activate/deactivate (Tool.active is the highest-blast-
+// radius flag in the system) and promo credits — so the audit trail answers
+// "who/when/why" from day one instead of being bolted on after an incident.
+model AdminAction {
+  id String @id @default(cuid())
+
+  // Always a real user — integrity + join to the admin's name.
+  adminUserId String
+  adminUser   User             @relation("AdminActions", fields: [adminUserId], references: [id], onDelete: Restrict)
+  action      AdminActionType
+
+  // Polymorphic target (tool | wallet | subscription | user | ...) — targetId
+  // is a plain string, typed by convention, NOT an FK (Prisma can't FK one
+  // column to multiple tables). targetType names which table targetId points at.
+  targetType String
+  targetId   String
+
+  // Small state deltas only (e.g. { active: false }, { balance: 120 }) — NOT
+  // full-object dumps, and no client PII beyond the target id. This is the
+  // admin-eyes domain and must not pull member data (email, business fields)
+  // across the audience line.
+  before Json?
+  after  Json?
+  note   String? // optional admin reason ("launch", "comp for support issue")
+
+  createdAt DateTime @default(now())
+
+  @@index([adminUserId, createdAt])
+  @@index([targetType, targetId, createdAt])
 }
