@@ -91,20 +91,22 @@ const tools = [
   },
 ] satisfies ToolSeed[]
 
-type TierSeed = { featureSlug: string; level: Prisma.TierCreateInput['level']; priceCents: number; allowance: number | null }
+type TierSeed = { featureSlug: string; level: Prisma.TierCreateInput['level']; priceCents: number; allowance: number | null; stripePriceId?: string | null }
 
 // À-la-carte ladder, locked 2026-09-14. No ask/pro — deferred pending a real
 // feature hook (architecture doc §3/§8.1). No pack tier — pay-go only.
+// stripePriceId is the dev-mode (sk_test_) à-la-carte Price for each tier —
+// fetched from Stripe test mode 2026-09-17. Dev-only; not authoritative.
 const tiers = [
   { featureSlug: 'score', level: 'base', priceCents: 0, allowance: 10 },
-  { featureSlug: 'score', level: 'plus', priceCents: 2900, allowance: 50 },
-  { featureSlug: 'score', level: 'pro', priceCents: 4900, allowance: 175 },
+  { featureSlug: 'score', level: 'plus', priceCents: 2900, allowance: 50, stripePriceId: 'price_1UFocaDBmAikSXyuOaDqZcfm' },
+  { featureSlug: 'score', level: 'pro', priceCents: 4900, allowance: 175, stripePriceId: 'price_1UFocbDBmAikSXyukr5TolrV' },
   { featureSlug: 'scrub', level: 'base', priceCents: 0, allowance: null },
-  { featureSlug: 'ask', level: 'base', priceCents: 2900, allowance: 500 },
-  { featureSlug: 'ask', level: 'plus', priceCents: 4900, allowance: 1500 },
-  { featureSlug: 'bots', level: 'base', priceCents: 9900, allowance: 60 },
-  { featureSlug: 'bots', level: 'plus', priceCents: 16900, allowance: 120 },
-  { featureSlug: 'bots', level: 'pro', priceCents: 29900, allowance: 250 },
+  { featureSlug: 'ask', level: 'base', priceCents: 2900, allowance: 500, stripePriceId: 'price_1UG3a4DBmAikSXyu5XGUmxof' },
+  { featureSlug: 'ask', level: 'plus', priceCents: 4900, allowance: 1500, stripePriceId: 'price_1UG4CrDBmAikSXyunaP4EuN3' },
+  { featureSlug: 'bots', level: 'base', priceCents: 9900, allowance: 60, stripePriceId: 'price_1UFoceDBmAikSXyugKknohv6' },
+  { featureSlug: 'bots', level: 'plus', priceCents: 16900, allowance: 120, stripePriceId: 'price_1UFocfDBmAikSXyu154HjOxv' },
+  { featureSlug: 'bots', level: 'pro', priceCents: 29900, allowance: 250, stripePriceId: 'price_1UFocgDBmAikSXyuRvkBpZgt' },
 ] satisfies TierSeed[]
 
 type BundleSeed = Omit<Prisma.BundleCreateInput, 'tiers' | 'subscriptions' | 'priceOverrides'> & {
@@ -132,25 +134,28 @@ const bundles = [
   },
 ] satisfies BundleSeed[]
 
-type OverrideSeed = { featureSlug: string; level: TierSeed['level']; bundleSlug: string }
+type OverrideSeed = { featureSlug: string; level: TierSeed['level']; bundleSlug: string; stripePriceId?: string | null }
 
 // Sparse: one row only where in-bundle price != à-la-carte (every covered
 // line, here — no bundle line currently matches its à-la-carte price).
-// stripePriceId stays null until Pass 2 mints the real in-bundle Stripe
-// Price; resolver/checkout fall back to the tier's own stripePriceId until
-// then.
+// stripePriceId is the dev-mode (sk_test_) in-bundle Price for each override
+// — fetched from Stripe test mode 2026-09-17 (Pass 2 has since minted these,
+// so this is no longer null). Dev-only; not authoritative.
 const overrides = [
-  { featureSlug: 'score', level: 'plus', bundleSlug: 'bundle-plus' }, // à-la-carte $29 -> $25
-  { featureSlug: 'ask', level: 'base', bundleSlug: 'bundle-plus' },   // à-la-carte $29 -> $21
-  { featureSlug: 'score', level: 'pro', bundleSlug: 'bundle-pro' },   // à-la-carte $49 -> $45
-  { featureSlug: 'ask', level: 'plus', bundleSlug: 'bundle-pro' },    // à-la-carte $49 -> $39
-  { featureSlug: 'bots', level: 'base', bundleSlug: 'bundle-pro' },   // à-la-carte $99 -> $89
+  { featureSlug: 'score', level: 'plus', bundleSlug: 'bundle-plus', stripePriceId: 'price_1UFocgDBmAikSXyu0LVcfHa8' }, // à-la-carte $29 -> $25
+  { featureSlug: 'ask', level: 'base', bundleSlug: 'bundle-plus', stripePriceId: 'price_1UFochDBmAikSXyuyximqqJV' },   // à-la-carte $29 -> $21
+  { featureSlug: 'score', level: 'pro', bundleSlug: 'bundle-pro', stripePriceId: 'price_1UFochDBmAikSXyuH7CBxNuY' },   // à-la-carte $49 -> $45
+  { featureSlug: 'ask', level: 'plus', bundleSlug: 'bundle-pro', stripePriceId: 'price_1UG3jiDBmAikSXyu4ojDctFz' },    // à-la-carte $49 -> $39
+  { featureSlug: 'bots', level: 'base', bundleSlug: 'bundle-pro', stripePriceId: 'price_1UFociDBmAikSXyu9AT35N3j' },   // à-la-carte $99 -> $89
 ] satisfies OverrideSeed[]
 
+// priceCents + stripePriceId reflect Stripe test mode's actual "REIcredits -
+// N" Prices (fetched 2026-09-17) — Stripe is the source of truth here, not
+// the earlier locked-pricing doc numbers.
 const creditPacks = [
-  { slug: 'pack-100', credits: 100, priceCents: 1800 },
-  { slug: 'pack-250', credits: 250, priceCents: 4000 },
-  { slug: 'pack-600', credits: 600, priceCents: 9000 },
+  { slug: 'pack-100', credits: 100, priceCents: 2500, stripePriceId: 'price_1UG340DBmAikSXyu5F30outj' },
+  { slug: 'pack-250', credits: 250, priceCents: 6250, stripePriceId: 'price_1UG3QRDBmAikSXyuaOK0AOHH' },
+  { slug: 'pack-600', credits: 600, priceCents: 15000, stripePriceId: 'price_1UG3PRDBmAikSXyuAu7n1OZU' },
 ] satisfies Omit<Prisma.CreditPackCreateInput, 'fundingEntries'>[]
 
 async function main() {
@@ -205,7 +210,7 @@ async function main() {
             featureId: featureId(override.featureSlug),
             level: override.level,
             bundleSlug: override.bundleSlug,
-            stripePriceId: null,
+            stripePriceId: override.stripePriceId ?? null,
           },
         })
       }
