@@ -13,9 +13,12 @@ import {
 
 async function resolveActiveMember(locationId: string) {
   const user = await prisma.user.findFirst({ where: { ghlLocationId: locationId } })
-  if (!user || user.status !== 'active' || !user.a2pPhone || !user.ghlContactId) {
-    return null
-  }
+  if (!user || user.status !== 'active') return null
+  // Admin is not a separate front door — it's this same entry, gated on
+  // role at the surface level (requireAdmin), not on the member A2P/KYC
+  // gate below. Admins have no SMS-provisioned number to gate on.
+  if (user.role === 'admin') return user
+  if (!user.a2pPhone || !user.ghlContactId) return null
   return user
 }
 

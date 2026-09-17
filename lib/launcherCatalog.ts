@@ -95,6 +95,7 @@ async function getRealLauncherData(userId: string, client: PrismaClient): Promis
       name: user.name ?? user.email,
       email: user.email,
       walletBalance: wallet?.balance ?? 0,
+      role: user.role,
     },
     tools: launcherTools,
   };

@@ -1,10 +1,11 @@
 import { cookies } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
-import { mintOtp } from '@/lib/otp'
+import { mintOtp, mintOtpDevStub } from '@/lib/otp'
 import { verifyToolsSession } from '@/lib/toolsSession'
 import { TOOLS_OTP_SEND_COOLDOWN_MS, TOOLS_SESSION_COOKIE } from '@/lib/constants'
 import { OtpForm } from './OtpForm'
+import { AutoAdminOtp } from './AutoAdminOtp'
 import MinimalHeader from '@/components/tools/MinimalHeader'
 
 export const dynamic = 'force-dynamic'
@@ -65,6 +66,20 @@ export default async function EnterPage({
         title="Access not available"
         message="We couldn't verify your account. Reopen this tool from your CRM menu, or contact support."
       />
+    )
+  }
+
+  // Admin is not a separate front door — same lookup → OTP → session flow as
+  // any member, just gated on role rather than the A2P/KYC gate below (an
+  // admin has no SMS-provisioned number to gate on). The OTP mint step is
+  // stubbed in dev (no real SMS send) but the verify + session-write path is
+  // identical to the member flow — go-live unstubs the send, not the model.
+  if (user.role === 'admin') {
+    const { code } = await mintOtpDevStub(user.id)
+    return (
+      <Screen title="Signing in as admin…">
+        <AutoAdminOtp locationId={locationId} code={code} />
+      </Screen>
     )
   }
 

@@ -107,6 +107,8 @@ export interface StoreMember {
   name: string;
   walletBalance: number;
   currentBundleSlug: string | null;
+  /** Drives the shared Tools|Store|Admin top nav (components/shared/TopNav.tsx) — Admin only renders for 'admin'. */
+  role: "user" | "admin" | "manager" | "team_lead";
 }
 
 export interface StoreData {

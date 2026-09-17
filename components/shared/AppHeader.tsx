@@ -1,5 +1,6 @@
 import React from 'react'
 import CreditCoin from '@/components/shared/CreditCoin'
+import TopNav, { type TopNavRole } from '@/components/shared/TopNav'
 
 interface AccountBlockProps {
   name: string
@@ -44,15 +45,20 @@ interface AppHeaderProps {
   account: AccountBlockProps
   /** Inline action next to the balance figure — e.g. "Get credits" or a cart trigger. Swappable per surface. */
   actionSlot?: React.ReactNode
+  /** The member's role — when provided, renders the shared Tools|Store|Admin nav (components/shared/TopNav.tsx) next to the brand slot. Omit on surfaces that don't have a resolved member (e.g. pre-auth). */
+  role?: TopNavRole
   className?: string
 }
 
-export default function AppHeader({ brandSlot, account, actionSlot, className = '' }: AppHeaderProps) {
+export default function AppHeader({ brandSlot, account, actionSlot, role, className = '' }: AppHeaderProps) {
   return (
     <header
       className={`flex items-center justify-between gap-6 border-b border-border-default bg-black px-6 md:px-12 lg:px-16 py-4.5 sticky top-0 z-20 backdrop-blur-md ${className}`}
     >
-      <div className="flex items-center gap-4">{brandSlot}</div>
+      <div className="flex items-center gap-6">
+        {brandSlot}
+        {role && <TopNav role={role} />}
+      </div>
       <AccountBlock {...account} actionSlot={actionSlot} />
     </header>
   )

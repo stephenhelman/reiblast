@@ -15,6 +15,7 @@ export const mockStoreData: StoreData = {
     name: "Preview Member",
     walletBalance: 42,
     currentBundleSlug: null,
+    role: "user",
   },
   tools: [
     {

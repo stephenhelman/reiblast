@@ -139,6 +139,24 @@ export async function mintOtp(params: MintOtpParams): Promise<MintOtpResult> {
   return result;
 }
 
+/**
+ * DEV-ONLY stub of the mint step for the admin login path. Same storage
+ * shape as mintOtp (otpCode/otpExpiry/otpAttempts/otpLastSentAt) so verifyOtp
+ * works completely unchanged — the only thing skipped is deliverOtp, since
+ * admin accounts have no ghlContactId/a2pPhone to deliver an SMS to yet.
+ * Go-live unstubs this the same way any other delivery channel gets wired up
+ * — it is not a second auth model, just the same mint step without a send.
+ */
+export async function mintOtpDevStub(userId: string): Promise<{ code: string }> {
+  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MS);
+  await prisma.user.update({
+    where: { id: userId },
+    data: { otpCode: code, otpExpiry, otpAttempts: 0, otpLastSentAt: new Date() },
+  });
+  return { code };
+}
+
 export type ResendOtpParams = MintOtpParams;
 export type ResendOtpResult = MintOtpResult;
 

@@ -32,6 +32,7 @@ export const mockLauncherMember: LauncherMember = {
   // hardcodes its own accessibleState directly rather than deriving it from
   // this figure — that's what lets one fixture show every state at once.
   walletBalance: 42,
+  role: "user",
 };
 
 export const mockLauncherTools: LauncherTool[] = [

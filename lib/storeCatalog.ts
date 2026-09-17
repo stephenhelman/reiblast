@@ -159,6 +159,7 @@ async function getRealStoreData(userId: string, client: PrismaClient): Promise<S
       name: user.name ?? user.email,
       walletBalance: wallet?.balance ?? 0,
       currentBundleSlug,
+      role: user.role,
     },
     tools: storeTools,
     packs: storePacks,

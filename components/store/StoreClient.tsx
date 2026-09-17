@@ -2,7 +2,6 @@
 
 import { useState } from 'react'
 import Image from 'next/image'
-import Link from 'next/link'
 import AppHeader from '@/components/shared/AppHeader'
 import Button from '@/components/shared/Button'
 import { portalBrand } from '@/lib/brandAssets'
@@ -73,15 +72,8 @@ export default function StoreClient({ store, arrival, stripePublishableKey }: St
   return (
     <main className="min-h-screen bg-black text-white">
       <AppHeader
-        brandSlot={
-          <Link href="/" className="flex items-center gap-2.5 text-silver hover:text-white text-sm font-medium">
-            <svg viewBox="0 0 24 24" fill="none" className="h-4.5 w-4.5" aria-hidden="true">
-              <path d="M15 6l-6 6 6 6" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
-            <span>Back to</span>
-            <Image src={portalBrand.wordmark} alt="REI/tools" height={18} width={90} style={{ height: 18, width: 'auto' }} />
-          </Link>
-        }
+        brandSlot={<Image src={portalBrand.wordmark} alt="REI/tools" height={30} width={140} style={{ height: 30, width: 'auto' }} />}
+        role={member.role}
         account={{ name: member.name, creditBalance: member.walletBalance }}
         actionSlot={
           <div className="flex items-center gap-3">

@@ -25,6 +25,7 @@ export default function ToolsLauncherClient({ member, tools }: ToolsLauncherClie
     <main className="min-h-screen bg-black text-white">
       <AppHeader
         brandSlot={<Image src={portalBrand.wordmark} alt="REI/tools" height={30} width={140} style={{ height: 30, width: 'auto' }} />}
+        role={member.role}
         account={{ name: member.name, creditBalance: member.walletBalance }}
         actionSlot={
           <Link href={buildStoreLink({ from: 'launcher', intent: 'credits' })}>

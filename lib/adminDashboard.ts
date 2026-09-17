@@ -1,90 +1,70 @@
-// Admin-eyes overview data layer (/admin). Aggregate operator view: usage,
-// vendor cost, margin. Read-only — v1 writes nothing.
+// Admin Overview data layer (/admin). Loads the filtered dataset ONCE and
+// computes all three lens triads (aggregate hero + per-tool) up front — the
+// lens toggle is client-side over this payload, never a refetch. Only Range
+// and Source (server-side filters) cause a re-fetch.
 //
 // AUDIENCE SPLIT (locked, see prisma/schema.prisma ApiCall/LedgerEntry
 // comments): this file reads ToolUse + ApiCall (admin-eyes: usage + company
-// cost). It never reads LedgerEntry for cost — LedgerEntry is client-eyes
-// only and carries no company cost.
-//
-// Default view EXCLUDES isAdmin runs (both ToolUse and ApiCall carry the
-// flag independently — filter both, since a run's ApiCalls are what actually
-// carries the cost). Callers pass includeAdmin to flip that.
+// cost) and Subscription/Tier (revenue estimate). It never reads
+// LedgerEntry — that table is client-eyes only (member credits/allowance)
+// and carries no company cost; mixing it into these numbers is the one hard
+// rule this surface must never violate.
 
 import { PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
+import { RangeKey, SourceFilter, resolveRange, sourceToIsAdminFilter } from "@/lib/adminFilters";
+import { brandSlugFor } from "@/lib/brandSlug";
+import { getBrandAssets } from "@/lib/brandAssets";
 
-export type ToolSlug = "score" | "ask" | "bots" | "scrub" | "pack";
+export type Lens = "money" | "users" | "activity";
 
-export type UsagePoint = { date: string; count: number };
+export type MoneyMetrics = {
+  costCents: number | null;
+  revenueCents: number | null;
+  marginCents: number | null;
+  costUnknownCalls: number; // ApiCalls with a null costCents that AREN'T Rentcast (i.e. genuinely unpriced) — flagged, never silently $0
+};
 
-export type ToolUsageSummary = {
-  featureSlug: string;
-  totalRuns: number;
-  success: number;
+export type UsersMetrics = {
+  active: number | null;
+  unique: number | null;
+  churned: number | null;
+};
+
+export type ActivityMetrics = {
+  ok: number;
   fail: number;
   partial: number;
-  series: UsagePoint[]; // per-day run counts over the window
 };
 
-export type ToolVendorCost = {
+export type ToolCard = {
+  slug: string; // catalog Tool slug (score, scrub, ask, acq, dispo, pack) — acq/dispo are separate cards sharing the 'bots' feature
+  name: string;
+  wordmark: string;
   featureSlug: string;
-  vendorCostCents: number; // frozen ApiCall.costCents sum, non-Rentcast
-  rentcastCostCents: number; // period-allocated share attributed to this tool's rentcast calls
-  totalCostCents: number;
-  revenueCents: number; // estimated (list price) — see RevenueByTool
-  marginCents: number;
-  failCostCents: number; // cost burned on fail-outcome runs — surfaced so margin doesn't hide it
+  live: boolean; // Tool.active OR has real data in range — "soon" tools render dimmed with placeholders
+  money: MoneyMetrics;
+  users: UsersMetrics;
+  activity: ActivityMetrics;
 };
 
-export type RentcastPanel = {
-  periodStart: string;
-  periodEnd: string;
-  periodCalls: number;
-  includedQuota: number;
-  baseMonthlyCents: number;
-  overageCentsPerCall: number;
-  totalPeriodCostCents: number; // baseMonthlyCents + overage so far
-  costPerCallCents: number; // totalPeriodCostCents / periodCalls — decreases as periodCalls grows
-  isOpenPeriod: boolean; // true until the vendor period closes — cost-per-call is an in-progress estimate
-  approachingUpgradeTrigger: boolean; // trending toward the ~3000 sustained-calls trigger
-  trend: { date: string; cumulativeCalls: number }[];
+export type AdminOverviewData = {
+  range: RangeKey;
+  source: SourceFilter;
+  windowStart: string | null;
+  windowEnd: string;
+  heroMoney: MoneyMetrics;
+  heroUsers: UsersMetrics;
+  heroActivity: ActivityMetrics;
+  tools: ToolCard[];
 };
 
-export type CacheEffectiveness = {
-  freshCostCents: number; // avg cost per fresh (3-ApiCall) Score run
-  cacheCostCents: number; // avg cost per cache (1-ApiCall) Score run
-  gapCents: number;
-  freshCount: number;
-  cacheCount: number;
-};
+const RENTCAST_RESOURCE = "rentcast";
 
-export type AdminOverview = {
-  includeAdmin: boolean;
-  windowDays: number;
-  totalRuns: number;
-  totalVendorCostCents: number;
-  estMarginCents: number;
-  activeMembers: number;
-  usage: ToolUsageSummary[];
-  vendorCostByTool: ToolVendorCost[];
-  rentcast: RentcastPanel;
-  cacheEffectiveness: CacheEffectiveness;
-}
-
-const WINDOW_DAYS = 45;
-const ACTIVE_MEMBER_WINDOW_DAYS = 30;
-const RENTCAST_UPGRADE_TRIGGER = 3000;
-
-function dayKey(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-/** Current Rentcast billing period, anchored on VendorPlan.periodAnchorDay. */
 function currentVendorPeriod(now: Date, anchorDay: number): { periodStart: Date; periodEnd: Date } {
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth();
   const day = now.getUTCDate();
-
   let periodStart: Date;
   if (day >= anchorDay) {
     periodStart = new Date(Date.UTC(year, month, anchorDay));
@@ -95,205 +75,185 @@ function currentVendorPeriod(now: Date, anchorDay: number): { periodStart: Date;
   return { periodStart, periodEnd };
 }
 
-export async function getAdminOverview(includeAdmin: boolean, db: PrismaClient = defaultPrisma): Promise<AdminOverview> {
+export async function getAdminOverview(
+  range: RangeKey,
+  source: SourceFilter,
+  db: PrismaClient = defaultPrisma,
+  customFrom?: string,
+  customTo?: string,
+): Promise<AdminOverviewData> {
   const now = new Date();
-  const windowStart = new Date(now.getTime() - WINDOW_DAYS * 24 * 60 * 60 * 1000);
-  const activeMemberWindowStart = new Date(now.getTime() - ACTIVE_MEMBER_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const { start: windowStart, end: windowEnd } = resolveRange(range, now, customFrom, customTo);
+  const isAdminFilter = sourceToIsAdminFilter(source);
 
-  const adminFilter = includeAdmin ? {} : { isAdmin: false };
+  const toolUseWhere = {
+    createdAt: { gte: windowStart ?? undefined, lte: windowEnd },
+    ...(isAdminFilter ?? {}),
+  };
 
-  const [toolUses, apiCalls, vendorPlan, activeMembersRows, subs] = await Promise.all([
+  const [toolUses, apiCalls, vendorPlan, tools, subs] = await Promise.all([
     db.toolUse.findMany({
-      where: { createdAt: { gte: windowStart }, ...adminFilter },
-      select: { id: true, featureSlug: true, outcome: true, createdAt: true, compSource: true, isAdmin: true },
+      where: toolUseWhere,
+      select: { id: true, featureSlug: true, kind: true, outcome: true, createdAt: true, isAdmin: true },
     }),
     db.apiCall.findMany({
-      where: { createdAt: { gte: windowStart }, ...adminFilter },
-      select: {
-        id: true,
-        toolUseId: true,
-        resource: true,
-        model: true,
-        featureSlug: true,
-        costCents: true,
-        createdAt: true,
-        isAdmin: true,
-      },
+      where: { createdAt: { gte: windowStart ?? undefined, lte: windowEnd }, ...(isAdminFilter ?? {}) },
+      select: { id: true, toolUseId: true, resource: true, featureSlug: true, costCents: true, createdAt: true },
     }),
-    db.vendorPlan.findFirst({ where: { resource: "rentcast" } }),
-    db.toolUse.findMany({
-      where: { createdAt: { gte: activeMemberWindowStart }, isAdmin: false },
-      select: { userId: true },
-      distinct: ["userId"],
-    }),
+    db.vendorPlan.findFirst({ where: { resource: RENTCAST_RESOURCE } }),
+    db.tool.findMany({ include: { feature: { include: { tiers: true } } } }),
+    // Subscriptions are NOT usage rows — Source (usage-row filter) never
+    // applies here. Always excludes the admin user so "an admin isn't a
+    // subscriber" never produces a nonsense row in Users/Money-revenue.
     db.subscription.findMany({
-      where: { status: "active" },
-      select: { featureId: true, feature: { select: { slug: true } }, tier: { select: { priceCents: true } } },
+      include: { tier: true, feature: true, user: { select: { role: true, status: true } } },
     }),
   ]);
 
-  // --- Usage per tool -------------------------------------------------------
-  const featureSlugs = Array.from(new Set(toolUses.map((t) => t.featureSlug))).sort();
-  const usage: ToolUsageSummary[] = featureSlugs.map((featureSlug) => {
-    const runs = toolUses.filter((t) => t.featureSlug === featureSlug);
-    const byDay = new Map<string, number>();
-    for (const r of runs) {
-      const k = dayKey(r.createdAt);
-      byDay.set(k, (byDay.get(k) ?? 0) + 1);
-    }
-    const series: UsagePoint[] = Array.from(byDay.entries())
-      .sort(([a], [b]) => (a < b ? -1 : 1))
-      .map(([date, count]) => ({ date, count }));
+  const realSubs = subs.filter((s) => s.user.role !== "admin");
 
-    return {
-      featureSlug,
-      totalRuns: runs.length,
-      success: runs.filter((r) => r.outcome === "success").length,
-      fail: runs.filter((r) => r.outcome === "fail").length,
-      partial: runs.filter((r) => r.outcome === "partial").length,
-      series,
-    };
-  });
-
-  // --- Rentcast: period-allocated amortized cost -----------------------------
+  // --- Rentcast: period-allocated amortized cost, independent of the Range filter (it's the vendor's own billing period) ---
   const anchorDay = vendorPlan?.periodAnchorDay ?? 1;
   const { periodStart, periodEnd } = currentVendorPeriod(now, anchorDay);
-  const isOpenPeriod = now < periodEnd;
-
-  // Rentcast calls THIS PERIOD (not just the 45-day usage window) — the plan
-  // amortizes over the vendor's own billing period, which may be longer or
-  // shorter than the dashboard's usage window.
   const periodRentcastCalls = await db.apiCall.count({
-    where: { resource: "rentcast", createdAt: { gte: periodStart, lt: periodEnd }, ...adminFilter },
+    where: { resource: RENTCAST_RESOURCE, createdAt: { gte: periodStart, lt: periodEnd }, ...(isAdminFilter ?? {}) },
   });
-
   const baseMonthlyCents = vendorPlan?.baseMonthlyCents ?? 0;
   const includedQuota = vendorPlan?.includedQuota ?? 0;
   const overageCentsPerCall = vendorPlan?.overageCentsPerCall ?? 0;
   const overageCalls = Math.max(0, periodRentcastCalls - includedQuota);
-  const totalPeriodCostCents = baseMonthlyCents + overageCalls * overageCentsPerCall;
-  const costPerCallCents = periodRentcastCalls > 0 ? totalPeriodCostCents / periodRentcastCalls : 0;
+  const totalRentcastPeriodCostCents = baseMonthlyCents + overageCalls * overageCentsPerCall;
 
-  // Cumulative-calls trend across the window, for "approaching quota" context.
-  const rentcastCallsInWindow = apiCalls.filter((c) => c.resource === "rentcast");
-  const rcByDay = new Map<string, number>();
-  for (const c of rentcastCallsInWindow) {
-    const k = dayKey(c.createdAt);
-    rcByDay.set(k, (rcByDay.get(k) ?? 0) + 1);
-  }
-  let cumulative = 0;
-  const trend = Array.from(rcByDay.entries())
-    .sort(([a], [b]) => (a < b ? -1 : 1))
-    .map(([date, count]) => {
-      cumulative += count;
-      return { date, cumulativeCalls: cumulative };
-    });
-
-  // Sustained-volume trigger: projected monthly run-rate from this period so far.
-  const daysElapsedInPeriod = Math.max(1, Math.ceil((now.getTime() - periodStart.getTime()) / (24 * 60 * 60 * 1000)));
-  const daysInPeriod = Math.max(1, Math.ceil((periodEnd.getTime() - periodStart.getTime()) / (24 * 60 * 60 * 1000)));
-  const projectedMonthlyCalls = (periodRentcastCalls / daysElapsedInPeriod) * daysInPeriod;
-
-  const rentcast: RentcastPanel = {
-    periodStart: periodStart.toISOString(),
-    periodEnd: periodEnd.toISOString(),
-    periodCalls: periodRentcastCalls,
-    includedQuota,
-    baseMonthlyCents,
-    overageCentsPerCall,
-    totalPeriodCostCents,
-    costPerCallCents,
-    isOpenPeriod,
-    approachingUpgradeTrigger: projectedMonthlyCalls >= RENTCAST_UPGRADE_TRIGGER * 0.8,
-    trend,
-  };
-
-  // Per-tool Rentcast allocation: split the period's total Rentcast cost
-  // across tools by each tool's share of THIS WINDOW's Rentcast call volume
-  // (Rentcast is only ever called by Score's fresh path today, but this
-  // stays generic rather than hardcoding "score").
+  // Allocate that period cost across THIS WINDOW's Rentcast calls, proportional to call share.
+  const rentcastCallsInWindow = apiCalls.filter((c) => c.resource === RENTCAST_RESOURCE);
   const rentcastByFeature = new Map<string, number>();
   for (const c of rentcastCallsInWindow) {
     const slug = c.featureSlug ?? "unknown";
     rentcastByFeature.set(slug, (rentcastByFeature.get(slug) ?? 0) + 1);
   }
   const totalWindowRentcastCalls = rentcastCallsInWindow.length;
+  const rentcastShareFor = (featureSlug: string): number =>
+    totalWindowRentcastCalls > 0
+      ? Math.round(((rentcastByFeature.get(featureSlug) ?? 0) / totalWindowRentcastCalls) * totalRentcastPeriodCostCents)
+      : 0;
 
-  // --- Vendor cost + margin per tool -----------------------------------------
-  const revenueByFeatureSlug = new Map<string, number>();
-  for (const s of subs) {
-    const slug = s.feature.slug;
-    revenueByFeatureSlug.set(slug, (revenueByFeatureSlug.get(slug) ?? 0) + s.tier.priceCents);
+  // --- Revenue: Stripe not wired yet -> estimated from active, non-admin Subscription.tier.priceCents ---
+  // Source='admin' shows cost w/ zero revenue (admin spend is real, but generates no revenue) — the one
+  // spot Source DOES touch a subscription-based number, because it's asking "what did this slice buy us".
+  const revenueByFeatureId = new Map<string, number>();
+  for (const s of realSubs) {
+    if (s.status !== "active") continue;
+    revenueByFeatureId.set(s.featureId, (revenueByFeatureId.get(s.featureId) ?? 0) + s.tier.priceCents);
+  }
+  const revenueApplicable = source !== "admin";
+
+  const subsByFeatureId = new Map<string, typeof realSubs>();
+  for (const s of realSubs) {
+    const arr = subsByFeatureId.get(s.featureId) ?? [];
+    arr.push(s);
+    subsByFeatureId.set(s.featureId, arr);
   }
 
-  const toolUseOutcomeById = new Map(toolUses.map((t) => [t.id, t.outcome]));
+  function usersMetricsFor(featureId: string, hasPaidTier: boolean): UsersMetrics {
+    if (!hasPaidTier) return { active: null, unique: null, churned: null };
+    const featureSubs = subsByFeatureId.get(featureId) ?? [];
+    const active = featureSubs.filter((s) => s.status === "active");
+    const unique = new Set(active.map((s) => s.userId)).size;
+    const churned = featureSubs.filter((s) => s.status === "canceled" || s.user.status === "inactive").length;
+    return { active: active.length, unique, churned };
+  }
 
-  const vendorCostByTool: ToolVendorCost[] = featureSlugs.map((featureSlug) => {
-    const callsForTool = apiCalls.filter((c) => c.featureSlug === featureSlug);
-    const nonRentcast = callsForTool.filter((c) => c.resource !== "rentcast");
-    const vendorCostCents = nonRentcast.reduce((sum, c) => sum + (c.costCents ?? 0), 0);
+  function moneyRevenueFor(featureId: string, hasPaidTier: boolean): number | null {
+    if (!hasPaidTier) return null;
+    if (!revenueApplicable) return 0;
+    return revenueByFeatureId.get(featureId) ?? 0;
+  }
 
-    const toolRentcastCalls = rentcastByFeature.get(featureSlug) ?? 0;
-    const rentcastCostCents =
-      totalWindowRentcastCalls > 0 ? Math.round((toolRentcastCalls / totalWindowRentcastCalls) * totalPeriodCostCents) : 0;
+  // --- Per-run outcome + cost lookups, joined via toolUseId ---
+  const toolUseById = new Map(toolUses.map((t) => [t.id, t]));
+  const costableApiCalls = apiCalls.filter((c) => c.resource !== RENTCAST_RESOURCE);
 
-    const totalCostCents = vendorCostCents + rentcastCostCents;
-    const revenueCents = revenueByFeatureSlug.get(featureSlug) ?? 0;
-
-    const failCostCents = callsForTool
-      .filter((c) => c.toolUseId && toolUseOutcomeById.get(c.toolUseId) === "fail")
-      .reduce((sum, c) => sum + (c.costCents ?? 0), 0);
-
+  function activityFor(runs: typeof toolUses): ActivityMetrics {
     return {
-      featureSlug,
-      vendorCostCents,
-      rentcastCostCents,
-      totalCostCents,
-      revenueCents,
-      marginCents: revenueCents - totalCostCents,
-      failCostCents,
+      ok: runs.filter((r) => r.outcome === "success").length,
+      fail: runs.filter((r) => r.outcome === "fail").length,
+      partial: runs.filter((r) => r.outcome === "partial").length,
     };
-  });
-
-  // --- Cache effectiveness (Score fresh vs cache) ----------------------------
-  const scoreRuns = toolUses.filter((t) => t.featureSlug === "score");
-  const scoreRunIds = new Set(scoreRuns.map((r) => r.id));
-  const scoreApiCalls = apiCalls.filter((c) => c.toolUseId && scoreRunIds.has(c.toolUseId));
-
-  const costByToolUse = new Map<string, number>();
-  for (const c of scoreApiCalls) {
-    if (!c.toolUseId) continue;
-    costByToolUse.set(c.toolUseId, (costByToolUse.get(c.toolUseId) ?? 0) + (c.costCents ?? 0));
   }
 
-  const freshRuns = scoreRuns.filter((r) => r.compSource === "fresh");
-  const cacheRuns = scoreRuns.filter((r) => r.compSource === "cache");
-  const sum = (runs: typeof scoreRuns) => runs.reduce((s, r) => s + (costByToolUse.get(r.id) ?? 0), 0);
-  const freshCostCents = freshRuns.length > 0 ? sum(freshRuns) / freshRuns.length : 0;
-  const cacheCostCents = cacheRuns.length > 0 ? sum(cacheRuns) / cacheRuns.length : 0;
+  function moneyCostFor(runIds: Set<string>, featureSlug: string): { costCents: number; unknownCalls: number } {
+    const calls = costableApiCalls.filter((c) => c.toolUseId && runIds.has(c.toolUseId));
+    let costCents = 0;
+    let unknownCalls = 0;
+    for (const c of calls) {
+      if (c.costCents === null) unknownCalls += 1;
+      else costCents += c.costCents;
+    }
+    return { costCents: costCents + rentcastShareFor(featureSlug), unknownCalls };
+  }
 
-  const cacheEffectiveness: CacheEffectiveness = {
-    freshCostCents,
-    cacheCostCents,
-    gapCents: freshCostCents - cacheCostCents,
-    freshCount: freshRuns.length,
-    cacheCount: cacheRuns.length,
+  // --- Per-tool cards ---
+  const toolCards: ToolCard[] = tools
+    .map((t) => {
+      const isBotsSplit = t.slug === "acq" || t.slug === "dispo";
+      const runs = isBotsSplit
+        ? toolUses.filter((r) => r.featureSlug === "bots" && r.kind === t.slug)
+        : toolUses.filter((r) => r.featureSlug === t.feature.slug);
+      const runIds = new Set(runs.map((r) => r.id));
+      const hasPaidTier = t.feature.tiers.some((tier) => tier.priceCents > 0);
+
+      const { costCents, unknownCalls } = moneyCostFor(runIds, t.feature.slug);
+      const revenueCents = moneyRevenueFor(t.featureId, hasPaidTier);
+      const marginCents = revenueCents === null ? null : revenueCents - costCents;
+
+      const live = t.active || runs.length > 0;
+
+      return {
+        slug: t.slug,
+        name: t.name,
+        wordmark: getBrandAssets(brandSlugFor(t.slug)).wordmark,
+        featureSlug: t.feature.slug,
+        live,
+        money: { costCents: live ? costCents : null, revenueCents: live ? revenueCents : null, marginCents: live ? marginCents : null, costUnknownCalls: unknownCalls },
+        users: live ? usersMetricsFor(t.featureId, hasPaidTier) : { active: null, unique: null, churned: null },
+        activity: live ? activityFor(runs) : { ok: 0, fail: 0, partial: 0 },
+      };
+    })
+    // score, scrub, ask, acq, dispo, pack — stable, matches the approved mockup ordering
+    .sort((a, b) => {
+      const order = ["score", "scrub", "ask", "acq", "dispo", "pack"];
+      return order.indexOf(a.slug) - order.indexOf(b.slug);
+    });
+
+  // --- Hero (aggregate) ---
+  const heroCostCents = costableApiCalls.reduce((s, c) => s + (c.costCents ?? 0), 0) + totalRentcastPeriodCostCents * (totalWindowRentcastCalls > 0 ? 1 : 0);
+  const heroUnknownCalls = costableApiCalls.filter((c) => c.costCents === null).length;
+  const heroRevenueCents = revenueApplicable ? Array.from(revenueByFeatureId.values()).reduce((s, v) => s + v, 0) : 0;
+
+  const heroMoney: MoneyMetrics = {
+    costCents: heroCostCents,
+    revenueCents: heroRevenueCents,
+    marginCents: heroRevenueCents - heroCostCents,
+    costUnknownCalls: heroUnknownCalls,
   };
 
-  // --- Top strip --------------------------------------------------------------
-  const totalVendorCostCents = vendorCostByTool.reduce((s, t) => s + t.totalCostCents, 0);
-  const totalRevenueCents = vendorCostByTool.reduce((s, t) => s + t.revenueCents, 0);
+  const activeSubs = realSubs.filter((s) => s.status === "active");
+  const heroUsers: UsersMetrics = {
+    active: activeSubs.length,
+    unique: new Set(activeSubs.map((s) => s.userId)).size,
+    churned: realSubs.filter((s) => s.status === "canceled" || s.user.status === "inactive").length,
+  };
+
+  const heroActivity = activityFor(toolUses);
 
   return {
-    includeAdmin,
-    windowDays: WINDOW_DAYS,
-    totalRuns: toolUses.length,
-    totalVendorCostCents,
-    estMarginCents: totalRevenueCents - totalVendorCostCents,
-    activeMembers: activeMembersRows.length,
-    usage,
-    vendorCostByTool,
-    rentcast,
-    cacheEffectiveness,
+    range,
+    source,
+    windowStart: windowStart ? windowStart.toISOString() : null,
+    windowEnd: windowEnd.toISOString(),
+    heroMoney,
+    heroUsers,
+    heroActivity,
+    tools: toolCards,
   };
 }

@@ -51,6 +51,8 @@ export interface LauncherMember {
   email: string;
   /** Wallet.balance — credits, the one shared account-level balance. Not per-tool. */
   walletBalance: number;
+  /** Drives the shared Tools|Store|Admin top nav (components/shared/TopNav.tsx) — Admin only renders for 'admin'. */
+  role: "user" | "admin" | "manager" | "team_lead";
 }
 
 export interface LauncherData {
