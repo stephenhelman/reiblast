@@ -233,6 +233,12 @@ model PropertyRecord {
 // rates), null for record-vendors. `toolUseId`/`tool`/`featureSlug` tie a
 // vendor hit back to the run that caused it; `isAdmin` mirrors ToolUse so
 // expense views can exclude admin testing by default.
+//
+// ApiCall (and ToolUse) are ADMIN-EYES: usage + company cost, drives margin.
+// LedgerEntry is CLIENT-EYES: the client's credits/allowance/wallet, and
+// never carries company cost. Cost lives here, per-resource, so per-tool /
+// per-vendor / per-model cost is derivable — and admin/free runs, which have
+// ApiCalls but no ledger row, still capture cost.
 model ApiCall {
   id          String   @id @default(cuid())
   locationId  String
@@ -251,6 +257,11 @@ model ApiCall {
   inputTokens  Int?
   outputTokens Int?
   isAdmin      Boolean  @default(false)
+  // Frozen at call time from the VendorRate in effect then. True marginal
+  // cost for per-call vendors (Melissa flat, Anthropic tokens×rate); a
+  // notional marker for Rentcast — real Rentcast cost is derived read-side
+  // from call count + VendorPlan (Option B: subscription amortization).
+  costCents    Int?
   // Partial index (WHERE model IS NOT NULL) is hand-written into the
   // migration SQL, not expressed here — same convention as the hand-written
   // partial unique indexes noted on Subscription/BundlePriceOverride above,
@@ -262,6 +273,40 @@ model ApiCall {
   @@index([resource])
   @@index([createdAt])
   @@index([toolUseId])
+  @@index([resource, createdAt])
+  @@index([featureSlug, createdAt])
+}
+
+// Admin-editable rate book — append-only, effective-dated. Raising a price
+// is an INSERT, never an update, so historical ApiCall.costCents stays
+// explainable against the rate that was actually in effect. The current
+// rate for a call is the row with the latest effectiveFrom <= call time for
+// that (resource, model).
+model VendorRate {
+  id                     String   @id @default(cuid())
+  resource               String // rentcast | melissa | anthropic
+  model                  String? // sonnet | haiku; null for record vendors
+  flatCents              Int? // Melissa per-call, Rentcast notional per-call
+  perMillionInputTokens  Int? // Anthropic — integer cents per 1M tokens so
+  perMillionOutputTokens Int? // fractional-cent rates don't round to zero
+  effectiveFrom          DateTime
+  createdAt              DateTime @default(now())
+
+  @@index([resource, model, effectiveFrom])
+}
+
+// Subscription vendors ONLY — currently just Rentcast. Melissa has no
+// VendorPlan row; that absence is what marks a vendor as pure per-call.
+model VendorPlan {
+  id                  String   @id @default(cuid())
+  resource            String   @unique
+  baseMonthlyCents    Int
+  includedQuota       Int // calls included per month
+  overageCentsPerCall Int
+  periodAnchorDay     Int // billing day of month
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
 }
 
 model LandDeal {
@@ -541,6 +586,10 @@ model Wallet {
 // Append-only — never updated. creditDelta is the only balance-affecting field.
 // Funding fields are set on kind = funding rows, consumption fields on
 // kind = consumption rows.
+//
+// CLIENT-EYES only: the client's credits/allowance/wallet — never company
+// cost. Company cost lives on ApiCall (ADMIN-EYES), per-resource, where it's
+// captured even for admin/free runs that have no ledger row at all.
 model LedgerEntry {
   id          String     @id @default(cuid())
   userId      String
@@ -561,7 +610,6 @@ model LedgerEntry {
   featureId        String? // which pool it drew from — group-by key for allowance-used
   feature          Feature?            @relation(fields: [featureId], references: [id], onDelete: Restrict)
   unitCount        Int?
-  vendorCostCents  Int? // logged even at zero debit and on fail
   creditsDebited   Int?
   allowanceCovered Boolean?
   outcome          ConsumptionOutcome?
