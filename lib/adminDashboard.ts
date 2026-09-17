@@ -61,7 +61,7 @@ export type AdminOverviewData = {
 
 const RENTCAST_RESOURCE = "rentcast";
 
-function currentVendorPeriod(now: Date, anchorDay: number): { periodStart: Date; periodEnd: Date } {
+export function currentVendorPeriod(now: Date, anchorDay: number): { periodStart: Date; periodEnd: Date } {
   const year = now.getUTCFullYear();
   const month = now.getUTCMonth();
   const day = now.getUTCDate();
