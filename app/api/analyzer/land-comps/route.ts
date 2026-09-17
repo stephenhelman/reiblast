@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { requireMember } from '@/lib/requireMember'
 
 // 0.072 degrees ≈ 5 miles
 const RADIUS_DEG = 0.072
@@ -41,6 +42,14 @@ function getMostRecentLandAssessment(taxAssessments: Record<string, any> | null 
 }
 
 export async function POST(req: NextRequest) {
+  let isAdmin = false
+  try {
+    const member = await requireMember(req)
+    isAdmin = member.role === 'admin'
+  } catch {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
   let body: {
     lat?: number
     lng?: number
@@ -91,6 +100,9 @@ export async function POST(req: NextRequest) {
           statusCode: 200,
           resultCount: dbComps.length,
           durationMs: 0,
+          tool: 'score',
+          featureSlug: 'score',
+          isAdmin,
         },
       }).catch(() => {})
 
@@ -130,6 +142,9 @@ export async function POST(req: NextRequest) {
         statusCode: res.status,
         resultCount: data.length,
         durationMs,
+        tool: 'score',
+        featureSlug: 'score',
+        isAdmin,
       },
     }).catch(() => {})
 

@@ -165,17 +165,18 @@ OUTPUT — valid JSON only, no markdown, no preamble:
 }`;
 
 export async function POST(req: NextRequest) {
+  let member: Awaited<ReturnType<typeof requireMember>>;
   try {
-    await requireMember(req);
+    member = await requireMember(req);
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const isAdmin = member.role === "admin";
 
   let body: {
     subject?: unknown;
     comps?: unknown[];
     contextParcels?: unknown[];
-    locationId?: string;
   };
   try {
     body = await req.json();
@@ -187,7 +188,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "subject is required" }, { status: 400 });
   }
 
-  const locationId = body.locationId ?? "";
+  const locationId = member.locationId;
   const start = Date.now();
 
   try {
@@ -217,6 +218,34 @@ export async function POST(req: NextRequest) {
 
     const durationMs = Date.now() - start;
 
+    if (!claudeRes.ok) {
+      const err = await claudeRes.text();
+      console.error("[analyzer/land] Claude API error:", err);
+      await prisma.apiCall
+        .create({
+          data: {
+            locationId,
+            resource: "claude",
+            endpoint: "/api/analyzer/land",
+            statusCode: claudeRes.status,
+            durationMs,
+            tool: "score",
+            featureSlug: "score",
+            model: "claude-sonnet-5",
+            isAdmin,
+          },
+        })
+        .catch(() => {});
+      return NextResponse.json(
+        { error: "Analysis service unavailable" },
+        { status: 500 },
+      );
+    }
+
+    const claudeData = await claudeRes.json();
+    const inputTokens: number = claudeData.usage?.input_tokens ?? 0;
+    const outputTokens: number = claudeData.usage?.output_tokens ?? 0;
+
     await prisma.apiCall
       .create({
         data: {
@@ -225,20 +254,16 @@ export async function POST(req: NextRequest) {
           endpoint: "/api/analyzer/land",
           statusCode: claudeRes.status,
           durationMs,
+          tool: "score",
+          featureSlug: "score",
+          model: "claude-sonnet-5",
+          inputTokens,
+          outputTokens,
+          isAdmin,
         },
       })
       .catch(() => {});
 
-    if (!claudeRes.ok) {
-      const err = await claudeRes.text();
-      console.error("[analyzer/land] Claude API error:", err);
-      return NextResponse.json(
-        { error: "Analysis service unavailable" },
-        { status: 500 },
-      );
-    }
-
-    const claudeData = await claudeRes.json();
     let text = claudeData.content?.[0]?.text || "";
     text = text
       .replace(/^```(?:json)?\n?/, "")

@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireMember } from "@/lib/requireMember";
+import { prisma } from "@/lib/prisma";
+import { openToolUse, finalizeToolUse } from "@/lib/engine/toolUse";
+import { sonnetCostCents } from "@/lib/engine/vendorPricing";
+import type { ScoreDetail } from "@/lib/toolUseDetail";
 
 const ARV_SYSTEM_PROMPT = `You are a real estate deal analyzer for wholesale investors. You analyze a subject property and comparable sales and return a structured JSON object. You never fabricate data. You only analyze what is provided.
 
@@ -98,11 +102,13 @@ OUTPUT — return only valid JSON, no markdown, no preamble:
 // daysSinceSold is calculated client-side at request time using current Date.now()
 // Never trust stored daysSinceSold values — always recalculate from saleDate before sending
 export async function POST(req: NextRequest) {
+  let member: Awaited<ReturnType<typeof requireMember>>;
   try {
-    await requireMember(req);
+    member = await requireMember(req);
   } catch {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  const isAdmin = member.role === "admin";
 
   let body: { subject?: unknown; comps?: unknown[] };
   try {
@@ -125,7 +131,23 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // DORMANT METER: withMeter (lib/engine/withMeter.ts) is the launch-time gate
+  // for this route — precheck before spend, chargeOnSuccess/recordFailure,
+  // 402 on out-of-credits. It is built and tested but deliberately NOT wired
+  // here; arv runs unconditionally for any authenticated member until that's
+  // a deliberate go-live decision. This route still opens/finalizes its own
+  // ToolUse + ApiCall rows directly (observe now, charge later) — see the
+  // 2026-09-16 admin data-layer appendix.
+  const { id: toolUseId } = await openToolUse(prisma, {
+    userId: member.userId,
+    locationId: member.locationId,
+    isAdmin,
+    featureSlug: "score",
+    kind: "SFR",
+  });
+
   try {
+    const start = Date.now();
     const claudeRes = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
@@ -150,9 +172,28 @@ export async function POST(req: NextRequest) {
       }),
     });
 
+    const durationMs = Date.now() - start;
+
     if (!claudeRes.ok) {
       const err = await claudeRes.text();
       console.error("[analyzer/arv] Claude API error:", err);
+      await prisma.apiCall
+        .create({
+          data: {
+            locationId: member.locationId,
+            resource: "claude",
+            endpoint: "/api/analyzer/arv",
+            statusCode: claudeRes.status,
+            durationMs,
+            tool: "score",
+            featureSlug: "score",
+            model: "claude-sonnet-5",
+            isAdmin,
+            toolUseId,
+          },
+        })
+        .catch(() => {});
+      await finalizeToolUse(prisma, toolUseId, { outcome: "fail" }).catch(() => {});
       return NextResponse.json(
         { error: "Analysis service unavailable" },
         { status: 500 },
@@ -160,6 +201,29 @@ export async function POST(req: NextRequest) {
     }
 
     const claudeData = await claudeRes.json();
+    const inputTokens: number = claudeData.usage?.input_tokens ?? 0;
+    const outputTokens: number = claudeData.usage?.output_tokens ?? 0;
+    const vendorCostCents = sonnetCostCents(inputTokens, outputTokens);
+
+    await prisma.apiCall
+      .create({
+        data: {
+          locationId: member.locationId,
+          resource: "claude",
+          endpoint: "/api/analyzer/arv",
+          statusCode: claudeRes.status,
+          durationMs,
+          tool: "score",
+          featureSlug: "score",
+          model: "claude-sonnet-5",
+          inputTokens,
+          outputTokens,
+          isAdmin,
+          toolUseId,
+        },
+      })
+      .catch(() => {});
+
     const textBlock = (claudeData.content ?? []).find(
       (block: { type?: string }) => block.type === "text",
     );
@@ -169,24 +233,47 @@ export async function POST(req: NextRequest) {
       .replace(/\n?```$/, "")
       .trim();
 
-    const analysis = JSON.parse(text);
-
-    const required = [
-      "comps",
-      "arv",
-      "as_is",
-      "exit_strategy",
-      "narrative",
-      "warnings",
-    ];
-    for (const key of required) {
-      if (!(key in analysis))
-        throw new Error(`Missing field in analysis: ${key}`);
+    let analysis;
+    try {
+      analysis = JSON.parse(text);
+      const required = [
+        "comps",
+        "arv",
+        "as_is",
+        "exit_strategy",
+        "narrative",
+        "warnings",
+      ];
+      for (const key of required) {
+        if (!(key in analysis))
+          throw new Error(`Missing field in analysis: ${key}`);
+      }
+    } catch (parseErr) {
+      console.error("[analyzer/arv] analysis parse/shape error:", parseErr);
+      await finalizeToolUse(prisma, toolUseId, { outcome: "fail" }).catch(() => {});
+      return NextResponse.json(
+        { error: "Failed to generate analysis" },
+        { status: 500 },
+      );
     }
+
+    const toolUseDetail: ScoreDetail = {
+      featureSlug: "score",
+      warnings: Array.isArray(analysis.warnings) ? analysis.warnings : [],
+      exitStrategyRecommendation: analysis.exit_strategy?.recommendation ?? "",
+      confidence: analysis.arv?.confidence ?? "low",
+      compCount: Array.isArray(body.comps) ? body.comps.length : 0,
+    };
+
+    await finalizeToolUse(prisma, toolUseId, {
+      outcome: "success",
+      detail: toolUseDetail,
+    }).catch(() => {});
 
     return NextResponse.json(analysis);
   } catch (err) {
     console.error("[analyzer/arv] error:", err);
+    await finalizeToolUse(prisma, toolUseId, { outcome: "fail" }).catch(() => {});
     return NextResponse.json(
       { error: "Failed to generate analysis" },
       { status: 500 },

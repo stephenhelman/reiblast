@@ -1,6 +1,6 @@
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
-import type { PrismaClient } from "@prisma/client";
+import type { PrismaClient, Role } from "@prisma/client";
 import { TOOLS_SESSION_COOKIE, TOOLS_SESSION_MAX_AGE_SECONDS } from "@/lib/constants";
 
 export type ToolsSessionPayload = {
@@ -95,6 +95,41 @@ export async function resolveSessionUserId(prisma: PrismaClient): Promise<string
   const cookieStore = await cookies();
   const token = cookieStore.get(TOOLS_SESSION_COOKIE)?.value;
   return resolveUserIdFromToken(prisma, token);
+}
+
+export type ToolsSessionMember = {
+  userId: string;
+  locationId: string;
+  role: Role;
+};
+
+/**
+ * Same fail-closed bridge as resolveUserIdFromToken, but surfaces the
+ * locationId (already in the JWT payload, previously discarded here) and
+ * the current User.role — needed by write-path callers that must open a
+ * ToolUse (requires both keys) and freeze isAdmin at write time. Additive:
+ * resolveUserIdFromToken/resolveSessionUserId are untouched for existing
+ * userId-only callers.
+ */
+export async function resolveMemberFromToken(
+  prisma: PrismaClient,
+  token: string | undefined,
+): Promise<ToolsSessionMember | null> {
+  if (!token) return null;
+
+  const session = await verifyToolsSession(token);
+  if (!session) return null;
+
+  const user = await prisma.user.findUnique({ where: { id: session.userId } });
+  if (!user) return null;
+
+  return { userId: user.id, locationId: session.locationId, role: user.role };
+}
+
+export async function resolveSessionMember(prisma: PrismaClient): Promise<ToolsSessionMember | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(TOOLS_SESSION_COOKIE)?.value;
+  return resolveMemberFromToken(prisma, token);
 }
 
 /**

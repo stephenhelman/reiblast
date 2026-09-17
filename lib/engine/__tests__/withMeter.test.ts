@@ -43,10 +43,20 @@ describe('withMeter', () => {
 
     it('precheck -> allowance, chargeOnSuccess fires, wallet untouched, remaining decrements', async () => {
       let workRan = false
-      const { result, meter } = await withMeter(testPrisma, userId, 'score', scoreToolId, 5, async () => {
-        workRan = true
-        return { result: 'analysis-done', vendorCostCents: 13 }
-      })
+      let receivedToolUseId = ''
+      const { result, meter } = await withMeter(
+        testPrisma,
+        { userId, locationId: 'test-location', role: 'user' },
+        'score',
+        scoreToolId,
+        'SFR',
+        5,
+        async (toolUseId) => {
+          workRan = true
+          receivedToolUseId = toolUseId
+          return { result: 'analysis-done', vendorCostCents: 13 }
+        },
+      )
 
       expect(workRan).toBe(true)
       expect(result).toBe('analysis-done')
@@ -63,6 +73,12 @@ describe('withMeter', () => {
       expect(row.allowanceCovered).toBe(true)
       expect(row.creditsDebited).toBe(0)
       expect(row.vendorCostCents).toBe(13)
+      expect(row.toolUseId).toBe(receivedToolUseId)
+
+      const toolUse = await testPrisma.toolUse.findUniqueOrThrow({ where: { id: receivedToolUseId } })
+      expect(toolUse.outcome).toBe('success')
+      expect(toolUse.isAdmin).toBe(false)
+      expect(toolUse.locationId).toBe('test-location')
     })
   })
 
@@ -80,9 +96,17 @@ describe('withMeter', () => {
     })
 
     it('precheck -> credit, wallet decrements by creditCost, remaining stays 0', async () => {
-      const { result, meter } = await withMeter(testPrisma, userId, 'score', scoreToolId, 5, async () => {
-        return { result: 'analysis-done', vendorCostCents: 13 }
-      })
+      const { result, meter } = await withMeter(
+        testPrisma,
+        { userId, locationId: 'test-location', role: 'user' },
+        'score',
+        scoreToolId,
+        'SFR',
+        5,
+        async () => {
+          return { result: 'analysis-done', vendorCostCents: 13 }
+        },
+      )
 
       expect(result).toBe('analysis-done')
       expect(meter).toMatchObject({ outcome: 'charged', decision: 'credit', creditsDebited: 5, allowanceCovered: false })
@@ -106,11 +130,19 @@ describe('withMeter', () => {
       await teardownDisposableUser(userId)
     })
 
-    it('recordFailure fires with the thrown vendorCostCents, no charge, original error rethrown', async () => {
+    it('recordFailure fires with the thrown vendorCostCents, no charge, original error rethrown, ToolUse finalized as fail', async () => {
       await expect(
-        withMeter(testPrisma, userId, 'score', scoreToolId, 5, async () => {
-          throw new MeteredWorkError(7, 'vendor call blew up')
-        }),
+        withMeter(
+          testPrisma,
+          { userId, locationId: 'test-location', role: 'user' },
+          'score',
+          scoreToolId,
+          'SFR',
+          5,
+          async () => {
+            throw new MeteredWorkError(7, 'vendor call blew up')
+          },
+        ),
       ).rejects.toThrow('vendor call blew up')
 
       const wallet = await testPrisma.wallet.findUniqueOrThrow({ where: { userId } })
@@ -122,13 +154,25 @@ describe('withMeter', () => {
       expect(row.vendorCostCents).toBe(7)
       expect(row.creditDelta).toBe(0)
       expect(row.creditsDebited).toBe(0)
+      expect(row.toolUseId).not.toBeNull()
+
+      const toolUse = await testPrisma.toolUse.findUniqueOrThrow({ where: { id: row.toolUseId! } })
+      expect(toolUse.outcome).toBe('fail')
     })
 
     it('a plain (non-MeteredWorkError) throw logs vendorCostCents 0 and still rethrows', async () => {
       await expect(
-        withMeter(testPrisma, userId, 'score', scoreToolId, 5, async () => {
-          throw new Error('unexpected crash before any vendor spend')
-        }),
+        withMeter(
+          testPrisma,
+          { userId, locationId: 'test-location', role: 'user' },
+          'score',
+          scoreToolId,
+          'SFR',
+          5,
+          async () => {
+            throw new Error('unexpected crash before any vendor spend')
+          },
+        ),
       ).rejects.toThrow('unexpected crash before any vendor spend')
 
       const rows = await testPrisma.ledgerEntry.findMany({
@@ -152,12 +196,20 @@ describe('withMeter', () => {
       await teardownDisposableUser(userId)
     })
 
-    it('neither work nor any charge fires; nothing moves', async () => {
+    it('neither work nor any charge fires; nothing moves; no ToolUse row opened', async () => {
       let workRan = false
-      const { result, meter } = await withMeter(testPrisma, userId, 'score', scoreToolId, 5, async () => {
-        workRan = true
-        return { result: 'should-not-run', vendorCostCents: 13 }
-      })
+      const { result, meter } = await withMeter(
+        testPrisma,
+        { userId, locationId: 'test-location', role: 'user' },
+        'score',
+        scoreToolId,
+        'SFR',
+        5,
+        async () => {
+          workRan = true
+          return { result: 'should-not-run', vendorCostCents: 13 }
+        },
+      )
 
       expect(workRan).toBe(false)
       expect(result).toBeNull()
@@ -168,6 +220,75 @@ describe('withMeter', () => {
 
       const rows = await testPrisma.ledgerEntry.findMany({ where: { userId } })
       expect(rows).toHaveLength(10) // just the exhausted-allowance fixture rows
+
+      const toolUses = await testPrisma.toolUse.findMany({ where: { userId } })
+      expect(toolUses).toHaveLength(0)
+    })
+  })
+
+  describe('admin: tracked-not-metered', () => {
+    let userId: string
+
+    beforeAll(async () => {
+      userId = await createDisposableUser()
+      await testPrisma.user.update({ where: { id: userId }, data: { role: 'admin' } })
+      // No wallet row at all — precheck must never run for admin, or this
+      // would throw (resolveFeature/Wallet lookup) before work() ever fires.
+    })
+
+    afterAll(async () => {
+      await teardownDisposableUser(userId)
+    })
+
+    it('skips precheck/charge entirely: ToolUse + ApiCall-shaped work still runs, no LedgerEntry, no wallet', async () => {
+      let workRan = false
+      const { result, meter } = await withMeter(
+        testPrisma,
+        { userId, locationId: 'test-location', role: 'admin' },
+        'score',
+        scoreToolId,
+        'SFR',
+        5,
+        async (toolUseId) => {
+          workRan = true
+          expect(toolUseId).toBeTruthy()
+          return { result: 'analysis-done', vendorCostCents: 13 }
+        },
+      )
+
+      expect(workRan).toBe(true)
+      expect(result).toBe('analysis-done')
+      expect(meter.outcome).toBe('admin')
+
+      const ledgerRows = await testPrisma.ledgerEntry.findMany({ where: { userId } })
+      expect(ledgerRows).toHaveLength(0)
+
+      const toolUseId = meter.outcome === 'admin' ? meter.toolUseId : ''
+      const toolUse = await testPrisma.toolUse.findUniqueOrThrow({ where: { id: toolUseId } })
+      expect(toolUse.isAdmin).toBe(true)
+      expect(toolUse.outcome).toBe('success')
+    })
+
+    it('a thrown work() still finalizes ToolUse as fail, with no LedgerEntry fail row (admin is untracked by the ledger)', async () => {
+      await expect(
+        withMeter(
+          testPrisma,
+          { userId, locationId: 'test-location', role: 'admin' },
+          'score',
+          scoreToolId,
+          'SFR',
+          5,
+          async () => {
+            throw new MeteredWorkError(9, 'admin test vendor blowup')
+          },
+        ),
+      ).rejects.toThrow('admin test vendor blowup')
+
+      const ledgerRows = await testPrisma.ledgerEntry.findMany({ where: { userId } })
+      expect(ledgerRows).toHaveLength(0)
+
+      const toolUses = await testPrisma.toolUse.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } })
+      expect(toolUses[0].outcome).toBe('fail')
     })
   })
 })

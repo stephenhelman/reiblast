@@ -21,11 +21,16 @@ export async function createDisposableUser(): Promise<string> {
   return user.id
 }
 
-// FK order: LedgerEntry -> Subscription -> Wallet -> User. Each delete is guarded
-// so a missing/already-cleaned row can't throw and abort the rest of the sweep.
+// FK order: ApiCall -> LedgerEntry -> ToolUse -> Subscription -> Wallet -> User.
+// ApiCall/LedgerEntry both reference ToolUse (onDelete: Restrict), and ToolUse
+// references User (onDelete: Restrict), so both must clear before ToolUse, and
+// ToolUse before User. Each delete is guarded so a missing/already-cleaned row
+// can't throw and abort the rest of the sweep.
 export async function teardownDisposableUser(userId: string): Promise<void> {
   const steps = [
+    () => testPrisma.apiCall.deleteMany({ where: { toolUse: { userId } } }),
     () => testPrisma.ledgerEntry.deleteMany({ where: { userId } }),
+    () => testPrisma.toolUse.deleteMany({ where: { userId } }),
     () => testPrisma.subscription.deleteMany({ where: { userId } }),
     () => testPrisma.wallet.deleteMany({ where: { userId } }),
     () => testPrisma.user.deleteMany({ where: { id: userId } }),

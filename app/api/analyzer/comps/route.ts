@@ -130,8 +130,10 @@ function mapDbCompToComp(
 }
 
 export async function POST(req: NextRequest) {
+  let isAdmin = false
   try {
-    await requireMember(req)
+    const member = await requireMember(req)
+    isAdmin = member.role === 'admin'
   } catch {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -189,6 +191,9 @@ export async function POST(req: NextRequest) {
           statusCode: 200,
           resultCount: dbComps.length,
           durationMs: 0,
+          tool: 'score',
+          featureSlug: 'score',
+          isAdmin,
         },
       }).catch(() => {})
 
@@ -213,6 +218,9 @@ export async function POST(req: NextRequest) {
         statusCode: 200,
         resultCount: rawRecords.length,
         durationMs,
+        tool: 'score',
+        featureSlug: 'score',
+        isAdmin,
       },
     }).catch(() => {})
 

@@ -1,6 +1,18 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { chargeOnSuccess, precheck, recordFailure } from '../meter'
+import { openToolUse } from '../toolUse'
 import { createDisposableUser, teardownDisposableUser, testPrisma } from './testDb'
+
+async function openTestToolUse(userId: string): Promise<string> {
+  const { id } = await openToolUse(testPrisma, {
+    userId,
+    locationId: 'test-location',
+    isAdmin: false,
+    featureSlug: 'score',
+    kind: 'SFR',
+  })
+  return id
+}
 
 async function exhaustScoreAllowance(userId: string, scoreToolId: string, scoreFeatureId: string) {
   await testPrisma.ledgerEntry.createMany({
@@ -46,7 +58,8 @@ describe('meter', () => {
       const decision = await precheck(testPrisma, userId, 'score', 5)
       expect(decision).toBe('credit')
 
-      await chargeOnSuccess(testPrisma, userId, 'score', scoreToolId, 'credit', 5, 200)
+      const toolUseId = await openTestToolUse(userId)
+      await chargeOnSuccess(testPrisma, userId, 'score', scoreToolId, 'credit', 5, 200, toolUseId)
 
       const wallet = await testPrisma.wallet.findUniqueOrThrow({ where: { userId } })
       expect(wallet.balance).toBe(0)
@@ -56,6 +69,10 @@ describe('meter', () => {
       })
       expect(row.creditsDebited).toBe(5)
       expect(row.creditDelta).toBe(-5)
+      expect(row.toolUseId).toBe(toolUseId)
+
+      const toolUse = await testPrisma.toolUse.findUniqueOrThrow({ where: { id: toolUseId } })
+      expect(toolUse.outcome).toBe('success')
     })
   })
 
@@ -75,7 +92,8 @@ describe('meter', () => {
       const decision = await precheck(testPrisma, userId, 'score', 5)
       expect(decision).toBe('allowance')
 
-      await chargeOnSuccess(testPrisma, userId, 'score', scoreToolId, 'allowance', 5, 200)
+      const toolUseId = await openTestToolUse(userId)
+      await chargeOnSuccess(testPrisma, userId, 'score', scoreToolId, 'allowance', 5, 200, toolUseId)
 
       const wallet = await testPrisma.wallet.findUniqueOrThrow({ where: { userId } })
       expect(wallet.balance).toBe(-3)
@@ -129,10 +147,12 @@ describe('meter', () => {
       ])
       expect(decisions).toEqual(['credit', 'credit'])
 
+      const toolUseIds = await Promise.all(decisions.map(() => openTestToolUse(userId)))
+
       await Promise.all(
-        decisions.map((decision) =>
+        decisions.map((decision, i) =>
           decision === 'credit'
-            ? chargeOnSuccess(testPrisma, userId, 'score', scoreToolId, 'credit', 10, 500)
+            ? chargeOnSuccess(testPrisma, userId, 'score', scoreToolId, 'credit', 10, 500, toolUseIds[i])
             : Promise.resolve(),
         ),
       )
@@ -160,7 +180,8 @@ describe('meter', () => {
     })
 
     it('recordFailure logs vendorCostCents, no wallet change', async () => {
-      await recordFailure(testPrisma, userId, 'score', scoreToolId, 300)
+      const toolUseId = await openTestToolUse(userId)
+      await recordFailure(testPrisma, userId, 'score', scoreToolId, 300, toolUseId)
 
       const wallet = await testPrisma.wallet.findUniqueOrThrow({ where: { userId } })
       expect(wallet.balance).toBe(5)
@@ -172,6 +193,10 @@ describe('meter', () => {
       expect(row.creditDelta).toBe(0)
       expect(row.creditsDebited).toBe(0)
       expect(row.allowanceCovered).toBe(false)
+      expect(row.toolUseId).toBe(toolUseId)
+
+      const toolUse = await testPrisma.toolUse.findUniqueOrThrow({ where: { id: toolUseId } })
+      expect(toolUse.outcome).toBe('fail')
     })
   })
 })

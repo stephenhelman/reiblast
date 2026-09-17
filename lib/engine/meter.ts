@@ -1,5 +1,7 @@
 import { PrismaClient } from '@prisma/client'
 import { resolveFeature } from './resolver'
+import { finalizeToolUse } from './toolUse'
+import type { ToolUseDetail } from '@/lib/toolUseDetail'
 
 export type MeterDecision = 'allowance' | 'credit' | 'blocked'
 
@@ -18,7 +20,10 @@ export async function precheck(
   return 'blocked'
 }
 
-// Phase C — charge on success, ONE transaction. The write is the gate.
+// Phase C — charge on success, ONE transaction. The write is the gate. toolUseId
+// links the LedgerEntry to its parent run and finalizes that run's ToolUse row in
+// the same transaction — "query ToolUse for usage" and "query ledger for money"
+// settle together, never in two separate writes.
 export async function chargeOnSuccess(
   prisma: PrismaClient,
   userId: string,
@@ -27,6 +32,12 @@ export async function chargeOnSuccess(
   decision: 'allowance' | 'credit',
   creditCost: number,
   vendorCostCents: number,
+  toolUseId: string,
+  toolUseFinalize?: {
+    compSource?: string | null
+    propertyDataSource?: string | null
+    detail?: ToolUseDetail | null
+  },
 ): Promise<void> {
   const feature = await prisma.feature.findUniqueOrThrow({ where: { slug: featureSlug } })
 
@@ -46,6 +57,7 @@ export async function chargeOnSuccess(
           creditsDebited: 0,
           allowanceCovered: true,
           outcome: 'success',
+          toolUseId,
         },
       })
     } else {
@@ -65,34 +77,49 @@ export async function chargeOnSuccess(
           creditsDebited: creditCost,
           allowanceCovered: false,
           outcome: 'success',
+          toolUseId,
         },
       })
     }
+    await finalizeToolUse(tx, toolUseId, {
+      outcome: 'success',
+      compSource: toolUseFinalize?.compSource,
+      propertyDataSource: toolUseFinalize?.propertyDataSource,
+      detail: toolUseFinalize?.detail,
+    })
   })
 }
 
-// Phase B (fail branch) — log true vendor cost, no wallet change, member pays nothing.
+// Phase B (fail branch) — log true vendor cost, no wallet change, member pays
+// nothing. toolUseId links the fail-row to its run and finalizes that ToolUse as
+// 'fail' in the same transaction, so a failed run still leaves its real
+// ApiCall/cost children queryable, not an orphaned ToolUse.
 export async function recordFailure(
   prisma: PrismaClient,
   userId: string,
   featureSlug: string,
   toolId: string,
   vendorCostCents: number,
+  toolUseId: string,
 ): Promise<void> {
   const feature = await prisma.feature.findUniqueOrThrow({ where: { slug: featureSlug } })
 
-  await prisma.ledgerEntry.create({
-    data: {
-      userId,
-      kind: 'consumption',
-      creditDelta: 0,
-      toolId,
-      featureId: feature.id,
-      unitCount: 1,
-      vendorCostCents,
-      creditsDebited: 0,
-      allowanceCovered: false,
-      outcome: 'fail',
-    },
+  await prisma.$transaction(async (tx) => {
+    await tx.ledgerEntry.create({
+      data: {
+        userId,
+        kind: 'consumption',
+        creditDelta: 0,
+        toolId,
+        featureId: feature.id,
+        unitCount: 1,
+        vendorCostCents,
+        creditsDebited: 0,
+        allowanceCovered: false,
+        outcome: 'fail',
+        toolUseId,
+      },
+    })
+    await finalizeToolUse(tx, toolUseId, { outcome: 'fail' })
   })
 }

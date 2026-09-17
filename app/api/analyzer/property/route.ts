@@ -6,8 +6,10 @@ import { requireMember } from '@/lib/requireMember'
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000
 
 export async function POST(req: NextRequest) {
+  let isAdmin = false
   try {
-    await requireMember(req)
+    const member = await requireMember(req)
+    isAdmin = member.role === 'admin'
   } catch {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
@@ -46,6 +48,9 @@ export async function POST(req: NextRequest) {
           statusCode: 200,
           resultCount: 1,
           durationMs: 0,
+          tool: 'score',
+          featureSlug: 'score',
+          isAdmin,
         },
       }).catch(() => {})
       return NextResponse.json({ found: true, ...serializeRecord(existing) })
@@ -74,6 +79,9 @@ export async function POST(req: NextRequest) {
         statusCode,
         resultCount: melissaRecord ? 1 : 0,
         durationMs,
+        tool: 'score',
+        featureSlug: 'score',
+        isAdmin,
       },
     }).catch(() => {})
 

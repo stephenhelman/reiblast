@@ -1,4 +1,5 @@
 import { NextRequest } from "next/server";
+import type { Role } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { verifyToolsSession } from "@/lib/toolsSession";
 import { TOOLS_SESSION_COOKIE } from "@/lib/constants";
@@ -6,6 +7,7 @@ import { TOOLS_SESSION_COOKIE } from "@/lib/constants";
 export type MemberContext = {
   userId: string;
   locationId: string;
+  role: Role;
 };
 
 export class RequireMemberError extends Error {}
@@ -32,5 +34,5 @@ export async function requireMember(req: NextRequest): Promise<MemberContext> {
     throw new RequireMemberError("Member is not active or session mismatch");
   }
 
-  return { userId: user.id, locationId: session.locationId };
+  return { userId: user.id, locationId: session.locationId, role: user.role };
 }
