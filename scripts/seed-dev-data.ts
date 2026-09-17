@@ -22,6 +22,7 @@
  */
 
 import { PrismaClient, Prisma } from "@prisma/client";
+import bcrypt from "bcryptjs";
 
 // ---------------------------------------------------------------------------
 // 0. SAFETY GUARDS — non-negotiable. This is the most dangerous file in the repo.
@@ -38,6 +39,11 @@ const DEV_HOST_FRAGMENT = "ep-bold-frost";
 // users, so this one marker scopes the entire delete-and-rebuild.
 const SEED_EMAIL_DOMAIN = "seed.reitools.dev";
 const seedEmail = (persona: string) => `${persona}@${SEED_EMAIL_DOMAIN}`;
+
+// Dev-only credential for the admin-portal login (app/admin/login). The seeded
+// admin has no a2pPhone/ghlContactId, so it can never resolve through the
+// member OTP flow (resolveActiveMember) — this password is the only way in.
+const ADMIN_DEV_PASSWORD = "admin-dev-password";
 
 function assertSafeTarget(): string {
   if (!SEED_URL) {
@@ -597,6 +603,7 @@ async function buildUser(cat: Catalog, p: Persona) {
       name: p.name,
       status: p.status,
       role: p.role as any,
+      passwordHash: p.role === "admin" ? await bcrypt.hash(ADMIN_DEV_PASSWORD, 10) : null,
       onboardingComplete: p.status !== "pending_onboarding",
       a2pPhone: p.provisioned ? `+1915555${randInt(1000, 9999)}` : null,
       ghlLocationId: locationId,
@@ -804,7 +811,7 @@ async function main() {
   console.log(`  apiCalls:     ${apiCalls}`);
   console.log(`  ledgerEntries:${ledger}`);
   console.log(`  vendorRates:  ${vendorRates}   vendorPlans: ${vendorPlans}`);
-  console.log(`\n  admin login: ${seedEmail("admin")}  (role=admin)\n`);
+  console.log(`\n  admin login (app/admin/login): ${seedEmail("admin")} / ${ADMIN_DEV_PASSWORD}\n`);
 }
 
 main()

@@ -13,6 +13,14 @@ export async function middleware(request: NextRequest) {
   const hostname = request.headers.get("host") || "";
   const { pathname } = request.nextUrl;
 
+  // Admin portal — host-agnostic, no rewrite. It has its own auth
+  // (lib/adminSession.ts / requireAdmin) and must not get pulled into the
+  // tools-host or marketing-host rewrite below (which would 404 /admin/* as
+  // a nonexistent /marketing/admin/* or /tools/admin/* path).
+  if (pathname === "/admin" || pathname.startsWith("/admin/")) {
+    return NextResponse.next();
+  }
+
   const isToolsHost =
     hostname.startsWith("tools.") ||
     hostname === "tools.reiblast.app" ||
