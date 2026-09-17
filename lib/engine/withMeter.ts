@@ -4,29 +4,26 @@ import { resolveFeature } from './resolver'
 import { openToolUse, finalizeToolUse } from './toolUse'
 import type { ToolUseDetail } from '@/lib/toolUseDetail'
 
-// The typed failure signal `work` throws to report vendor cost on a failed
-// run. `withMeter` RECEIVES vendorCostCents — it never produces it (that's
-// the analyzer-instrumentation work, done where the vendor calls live).
-// Defaults to 0 for a throw that predates any vendor spend.
+// The typed failure signal `work` throws on a failed run. Vendor cost is
+// NOT reported here — it's written directly onto the ApiCall row(s) work()
+// creates before it throws (ApiCall.costCents, frozen at call time from the
+// VendorRate in effect then). withMeter/meter never see or log cost; the
+// ledger is client-eyes only (credits/allowance/wallet).
 export class MeteredWorkError extends Error {
-  vendorCostCents: number
-
-  constructor(vendorCostCents = 0, message?: string, options?: ErrorOptions) {
+  constructor(message?: string, options?: ErrorOptions) {
     super(message ?? 'Metered work failed', options)
     this.name = 'MeteredWorkError'
-    this.vendorCostCents = vendorCostCents
   }
 }
 
 // work receives the toolUseId (opened before work runs) so it can stamp its
-// ApiCall children with the parent run — it still only ever RECEIVES/reports
-// vendorCostCents, never derives credit cost or charges anything itself.
+// ApiCall children — including each ApiCall's own costCents — with the
+// parent run. It never derives credit cost or charges anything itself.
 // compSource/propertyDataSource/toolUseDetail are optional behavioral facts
 // (not cost) work may report for the ToolUse row it ran under — no protocol
 // violation, just data the caller is best-placed to know.
 export type MeteredWork<T> = (toolUseId: string) => Promise<{
   result: T
-  vendorCostCents: number
   compSource?: string | null
   propertyDataSource?: string | null
   toolUseDetail?: ToolUseDetail | null
@@ -92,12 +89,11 @@ export async function withMeter<T>(
   try {
     workResult = await work(toolUseId)
   } catch (err) {
-    const vendorCostCents = err instanceof MeteredWorkError ? err.vendorCostCents : 0
     try {
       if (isAdmin) {
         await finalizeToolUse(prisma, toolUseId, { outcome: 'fail' })
       } else {
-        await recordFailure(prisma, member.userId, featureSlug, toolId, vendorCostCents, toolUseId)
+        await recordFailure(prisma, member.userId, featureSlug, toolId, toolUseId)
       }
     } catch {
       // A failed fail-log must never mask the real tool error below.
@@ -117,7 +113,6 @@ export async function withMeter<T>(
     toolId,
     decision as 'allowance' | 'credit',
     creditCost,
-    workResult.vendorCostCents,
     toolUseId,
     {
       compSource: workResult.compSource,

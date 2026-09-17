@@ -59,7 +59,7 @@ describe('meter', () => {
       expect(decision).toBe('credit')
 
       const toolUseId = await openTestToolUse(userId)
-      await chargeOnSuccess(testPrisma, userId, 'score', scoreToolId, 'credit', 5, 200, toolUseId)
+      await chargeOnSuccess(testPrisma, userId, 'score', scoreToolId, 'credit', 5, toolUseId)
 
       const wallet = await testPrisma.wallet.findUniqueOrThrow({ where: { userId } })
       expect(wallet.balance).toBe(0)
@@ -93,7 +93,7 @@ describe('meter', () => {
       expect(decision).toBe('allowance')
 
       const toolUseId = await openTestToolUse(userId)
-      await chargeOnSuccess(testPrisma, userId, 'score', scoreToolId, 'allowance', 5, 200, toolUseId)
+      await chargeOnSuccess(testPrisma, userId, 'score', scoreToolId, 'allowance', 5, toolUseId)
 
       const wallet = await testPrisma.wallet.findUniqueOrThrow({ where: { userId } })
       expect(wallet.balance).toBe(-3)
@@ -152,7 +152,7 @@ describe('meter', () => {
       await Promise.all(
         decisions.map((decision, i) =>
           decision === 'credit'
-            ? chargeOnSuccess(testPrisma, userId, 'score', scoreToolId, 'credit', 10, 500, toolUseIds[i])
+            ? chargeOnSuccess(testPrisma, userId, 'score', scoreToolId, 'credit', 10, toolUseIds[i])
             : Promise.resolve(),
         ),
       )
@@ -179,9 +179,9 @@ describe('meter', () => {
       await teardownDisposableUser(userId)
     })
 
-    it('recordFailure logs vendorCostCents, no wallet change', async () => {
+    it('recordFailure logs a zero-delta fail row, no wallet change', async () => {
       const toolUseId = await openTestToolUse(userId)
-      await recordFailure(testPrisma, userId, 'score', scoreToolId, 300, toolUseId)
+      await recordFailure(testPrisma, userId, 'score', scoreToolId, toolUseId)
 
       const wallet = await testPrisma.wallet.findUniqueOrThrow({ where: { userId } })
       expect(wallet.balance).toBe(5)
@@ -189,7 +189,6 @@ describe('meter', () => {
       const row = await testPrisma.ledgerEntry.findFirstOrThrow({
         where: { userId, outcome: 'fail' },
       })
-      expect(row.vendorCostCents).toBe(300)
       expect(row.creditDelta).toBe(0)
       expect(row.creditsDebited).toBe(0)
       expect(row.allowanceCovered).toBe(false)

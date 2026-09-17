@@ -24,6 +24,10 @@ export async function precheck(
 // links the LedgerEntry to its parent run and finalizes that run's ToolUse row in
 // the same transaction — "query ToolUse for usage" and "query ledger for money"
 // settle together, never in two separate writes.
+//
+// No vendor cost here — LedgerEntry is client-eyes only (credits/allowance/
+// wallet). Cost lives on ApiCall.costCents, written by the vendor-call
+// instrumentation itself, independent of whether this charge ever runs.
 export async function chargeOnSuccess(
   prisma: PrismaClient,
   userId: string,
@@ -31,7 +35,6 @@ export async function chargeOnSuccess(
   toolId: string,
   decision: 'allowance' | 'credit',
   creditCost: number,
-  vendorCostCents: number,
   toolUseId: string,
   toolUseFinalize?: {
     compSource?: string | null
@@ -53,7 +56,6 @@ export async function chargeOnSuccess(
           toolId,
           featureId: feature.id,
           unitCount: 1,
-          vendorCostCents,
           creditsDebited: 0,
           allowanceCovered: true,
           outcome: 'success',
@@ -73,7 +75,6 @@ export async function chargeOnSuccess(
           toolId,
           featureId: feature.id,
           unitCount: 1,
-          vendorCostCents,
           creditsDebited: creditCost,
           allowanceCovered: false,
           outcome: 'success',
@@ -90,16 +91,16 @@ export async function chargeOnSuccess(
   })
 }
 
-// Phase B (fail branch) — log true vendor cost, no wallet change, member pays
-// nothing. toolUseId links the fail-row to its run and finalizes that ToolUse as
-// 'fail' in the same transaction, so a failed run still leaves its real
-// ApiCall/cost children queryable, not an orphaned ToolUse.
+// Phase B (fail branch) — no wallet change, member pays nothing. toolUseId
+// links the fail-row to its run and finalizes that ToolUse as 'fail' in the
+// same transaction, so a failed run still leaves its real ApiCall/cost
+// children queryable, not an orphaned ToolUse. True vendor cost on a failed
+// run lives on the ApiCall rows work() wrote before throwing — not here.
 export async function recordFailure(
   prisma: PrismaClient,
   userId: string,
   featureSlug: string,
   toolId: string,
-  vendorCostCents: number,
   toolUseId: string,
 ): Promise<void> {
   const feature = await prisma.feature.findUniqueOrThrow({ where: { slug: featureSlug } })
@@ -113,7 +114,6 @@ export async function recordFailure(
         toolId,
         featureId: feature.id,
         unitCount: 1,
-        vendorCostCents,
         creditsDebited: 0,
         allowanceCovered: false,
         outcome: 'fail',

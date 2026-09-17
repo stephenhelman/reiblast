@@ -2,9 +2,9 @@
 // and lib/storeCatalog.ts, same engine tables. Read-only: this file never
 // writes to Wallet/LedgerEntry/Subscription.
 //
-// vendorCostCents is internal instrumentation and is deliberately never
-// selected in the ledger query below — it cannot leak into this surface's
-// payload because it's never fetched, not just never rendered.
+// Vendor cost is admin-eyes only and lives on ApiCall.costCents now, not on
+// LedgerEntry — it was never selectable from this client-eyes surface even
+// before the column moved, and still isn't.
 
 import type { FundingReason, PrismaClient, Subscription, Tier } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
@@ -114,7 +114,6 @@ async function buildLedger(prisma: PrismaClient, userId: string): Promise<Accoun
       creditsDebited: true,
       allowanceCovered: true,
       outcome: true,
-      // vendorCostCents intentionally NOT selected.
     },
   });
 

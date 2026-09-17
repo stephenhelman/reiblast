@@ -203,7 +203,7 @@ export async function POST(req: NextRequest) {
     const claudeData = await claudeRes.json();
     const inputTokens: number = claudeData.usage?.input_tokens ?? 0;
     const outputTokens: number = claudeData.usage?.output_tokens ?? 0;
-    const vendorCostCents = sonnetCostCents(inputTokens, outputTokens);
+    const costCents = sonnetCostCents(inputTokens, outputTokens);
 
     await prisma.apiCall
       .create({
@@ -218,6 +218,7 @@ export async function POST(req: NextRequest) {
           model: "claude-sonnet-5",
           inputTokens,
           outputTokens,
+          costCents,
           isAdmin,
           toolUseId,
         },

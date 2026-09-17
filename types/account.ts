@@ -2,8 +2,9 @@
 // writes to ledger/wallet/subscriptions; the only outbound action is the
 // stubbed OPWS "update my subscription" task (see app/tools/account/actions.ts).
 //
-// vendorCostCents is internal instrumentation and MUST NEVER appear on any
-// type in this file or any payload lib/accountData.ts produces.
+// Vendor cost is admin-eyes only (ApiCall.costCents) and MUST NEVER appear
+// on any type in this file or any payload lib/accountData.ts produces — this
+// surface is client-eyes (credits/allowance/wallet), never company cost.
 
 export interface AccountMeteredFeature {
   featureSlug: string;

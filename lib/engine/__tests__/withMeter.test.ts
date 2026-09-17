@@ -54,7 +54,7 @@ describe('withMeter', () => {
         async (toolUseId) => {
           workRan = true
           receivedToolUseId = toolUseId
-          return { result: 'analysis-done', vendorCostCents: 13 }
+          return { result: 'analysis-done' }
         },
       )
 
@@ -72,7 +72,6 @@ describe('withMeter', () => {
       })
       expect(row.allowanceCovered).toBe(true)
       expect(row.creditsDebited).toBe(0)
-      expect(row.vendorCostCents).toBe(13)
       expect(row.toolUseId).toBe(receivedToolUseId)
 
       const toolUse = await testPrisma.toolUse.findUniqueOrThrow({ where: { id: receivedToolUseId } })
@@ -104,7 +103,7 @@ describe('withMeter', () => {
         'SFR',
         5,
         async () => {
-          return { result: 'analysis-done', vendorCostCents: 13 }
+          return { result: 'analysis-done' }
         },
       )
 
@@ -130,7 +129,7 @@ describe('withMeter', () => {
       await teardownDisposableUser(userId)
     })
 
-    it('recordFailure fires with the thrown vendorCostCents, no charge, original error rethrown, ToolUse finalized as fail', async () => {
+    it('recordFailure fires, no charge, original error rethrown, ToolUse finalized as fail', async () => {
       await expect(
         withMeter(
           testPrisma,
@@ -140,7 +139,7 @@ describe('withMeter', () => {
           'SFR',
           5,
           async () => {
-            throw new MeteredWorkError(7, 'vendor call blew up')
+            throw new MeteredWorkError('vendor call blew up')
           },
         ),
       ).rejects.toThrow('vendor call blew up')
@@ -151,7 +150,6 @@ describe('withMeter', () => {
       const row = await testPrisma.ledgerEntry.findFirstOrThrow({
         where: { userId, outcome: 'fail' },
       })
-      expect(row.vendorCostCents).toBe(7)
       expect(row.creditDelta).toBe(0)
       expect(row.creditsDebited).toBe(0)
       expect(row.toolUseId).not.toBeNull()
@@ -160,7 +158,7 @@ describe('withMeter', () => {
       expect(toolUse.outcome).toBe('fail')
     })
 
-    it('a plain (non-MeteredWorkError) throw logs vendorCostCents 0 and still rethrows', async () => {
+    it('a plain (non-MeteredWorkError) throw still logs a fail row and rethrows', async () => {
       await expect(
         withMeter(
           testPrisma,
@@ -179,7 +177,6 @@ describe('withMeter', () => {
         where: { userId, outcome: 'fail' },
       })
       expect(rows).toHaveLength(2) // the previous test's fail row + this one
-      expect(rows[rows.length - 1].vendorCostCents).toBe(0)
     })
   })
 
@@ -207,7 +204,7 @@ describe('withMeter', () => {
         5,
         async () => {
           workRan = true
-          return { result: 'should-not-run', vendorCostCents: 13 }
+          return { result: 'should-not-run' }
         },
       )
 
@@ -252,7 +249,7 @@ describe('withMeter', () => {
         async (toolUseId) => {
           workRan = true
           expect(toolUseId).toBeTruthy()
-          return { result: 'analysis-done', vendorCostCents: 13 }
+          return { result: 'analysis-done' }
         },
       )
 
@@ -279,7 +276,7 @@ describe('withMeter', () => {
           'SFR',
           5,
           async () => {
-            throw new MeteredWorkError(9, 'admin test vendor blowup')
+            throw new MeteredWorkError('admin test vendor blowup')
           },
         ),
       ).rejects.toThrow('admin test vendor blowup')

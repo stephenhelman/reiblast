@@ -1,8 +1,13 @@
 // Anthropic per-token rates, in cents per token — used to turn real
-// input/output token counts (captured on ApiCall) into vendorCostCents for
-// the LedgerEntry/expense views. Only Sonnet is live (arv/route.ts,
-// land/route.ts both call claude-sonnet-5); Haiku has no call site yet, so
-// no Haiku rate is defined until the bots chat adds one.
+// input/output token counts into ApiCall.costCents (admin-eyes, per-resource
+// vendor spend — never the ledger, which is client-eyes only). Only Sonnet
+// is live (arv/route.ts, land/route.ts both call claude-sonnet-5); Haiku has
+// no call site yet, so no Haiku rate is defined until the bots chat adds one.
+//
+// TODO: this is a flat hardcoded rate, not a VendorRate lookup — once the
+// admin-editable rate book (VendorRate, effective-dated) has real rows for
+// anthropic/sonnet, call sites should resolve cost from the rate in effect
+// at call time instead of this constant.
 //
 // $2/$10 per 1M (input/output), Anthropic claude-sonnet-5, confirmed Sep
 // 2026; re-verify — this rate moved once in 2026.
