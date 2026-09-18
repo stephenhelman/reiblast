@@ -99,9 +99,12 @@ export default async function AdminMemberDetailPage({ params }: { params: { id: 
                 <div className="text-sm font-semibold">{f.title}</div>
                 <div className="mt-1 text-[13px] leading-snug text-white/70">{f.detail}</div>
               </div>
-              <button type="button" disabled className="btn btn-out shrink-0 rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-white/40 disabled:cursor-not-allowed disabled:opacity-50">
+              <Link
+                href={`/admin/members/compare?a=${data.id}`}
+                className="btn btn-out shrink-0 rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-white/70 hover:text-white"
+              >
                 Compare usage
-              </button>
+              </Link>
             </div>
           ))}
         </div>
