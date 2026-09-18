@@ -5,7 +5,12 @@
 //
 // AUDIENCE SPLIT (locked — see prisma/schema.prisma ApiCall/LedgerEntry
 // comments): reads ToolUse + ApiCall (admin-eyes: usage + company cost) and
-// Subscription/Tier (revenue estimate). Never reads LedgerEntry.
+// Subscription/Tier (revenue estimate). The one exception — same as the
+// deep page's — is a LedgerEntry.allowanceCovered read, needed ONLY to give
+// each tool's chart REVENUE LINE real per-day shape (see
+// usageRecognizedRevenueCents below); it's a business plan-fit aggregate,
+// never broken out per-member here, so it doesn't violate the client-eyes
+// rule the rest of this file holds to.
 //
 // This page renders CLIENT-ONLY series regardless of Source — Source still
 // filters which usage rows are in scope (via isAdmin), it just doesn't split
@@ -16,7 +21,7 @@ import { prisma as defaultPrisma } from "@/lib/prisma";
 import { RangeKey, SourceFilter, resolveRange, sourceToIsAdminFilter } from "@/lib/adminFilters";
 import { brandSlugFor } from "@/lib/brandSlug";
 import { getBrandAssets } from "@/lib/brandAssets";
-import { currentVendorPeriod, type Lens } from "@/lib/adminDashboard";
+import { getRentcastEconomics, usageRecognizedRevenueCents, CREDIT_DOLLARS_PER_CREDIT_CENTS, type Lens } from "@/lib/adminDashboard";
 
 const RENTCAST_RESOURCE = "rentcast";
 const TOOL_ORDER = ["score", "scrub", "ask", "acq", "dispo", "pack"];
@@ -84,7 +89,7 @@ export async function getAdminTools(
   const windowStart = rawStart ?? new Date(windowEnd.getTime() - 30 * DAY_MS);
   const isAdminFilter = sourceToIsAdminFilter(source);
 
-  const [toolUses, apiCalls, vendorPlan, tools, subs] = await Promise.all([
+  const [toolUses, apiCalls, rentcastEcon, tools, subs, ledgerAll] = await Promise.all([
     db.toolUse.findMany({
       where: { createdAt: { gte: windowStart, lte: windowEnd }, ...(isAdminFilter ?? {}) },
       select: { id: true, locationId: true, userId: true, featureSlug: true, kind: true, outcome: true, createdAt: true },
@@ -93,32 +98,27 @@ export async function getAdminTools(
       where: { createdAt: { gte: windowStart, lte: windowEnd }, ...(isAdminFilter ?? {}) },
       select: { id: true, toolUseId: true, locationId: true, resource: true, costCents: true, createdAt: true },
     }),
-    db.vendorPlan.findFirst({ where: { resource: RENTCAST_RESOURCE } }),
+    // Same corrected formula as Overview — independent of Range, it's the vendor's own billing period.
+    getRentcastEconomics(db, now),
     db.tool.findMany({ include: { feature: { include: { tiers: true } } } }),
     db.subscription.findMany({
       include: { tier: true, user: { select: { id: true, name: true, role: true, status: true, ghlLocationId: true } } },
+    }),
+    // Chart-line revenue only (see usageRecognizedRevenueCents) — never used for the flat totals below.
+    db.ledgerEntry.findMany({
+      where: { kind: "consumption", createdAt: { gte: windowStart, lte: windowEnd } },
+      select: { userId: true, toolId: true, allowanceCovered: true, createdAt: true },
     }),
   ]);
 
   const realSubs = subs.filter((s) => s.user.role !== "admin");
   const revenueApplicable = source !== "admin";
 
-  // --- Rentcast: period-allocated amortized cost (same formula as Overview — independent of Range, it's the vendor's own billing period) ---
-  const anchorDay = vendorPlan?.periodAnchorDay ?? 1;
-  const { periodStart, periodEnd } = currentVendorPeriod(now, anchorDay);
-  const periodRentcastCalls = await db.apiCall.count({
-    where: { resource: RENTCAST_RESOURCE, createdAt: { gte: periodStart, lt: periodEnd }, ...(isAdminFilter ?? {}) },
-  });
-  const baseMonthlyCents = vendorPlan?.baseMonthlyCents ?? 0;
-  const includedQuota = vendorPlan?.includedQuota ?? 0;
-  const overageCentsPerCall = vendorPlan?.overageCentsPerCall ?? 0;
-  const overageCalls = Math.max(0, periodRentcastCalls - includedQuota);
-  const totalRentcastPeriodCostCents = baseMonthlyCents + overageCalls * overageCentsPerCall;
-
-  const rentcastCallsInWindow = apiCalls.filter((c) => c.resource === RENTCAST_RESOURCE);
-  const totalWindowRentcastCalls = rentcastCallsInWindow.length;
-  function rentcastShareOf(count: number): number {
-    return totalWindowRentcastCalls > 0 ? Math.round((count / totalWindowRentcastCalls) * totalRentcastPeriodCostCents) : 0;
+  // per_call_cost = period_spend / total PERIOD calls (never this window's own call
+  // count — that misallocates whenever Range != the vendor's billing period).
+  const rentcastPerCallCostCents = rentcastEcon.perCallCostCents;
+  function rentcastShareOf(windowCallCount: number): number {
+    return Math.round(windowCallCount * rentcastPerCallCostCents);
   }
 
   const revenueByFeatureId = new Map<string, number>();
@@ -129,7 +129,6 @@ export async function getAdminTools(
 
   const days = bucketDays(windowStart, windowEnd);
   const dayIndex = new Map(days.map((d, i) => [d, i]));
-  const windowMs = Math.max(1, windowEnd.getTime() - windowStart.getTime());
 
   function bucketOf(date: Date): number | null {
     if (date.getTime() < windowStart.getTime() || date.getTime() > windowEnd.getTime()) return null;
@@ -159,15 +158,30 @@ export async function getAdminTools(
       const churnedSubs = featureSubs.filter((s) => s.status === "canceled" || s.user.status === "inactive");
 
       const revenueTotal = hasPaidTier && revenueApplicable ? revenueByFeatureId.get(t.featureId) ?? 0 : 0;
-      // No per-day revenue events without Stripe wired — spread the period's estimated revenue evenly across the window as a run-rate line, not a real daily signal.
-      const dailyRevenue = hasPaidTier && revenueApplicable ? (revenueTotal / windowMs) * DAY_MS : 0;
 
       const series: ToolTrendPoint[] = days.map((date) => ({
         date,
-        money: { cost: 0, rev: Math.round(dailyRevenue), margin: 0 },
+        money: { cost: 0, rev: 0, margin: 0 },
         users: { active: activeFeatureSubs.length, unique: uniqueActive, churned: 0 },
         activity: { ok: 0, fail: 0, partial: 0 },
       }));
+
+      // Chart revenue line: usage-RECOGNIZED per day (see usageRecognizedRevenueCents) — NOT
+      // revenueTotal (the flat Stripe total) spread evenly, which draws a flat line and hides
+      // exactly the usage swings the chart exists to show. revenueTotal itself is untouched and
+      // still what totals.money.rev reports below.
+      if (hasPaidTier && revenueApplicable) {
+        const tierByUserId = new Map<string, { priceCents: number; allowance: number | null }>();
+        for (const s of activeFeatureSubs) tierByUserId.set(s.userId, { priceCents: s.tier.priceCents, allowance: s.tier.allowance });
+        const creditRevPerUseCents = t.feature.creditCost * CREDIT_DOLLARS_PER_CREDIT_CENTS;
+        const toolLedger = ledgerAll.filter((l) => l.toolId === t.id);
+        for (const l of toolLedger) {
+          const idx = bucketOf(l.createdAt);
+          if (idx === null) continue;
+          series[idx].money.rev += usageRecognizedRevenueCents(l, tierByUserId, creditRevPerUseCents);
+        }
+        for (const p of series) p.money.rev = Math.round(p.money.rev);
+      }
 
       let unknownCalls = 0;
       for (const c of costableCalls) {

@@ -59,7 +59,7 @@ export type AdminOverviewData = {
   tools: ToolCard[];
 };
 
-const RENTCAST_RESOURCE = "rentcast";
+export const RENTCAST_RESOURCE = "rentcast";
 
 export function currentVendorPeriod(now: Date, anchorDay: number): { periodStart: Date; periodEnd: Date } {
   const year = now.getUTCFullYear();
@@ -74,6 +74,81 @@ export function currentVendorPeriod(now: Date, anchorDay: number): { periodStart
   const periodEnd = new Date(Date.UTC(periodStart.getUTCFullYear(), periodStart.getUTCMonth() + 1, anchorDay));
   return { periodStart, periodEnd };
 }
+
+export type RentcastEconomics = {
+  periodStart: Date;
+  periodEnd: Date;
+  periodRentcastCalls: number;
+  periodSpendCents: number;
+  perCallCostCents: number; // periodSpendCents / periodRentcastCalls (0 if no calls this period)
+};
+
+/**
+ * Corrected read-side Rentcast amortization (fixes the overage-omission /
+ * wrong-denominator bug): period_spend = base + max(0, period_calls − quota)
+ * × overage; per_call_cost = period_spend ÷ TOTAL PERIOD calls; scope_cost =
+ * scope_calls × per_call_cost. Two things this deliberately does NOT take a
+ * Source/isAdmin filter on:
+ *  1. period_calls is the vendor's REAL total call volume for the billing
+ *     period — the $74 base and overage tier are a company-wide fact, not
+ *     something that shrinks/grows depending on which admin/client slice a
+ *     view is asking for. Filtering this denominator by the caller's own
+ *     Source selection was the second half of the amortization bug: viewing
+ *     "Admin" cost would divide the whole base fee by only the handful of
+ *     admin calls, wildly inflating per-call cost for that view alone.
+ *  2. the caller's own window/scope call count — that misallocates whenever
+ *     the window is narrower than the vendor's own billing period.
+ * Callers multiply perCallCostCents by their own (window- and
+ * Source-filtered) scope call count for scope_cost.
+ */
+export async function getRentcastEconomics(db: PrismaClient, now: Date): Promise<RentcastEconomics> {
+  const vendorPlan = await db.vendorPlan.findFirst({ where: { resource: RENTCAST_RESOURCE } });
+  const anchorDay = vendorPlan?.periodAnchorDay ?? 1;
+  const { periodStart, periodEnd } = currentVendorPeriod(now, anchorDay);
+  const periodRentcastCalls = await db.apiCall.count({
+    where: { resource: RENTCAST_RESOURCE, createdAt: { gte: periodStart, lt: periodEnd } },
+  });
+  const baseMonthlyCents = vendorPlan?.baseMonthlyCents ?? 0;
+  const includedQuota = vendorPlan?.includedQuota ?? 0;
+  const overageCentsPerCall = vendorPlan?.overageCentsPerCall ?? 0;
+  const overageCalls = Math.max(0, periodRentcastCalls - includedQuota);
+  const periodSpendCents = baseMonthlyCents + overageCalls * overageCentsPerCall;
+  const perCallCostCents = periodRentcastCalls > 0 ? periodSpendCents / periodRentcastCalls : 0;
+  return { periodStart, periodEnd, periodRentcastCalls, periodSpendCents, perCallCostCents };
+}
+
+/**
+ * Shared usage-RECOGNIZED revenue formula for chart trend lines — every
+ * surface that plots revenue over time (lib/adminTools.ts's per-tool charts,
+ * lib/adminToolDetail.ts's deep-page chart) must go through this, so a
+ * single correction here fixes them all. A per-time-bucket revenue point
+ * derived from a flat period Stripe total is a straight line, not a trend —
+ * it hides exactly the usage swings the chart exists to show. Real shape
+ * instead comes from LedgerEntry.allowanceCovered, recognized per use:
+ *   allowance-covered use -> (that member's sub price / their tier's
+ *     allowance) — the slice of the flat fee this one use "used up"
+ *   credit-covered use -> creditsPerUse x $0.25 (same $/credit as the
+ *     credit-revenue hero card)
+ * This is DELIBERATELY a different number from the hero/summary cards'
+ * flat billed Stripe total — hero stays flat (what was actually charged),
+ * chart trend lines are usage-recognized (value delivered over time). Never
+ * make one match the other.
+ */
+export function usageRecognizedRevenueCents(
+  entry: { userId: string; allowanceCovered: boolean | null },
+  tierByUserId: Map<string, { priceCents: number; allowance: number | null }>,
+  creditRevPerUseCents: number,
+): number {
+  if (entry.allowanceCovered === true) {
+    const tier = tierByUserId.get(entry.userId);
+    if (!tier || !tier.allowance) return 0; // unlimited/no-active-tier: no meaningful per-use split
+    return tier.priceCents / tier.allowance;
+  }
+  if (entry.allowanceCovered === false) return creditRevPerUseCents;
+  return 0;
+}
+
+export const CREDIT_DOLLARS_PER_CREDIT_CENTS = 25; // $0.25/credit, shared by every credit-revenue computation
 
 export async function getAdminOverview(
   range: RangeKey,
@@ -91,7 +166,7 @@ export async function getAdminOverview(
     ...(isAdminFilter ?? {}),
   };
 
-  const [toolUses, apiCalls, vendorPlan, tools, subs] = await Promise.all([
+  const [toolUses, apiCalls, rentcastEcon, tools, subs] = await Promise.all([
     db.toolUse.findMany({
       where: toolUseWhere,
       select: { id: true, featureSlug: true, kind: true, outcome: true, createdAt: true, isAdmin: true },
@@ -100,7 +175,8 @@ export async function getAdminOverview(
       where: { createdAt: { gte: windowStart ?? undefined, lte: windowEnd }, ...(isAdminFilter ?? {}) },
       select: { id: true, toolUseId: true, resource: true, featureSlug: true, costCents: true, createdAt: true },
     }),
-    db.vendorPlan.findFirst({ where: { resource: RENTCAST_RESOURCE } }),
+    // Rentcast is a vendor subscription, independent of the Range filter — it's the vendor's own billing period.
+    getRentcastEconomics(db, now),
     db.tool.findMany({ include: { feature: { include: { tiers: true } } } }),
     // Subscriptions are NOT usage rows — Source (usage-row filter) never
     // applies here. Always excludes the admin user so "an admin isn't a
@@ -111,20 +187,9 @@ export async function getAdminOverview(
   ]);
 
   const realSubs = subs.filter((s) => s.user.role !== "admin");
+  const rentcastPerCallCostCents = rentcastEcon.perCallCostCents;
 
-  // --- Rentcast: period-allocated amortized cost, independent of the Range filter (it's the vendor's own billing period) ---
-  const anchorDay = vendorPlan?.periodAnchorDay ?? 1;
-  const { periodStart, periodEnd } = currentVendorPeriod(now, anchorDay);
-  const periodRentcastCalls = await db.apiCall.count({
-    where: { resource: RENTCAST_RESOURCE, createdAt: { gte: periodStart, lt: periodEnd }, ...(isAdminFilter ?? {}) },
-  });
-  const baseMonthlyCents = vendorPlan?.baseMonthlyCents ?? 0;
-  const includedQuota = vendorPlan?.includedQuota ?? 0;
-  const overageCentsPerCall = vendorPlan?.overageCentsPerCall ?? 0;
-  const overageCalls = Math.max(0, periodRentcastCalls - includedQuota);
-  const totalRentcastPeriodCostCents = baseMonthlyCents + overageCalls * overageCentsPerCall;
-
-  // Allocate that period cost across THIS WINDOW's Rentcast calls, proportional to call share.
+  // Allocate window-scoped Rentcast cost = this scope's WINDOW calls x per-call cost.
   const rentcastCallsInWindow = apiCalls.filter((c) => c.resource === RENTCAST_RESOURCE);
   const rentcastByFeature = new Map<string, number>();
   for (const c of rentcastCallsInWindow) {
@@ -133,9 +198,7 @@ export async function getAdminOverview(
   }
   const totalWindowRentcastCalls = rentcastCallsInWindow.length;
   const rentcastShareFor = (featureSlug: string): number =>
-    totalWindowRentcastCalls > 0
-      ? Math.round(((rentcastByFeature.get(featureSlug) ?? 0) / totalWindowRentcastCalls) * totalRentcastPeriodCostCents)
-      : 0;
+    Math.round((rentcastByFeature.get(featureSlug) ?? 0) * rentcastPerCallCostCents);
 
   // --- Revenue: Stripe not wired yet -> estimated from active, non-admin Subscription.tier.priceCents ---
   // Source='admin' shows cost w/ zero revenue (admin spend is real, but generates no revenue) — the one
@@ -226,7 +289,8 @@ export async function getAdminOverview(
     });
 
   // --- Hero (aggregate) ---
-  const heroCostCents = costableApiCalls.reduce((s, c) => s + (c.costCents ?? 0), 0) + totalRentcastPeriodCostCents * (totalWindowRentcastCalls > 0 ? 1 : 0);
+  const heroCostCents =
+    costableApiCalls.reduce((s, c) => s + (c.costCents ?? 0), 0) + Math.round(totalWindowRentcastCalls * rentcastPerCallCostCents);
   const heroUnknownCalls = costableApiCalls.filter((c) => c.costCents === null).length;
   const heroRevenueCents = revenueApplicable ? Array.from(revenueByFeatureId.values()).reduce((s, v) => s + v, 0) : 0;
 
