@@ -3,18 +3,20 @@
 // Source, all three lenses' per-tool day series + totals + leaderboards
 // computed up front. The lens toggle is client-side over this payload.
 //
-// AUDIENCE SPLIT (locked — see prisma/schema.prisma ApiCall/LedgerEntry
-// comments): reads ToolUse + ApiCall (admin-eyes: usage + company cost) and
-// Subscription/Tier (revenue estimate). The one exception — same as the
-// deep page's — is a LedgerEntry.allowanceCovered read, needed ONLY to give
-// each tool's chart REVENUE LINE real per-day shape (see
-// usageRecognizedRevenueCents below); it's a business plan-fit aggregate,
-// never broken out per-member here, so it doesn't violate the client-eyes
-// rule the rest of this file holds to.
+// AUDIENCE SPLIT: reads ToolUse + ApiCall (admin-eyes: usage + company cost)
+// and Subscription/Tier (revenue estimate). It also reads
+// LedgerEntry.allowanceCovered for TWO things now: the per-day chart REVENUE
+// LINE shape (usageRecognizedRevenueCents, unchanged) AND, as of the shared
+// lib/adminMoney.ts revenue definition, the flat credit-revenue component of
+// each tool's TOTAL — LedgerEntry rows are never written for admin runs, so
+// this stays inherently client-only with no isAdmin filter needed either way.
 //
 // This page renders CLIENT-ONLY series regardless of Source — Source still
 // filters which usage rows are in scope (via isAdmin), it just doesn't split
 // the rendered lines here. The admin/client split is deferred to /[slug].
+// All revenue/cost/margin TOTALS route through lib/adminMoney.ts — see that
+// file for why (this surface used to double-count the acq/dispo bots
+// subscription revenue and diverge from Overview's cost attribution).
 
 import { PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
@@ -22,6 +24,7 @@ import { RangeKey, SourceFilter, resolveRange, sourceToIsAdminFilter } from "@/l
 import { brandSlugFor } from "@/lib/brandSlug";
 import { getBrandAssets } from "@/lib/brandAssets";
 import { getRentcastEconomics, usageRecognizedRevenueCents, CREDIT_DOLLARS_PER_CREDIT_CENTS, type Lens } from "@/lib/adminDashboard";
+import { subscriptionRevenueByFeatureId, creditRevenueCents, splitSharedFeatureRevenue, attributedCostCents } from "@/lib/adminMoney";
 
 const RENTCAST_RESOURCE = "rentcast";
 const TOOL_ORDER = ["score", "scrub", "ask", "acq", "dispo", "pack"];
@@ -86,16 +89,23 @@ export async function getAdminTools(
 ): Promise<AdminToolsData> {
   const now = new Date();
   const { start: rawStart, end: windowEnd } = resolveRange(range, now, customFrom, customTo);
-  const windowStart = rawStart ?? new Date(windowEnd.getTime() - 30 * DAY_MS);
+  // QUERY window: rawStart, unmodified — null means truly unbounded ("All
+  // time"), same as Overview. CHART window: the per-day series still needs a
+  // finite start to bucket against, so it falls back to a trailing 30 days —
+  // but that fallback must ONLY shape the chart's x-axis, never the totals
+  // query below. Conflating the two used to silently clip "All time" totals
+  // to the trailing 30 days here while Overview's stayed truly unbounded —
+  // the single biggest source of Tools-vs-Overview total drift.
+  const chartStart = rawStart ?? new Date(windowEnd.getTime() - 30 * DAY_MS);
   const isAdminFilter = sourceToIsAdminFilter(source);
 
   const [toolUses, apiCalls, rentcastEcon, tools, subs, ledgerAll] = await Promise.all([
     db.toolUse.findMany({
-      where: { createdAt: { gte: windowStart, lte: windowEnd }, ...(isAdminFilter ?? {}) },
+      where: { createdAt: { gte: rawStart ?? undefined, lte: windowEnd }, ...(isAdminFilter ?? {}) },
       select: { id: true, locationId: true, userId: true, featureSlug: true, kind: true, outcome: true, createdAt: true },
     }),
     db.apiCall.findMany({
-      where: { createdAt: { gte: windowStart, lte: windowEnd }, ...(isAdminFilter ?? {}) },
+      where: { createdAt: { gte: rawStart ?? undefined, lte: windowEnd }, ...(isAdminFilter ?? {}) },
       select: { id: true, toolUseId: true, locationId: true, resource: true, costCents: true, createdAt: true },
     }),
     // Same corrected formula as Overview — independent of Range, it's the vendor's own billing period.
@@ -104,34 +114,70 @@ export async function getAdminTools(
     db.subscription.findMany({
       include: { tier: true, user: { select: { id: true, name: true, role: true, status: true, ghlLocationId: true } } },
     }),
-    // Chart-line revenue only (see usageRecognizedRevenueCents) — never used for the flat totals below.
+    // Used for BOTH the chart-line shape (usageRecognizedRevenueCents, via
+    // toolId) and, per the shared lib/adminMoney.ts revenue definition, the
+    // flat credit-revenue component of each tool's TOTAL (grouped by
+    // featureId — see note below on why not toolId).
     db.ledgerEntry.findMany({
-      where: { kind: "consumption", createdAt: { gte: windowStart, lte: windowEnd } },
-      select: { userId: true, toolId: true, allowanceCovered: true, createdAt: true },
+      where: { kind: "consumption", createdAt: { gte: rawStart ?? undefined, lte: windowEnd } },
+      select: { userId: true, toolId: true, featureId: true, allowanceCovered: true, createdAt: true },
     }),
   ]);
 
   const realSubs = subs.filter((s) => s.user.role !== "admin");
   const revenueApplicable = source !== "admin";
 
-  // per_call_cost = period_spend / total PERIOD calls (never this window's own call
-  // count — that misallocates whenever Range != the vendor's billing period).
   const rentcastPerCallCostCents = rentcastEcon.perCallCostCents;
-  function rentcastShareOf(windowCallCount: number): number {
-    return Math.round(windowCallCount * rentcastPerCallCostCents);
+
+  const revenueByFeatureId = subscriptionRevenueByFeatureId(
+    realSubs.map((s) => ({ status: s.status, featureId: s.tier.featureId, priceCents: s.tier.priceCents, userRole: s.user.role })),
+  );
+
+  // Credit revenue grouped by featureId, NOT LedgerEntry.toolId — some
+  // consumption rows are written with toolId null (a data gap), which would
+  // silently drop their revenue from every per-tool total. featureId is
+  // always set, so group there and split across marks the SAME way
+  // subscription revenue splits below — every cent stays accounted for and
+  // per-tool sums stay reconciled to Overview's total (see lib/adminMoney.ts).
+  const creditRunsByFeatureId = new Map<string, number>();
+  if (revenueApplicable) {
+    for (const l of ledgerAll) {
+      if (l.allowanceCovered !== false || !l.featureId) continue;
+      creditRunsByFeatureId.set(l.featureId, (creditRunsByFeatureId.get(l.featureId) ?? 0) + 1);
+    }
   }
 
-  const revenueByFeatureId = new Map<string, number>();
-  for (const s of realSubs) {
-    if (s.status !== "active") continue;
-    revenueByFeatureId.set(s.tier.featureId, (revenueByFeatureId.get(s.tier.featureId) ?? 0) + s.tier.priceCents);
+  function runsFor(t: (typeof tools)[number]): typeof toolUses {
+    const isBotsSplit = t.slug === "acq" || t.slug === "dispo";
+    return isBotsSplit
+      ? toolUses.filter((r) => r.featureSlug === "bots" && r.kind === t.slug)
+      : toolUses.filter((r) => r.featureSlug === t.feature.slug);
   }
 
-  const days = bucketDays(windowStart, windowEnd);
+  // Revenue split across shared-feature marks (bots -> acq+dispo), weighted
+  // by run count — see lib/adminMoney.ts. Non-shared tools are the trivial
+  // one-mark case of the same split. Subscription and credit revenue use the
+  // SAME weights so both land on the same marks consistently.
+  const revenueMarks = tools.map((t) => ({ markKey: t.slug, featureId: t.featureId, weight: runsFor(t).length }));
+  const subRevenueByToolSlug = revenueApplicable ? splitSharedFeatureRevenue(revenueByFeatureId, revenueMarks) : new Map<string, number>();
+  const creditCostByFeatureId = new Map(tools.map((t) => [t.featureId, t.feature.creditCost]));
+  const creditRevenueByFeatureId = new Map(
+    Array.from(creditRunsByFeatureId.entries()).map(([featureId, count]) => [
+      featureId,
+      creditRevenueCents(count, creditCostByFeatureId.get(featureId) ?? 0),
+    ]),
+  );
+  const creditRevenueByToolSlug = revenueApplicable ? splitSharedFeatureRevenue(creditRevenueByFeatureId, revenueMarks) : new Map<string, number>();
+
+  const days = bucketDays(chartStart, windowEnd);
   const dayIndex = new Map(days.map((d, i) => [d, i]));
 
   function bucketOf(date: Date): number | null {
-    if (date.getTime() < windowStart.getTime() || date.getTime() > windowEnd.getTime()) return null;
+    // Calls/runs before the chart's trailing-30-day window (possible when
+    // Range = "All time") simply have no day bucket — they still count in
+    // the totals above, they just don't plot on the chart. That's correct:
+    // a chart can't usefully show years of daily buckets anyway.
+    if (date.getTime() < chartStart.getTime() || date.getTime() > windowEnd.getTime()) return null;
     const idx = dayIndex.get(dayKey(date));
     // downsampled windows drop early buckets — fold anything before the first kept bucket into it
     return idx ?? 0;
@@ -139,10 +185,7 @@ export async function getAdminTools(
 
   const toolRows: ToolRow[] = tools
     .map((t) => {
-      const isBotsSplit = t.slug === "acq" || t.slug === "dispo";
-      const runs = isBotsSplit
-        ? toolUses.filter((r) => r.featureSlug === "bots" && r.kind === t.slug)
-        : toolUses.filter((r) => r.featureSlug === t.feature.slug);
+      const runs = runsFor(t);
       const runIds = new Set(runs.map((r) => r.id));
       const hasPaidTier = t.feature.tiers.some((tier) => tier.priceCents > 0);
       const live = t.active || runs.length > 0;
@@ -150,14 +193,14 @@ export async function getAdminTools(
       const calls = apiCalls.filter((c) => c.toolUseId && runIds.has(c.toolUseId));
       const costableCalls = calls.filter((c) => c.resource !== RENTCAST_RESOURCE);
       const rentcastCalls = calls.filter((c) => c.resource === RENTCAST_RESOURCE);
-      const toolRentcastShare = rentcastShareOf(rentcastCalls.length);
+      const toolRentcastShare = Math.round(rentcastCalls.length * rentcastPerCallCostCents);
 
       const featureSubs = realSubs.filter((s) => s.tier.featureId === t.featureId);
       const activeFeatureSubs = featureSubs.filter((s) => s.status === "active");
       const uniqueActive = new Set(activeFeatureSubs.map((s) => s.userId)).size;
       const churnedSubs = featureSubs.filter((s) => s.status === "canceled" || s.user.status === "inactive");
 
-      const revenueTotal = hasPaidTier && revenueApplicable ? revenueByFeatureId.get(t.featureId) ?? 0 : 0;
+      const revenueTotal = revenueApplicable ? (subRevenueByToolSlug.get(t.slug) ?? 0) + (creditRevenueByToolSlug.get(t.slug) ?? 0) : 0;
 
       const series: ToolTrendPoint[] = days.map((date) => ({
         date,
@@ -183,12 +226,10 @@ export async function getAdminTools(
         for (const p of series) p.money.rev = Math.round(p.money.rev);
       }
 
-      let unknownCalls = 0;
       for (const c of costableCalls) {
         const idx = bucketOf(c.createdAt);
-        if (idx === null) continue;
-        if (c.costCents === null) unknownCalls += 1;
-        else series[idx].money.cost += c.costCents;
+        if (idx === null || c.costCents === null) continue;
+        series[idx].money.cost += c.costCents;
       }
       const totalToolRentcastCalls = rentcastCalls.length;
       if (totalToolRentcastCalls > 0) {
@@ -214,7 +255,11 @@ export async function getAdminTools(
         series[idx].users.churned += 1;
       }
 
-      const costTotal = costableCalls.reduce((sum, c) => sum + (c.costCents ?? 0), 0) + toolRentcastShare;
+      const { totalCostCents: costTotal, unknownCalls: totalUnknownCalls } = attributedCostCents(
+        costableCalls,
+        rentcastCalls.length,
+        rentcastPerCallCostCents,
+      );
       const okTotal = runs.filter((r) => r.outcome === "success").length;
       const failTotal = runs.filter((r) => r.outcome === "fail").length;
       const partialTotal = runs.filter((r) => r.outcome === "partial").length;
@@ -228,7 +273,7 @@ export async function getAdminTools(
         hasPaidTier,
         series,
         totals: {
-          money: { cost: costTotal, rev: revenueTotal, margin: revenueTotal - costTotal, costUnknownCalls: unknownCalls },
+          money: { cost: costTotal, rev: revenueTotal, margin: revenueTotal - costTotal, costUnknownCalls: totalUnknownCalls },
           users: { active: activeFeatureSubs.length, unique: uniqueActive, churned: churnedSubs.length },
           activity: { ok: okTotal, fail: failTotal, partial: partialTotal },
         },
@@ -281,7 +326,7 @@ export async function getAdminTools(
   return {
     range,
     source,
-    windowStart: windowStart.toISOString(),
+    windowStart: chartStart.toISOString(),
     windowEnd: windowEnd.toISOString(),
     tools: toolRows,
     leaderboards: {

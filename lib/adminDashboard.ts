@@ -3,18 +3,20 @@
 // lens toggle is client-side over this payload, never a refetch. Only Range
 // and Source (server-side filters) cause a re-fetch.
 //
-// AUDIENCE SPLIT (locked, see prisma/schema.prisma ApiCall/LedgerEntry
-// comments): this file reads ToolUse + ApiCall (admin-eyes: usage + company
-// cost) and Subscription/Tier (revenue estimate). It never reads
-// LedgerEntry — that table is client-eyes only (member credits/allowance)
-// and carries no company cost; mixing it into these numbers is the one hard
-// rule this surface must never violate.
+// AUDIENCE SPLIT: this file reads ToolUse + ApiCall (admin-eyes: usage +
+// company cost) and Subscription/Tier (revenue estimate). It also reads
+// LedgerEntry.allowanceCovered, SANCTIONED read-side per lib/adminMoney.ts —
+// as a REVENUE signal (credit-covered runs are real money), never a cost
+// signal; LedgerEntry still carries no company cost and this file never
+// treats it as one. All revenue/cost/margin math routes through
+// lib/adminMoney.ts — see that file for why (it used to diverge per surface).
 
 import { PrismaClient } from "@prisma/client";
 import { prisma as defaultPrisma } from "@/lib/prisma";
 import { RangeKey, SourceFilter, resolveRange, sourceToIsAdminFilter } from "@/lib/adminFilters";
 import { brandSlugFor } from "@/lib/brandSlug";
 import { getBrandAssets } from "@/lib/brandAssets";
+import { subscriptionRevenueByFeatureId, creditRevenueCents, splitSharedFeatureRevenue, attributedCostCents } from "@/lib/adminMoney";
 
 export type Lens = "money" | "users" | "activity";
 
@@ -166,7 +168,7 @@ export async function getAdminOverview(
     ...(isAdminFilter ?? {}),
   };
 
-  const [toolUses, apiCalls, rentcastEcon, tools, subs] = await Promise.all([
+  const [toolUses, apiCalls, rentcastEcon, tools, subs, ledgerAll] = await Promise.all([
     db.toolUse.findMany({
       where: toolUseWhere,
       select: { id: true, featureSlug: true, kind: true, outcome: true, createdAt: true, isAdmin: true },
@@ -184,31 +186,47 @@ export async function getAdminOverview(
     db.subscription.findMany({
       include: { tier: true, feature: true, user: { select: { role: true, status: true } } },
     }),
+    // Credit revenue side of the shared revenue definition (lib/adminMoney.ts)
+    // — LedgerEntry rows are never written for admin runs, so this is
+    // inherently client-only with no isAdmin filter needed.
+    db.ledgerEntry.findMany({
+      where: { kind: "consumption", createdAt: { gte: windowStart ?? undefined, lte: windowEnd } },
+      select: { toolId: true, featureId: true, allowanceCovered: true },
+    }),
   ]);
 
   const realSubs = subs.filter((s) => s.user.role !== "admin");
   const rentcastPerCallCostCents = rentcastEcon.perCallCostCents;
 
-  // Allocate window-scoped Rentcast cost = this scope's WINDOW calls x per-call cost.
-  const rentcastCallsInWindow = apiCalls.filter((c) => c.resource === RENTCAST_RESOURCE);
-  const rentcastByFeature = new Map<string, number>();
-  for (const c of rentcastCallsInWindow) {
-    const slug = c.featureSlug ?? "unknown";
-    rentcastByFeature.set(slug, (rentcastByFeature.get(slug) ?? 0) + 1);
-  }
-  const totalWindowRentcastCalls = rentcastCallsInWindow.length;
-  const rentcastShareFor = (featureSlug: string): number =>
-    Math.round((rentcastByFeature.get(featureSlug) ?? 0) * rentcastPerCallCostCents);
-
   // --- Revenue: Stripe not wired yet -> estimated from active, non-admin Subscription.tier.priceCents ---
   // Source='admin' shows cost w/ zero revenue (admin spend is real, but generates no revenue) — the one
   // spot Source DOES touch a subscription-based number, because it's asking "what did this slice buy us".
-  const revenueByFeatureId = new Map<string, number>();
-  for (const s of realSubs) {
-    if (s.status !== "active") continue;
-    revenueByFeatureId.set(s.featureId, (revenueByFeatureId.get(s.featureId) ?? 0) + s.tier.priceCents);
-  }
   const revenueApplicable = source !== "admin";
+  const revenueByFeatureId = subscriptionRevenueByFeatureId(
+    realSubs.map((s) => ({ status: s.status, featureId: s.featureId, priceCents: s.tier.priceCents, userRole: s.user.role })),
+  );
+
+  // --- Credit revenue: grouped by featureId, NOT LedgerEntry.toolId — some
+  // consumption rows are written with toolId null (a data gap, not a
+  // modeling choice), which would silently drop their revenue from every
+  // per-tool card while still counting it in the hero total. featureId is
+  // always set on a consumption row, so grouping there and splitting across
+  // marks the SAME way subscription revenue splits (below) keeps every cent
+  // accounted for and keeps per-tool sums exactly reconciled to the hero. ---
+  const creditRunsByFeatureId = new Map<string, number>();
+  if (revenueApplicable) {
+    for (const l of ledgerAll) {
+      if (l.allowanceCovered !== false || !l.featureId) continue;
+      creditRunsByFeatureId.set(l.featureId, (creditRunsByFeatureId.get(l.featureId) ?? 0) + 1);
+    }
+  }
+  const creditCostByFeatureId = new Map(tools.map((t) => [t.featureId, t.feature.creditCost]));
+  const creditRevenueByFeatureId = new Map(
+    Array.from(creditRunsByFeatureId.entries()).map(([featureId, count]) => [
+      featureId,
+      creditRevenueCents(count, creditCostByFeatureId.get(featureId) ?? 0),
+    ]),
+  );
 
   const subsByFeatureId = new Map<string, typeof realSubs>();
   for (const s of realSubs) {
@@ -226,14 +244,8 @@ export async function getAdminOverview(
     return { active: active.length, unique, churned };
   }
 
-  function moneyRevenueFor(featureId: string, hasPaidTier: boolean): number | null {
-    if (!hasPaidTier) return null;
-    if (!revenueApplicable) return 0;
-    return revenueByFeatureId.get(featureId) ?? 0;
-  }
-
-  // --- Per-run outcome + cost lookups, joined via toolUseId ---
-  const toolUseById = new Map(toolUses.map((t) => [t.id, t]));
+  // --- Per-run outcome + cost lookups, joined via toolUseId (never via the
+  // denormalized ApiCall.featureSlug field — see lib/adminMoney.ts header) ---
   const costableApiCalls = apiCalls.filter((c) => c.resource !== RENTCAST_RESOURCE);
 
   function activityFor(runs: typeof toolUses): ActivityMetrics {
@@ -244,32 +256,44 @@ export async function getAdminOverview(
     };
   }
 
-  function moneyCostFor(runIds: Set<string>, featureSlug: string): { costCents: number; unknownCalls: number } {
-    const calls = costableApiCalls.filter((c) => c.toolUseId && runIds.has(c.toolUseId));
-    let costCents = 0;
-    let unknownCalls = 0;
-    for (const c of calls) {
-      if (c.costCents === null) unknownCalls += 1;
-      else costCents += c.costCents;
-    }
-    return { costCents: costCents + rentcastShareFor(featureSlug), unknownCalls };
+  function runsFor(t: (typeof tools)[number]): typeof toolUses {
+    const isBotsSplit = t.slug === "acq" || t.slug === "dispo";
+    return isBotsSplit
+      ? toolUses.filter((r) => r.featureSlug === "bots" && r.kind === t.slug)
+      : toolUses.filter((r) => r.featureSlug === t.feature.slug);
   }
+
+  // --- Revenue split across shared-feature marks (bots -> acq+dispo),
+  // weighted by each mark's run count in scope — see splitSharedFeatureRevenue
+  // in lib/adminMoney.ts. Non-shared tools are the trivial one-mark case of
+  // the same split, so every tool goes through one code path. Subscription
+  // and credit revenue are split with the SAME weights so both land on the
+  // same marks consistently. ---
+  const revenueMarks = tools.map((t) => ({ markKey: t.slug, featureId: t.featureId, weight: runsFor(t).length }));
+  const subRevenueByToolSlug = revenueApplicable ? splitSharedFeatureRevenue(revenueByFeatureId, revenueMarks) : new Map<string, number>();
+  const creditRevenueByToolSlug = revenueApplicable ? splitSharedFeatureRevenue(creditRevenueByFeatureId, revenueMarks) : new Map<string, number>();
 
   // --- Per-tool cards ---
   const toolCards: ToolCard[] = tools
     .map((t) => {
-      const isBotsSplit = t.slug === "acq" || t.slug === "dispo";
-      const runs = isBotsSplit
-        ? toolUses.filter((r) => r.featureSlug === "bots" && r.kind === t.slug)
-        : toolUses.filter((r) => r.featureSlug === t.feature.slug);
+      const runs = runsFor(t);
       const runIds = new Set(runs.map((r) => r.id));
       const hasPaidTier = t.feature.tiers.some((tier) => tier.priceCents > 0);
 
-      const { costCents, unknownCalls } = moneyCostFor(runIds, t.feature.slug);
-      const revenueCents = moneyRevenueFor(t.featureId, hasPaidTier);
-      const marginCents = revenueCents === null ? null : revenueCents - costCents;
+      const calls = costableApiCalls.filter((c) => c.toolUseId && runIds.has(c.toolUseId));
+      const rentcastCallCount = apiCalls.filter((c) => c.resource === RENTCAST_RESOURCE && c.toolUseId && runIds.has(c.toolUseId)).length;
+      const { totalCostCents: costCents, unknownCalls } = attributedCostCents(calls, rentcastCallCount, rentcastPerCallCostCents);
+
+      const revenueCents = revenueApplicable ? (subRevenueByToolSlug.get(t.slug) ?? 0) + (creditRevenueByToolSlug.get(t.slug) ?? 0) : 0;
+      const marginCentsValue = revenueCents - costCents;
 
       const live = t.active || runs.length > 0;
+      // Money is real data whenever there's a nonzero cost or revenue figure
+      // behind it, independent of "live" (usage-liveness) — a tool with paid
+      // subscribers but zero runs yet still has real revenue, and nulling it
+      // here would silently drop it from this card while the hero total
+      // still counts it, breaking sum(per-tool revenue) == hero total.
+      const moneyLive = live || costCents !== 0 || revenueCents !== 0;
 
       return {
         slug: t.slug,
@@ -277,7 +301,12 @@ export async function getAdminOverview(
         wordmark: getBrandAssets(brandSlugFor(t.slug)).wordmark,
         featureSlug: t.feature.slug,
         live,
-        money: { costCents: live ? costCents : null, revenueCents: live ? revenueCents : null, marginCents: live ? marginCents : null, costUnknownCalls: unknownCalls },
+        money: {
+          costCents: moneyLive ? costCents : null,
+          revenueCents: moneyLive ? revenueCents : null,
+          marginCents: moneyLive ? marginCentsValue : null,
+          costUnknownCalls: unknownCalls,
+        },
         users: live ? usersMetricsFor(t.featureId, hasPaidTier) : { active: null, unique: null, churned: null },
         activity: live ? activityFor(runs) : { ok: 0, fail: 0, partial: 0 },
       };
@@ -288,11 +317,19 @@ export async function getAdminOverview(
       return order.indexOf(a.slug) - order.indexOf(b.slug);
     });
 
-  // --- Hero (aggregate) ---
-  const heroCostCents =
-    costableApiCalls.reduce((s, c) => s + (c.costCents ?? 0), 0) + Math.round(totalWindowRentcastCalls * rentcastPerCallCostCents);
-  const heroUnknownCalls = costableApiCalls.filter((c) => c.costCents === null).length;
-  const heroRevenueCents = revenueApplicable ? Array.from(revenueByFeatureId.values()).reduce((s, v) => s + v, 0) : 0;
+  // --- Hero (aggregate) — sums the SAME per-feature/per-tool numbers the
+  // cards above read, so sum(card.revenue) / sum(card.cost) reconcile to
+  // these totals by construction (see the invariant check in
+  // scripts/verify-admin-money.ts). ---
+  const totalRentcastCalls = apiCalls.filter((c) => c.resource === RENTCAST_RESOURCE).length;
+  const { totalCostCents: heroCostCents, unknownCalls: heroUnknownCalls } = attributedCostCents(
+    costableApiCalls,
+    totalRentcastCalls,
+    rentcastPerCallCostCents,
+  );
+  const heroSubRevenueCents = Array.from(revenueByFeatureId.values()).reduce((s, v) => s + v, 0);
+  const heroCreditRevenueCents = Array.from(creditRevenueByFeatureId.values()).reduce((s, v) => s + v, 0);
+  const heroRevenueCents = revenueApplicable ? heroSubRevenueCents + heroCreditRevenueCents : 0;
 
   const heroMoney: MoneyMetrics = {
     costCents: heroCostCents,

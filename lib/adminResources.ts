@@ -93,18 +93,46 @@ export async function getAdminResources(range: RangeKey, db: PrismaClient = defa
   const now = new Date();
   const { start: windowStart, end: windowEnd } = resolveRange(range, now, customFrom, customTo);
 
+  // Rentcast is a BILLING-CYCLE cost, not a rolling-window one — the Period
+  // selector must resolve to the CYCLE it names, not the generic calendar
+  // approximation resolveRange uses for billing_current/billing_previous
+  // (see that function's own comment: "not the per-vendor anchor-day period
+  // used for Rentcast"). "This billing period" -> the vendor cycle containing
+  // `now`. "Last billing period" -> the vendor cycle immediately before that
+  // one (found by asking currentVendorPeriod about an instant 1ms before the
+  // current cycle's start — never re-deriving the anchor-day math here).
+  // Every other Period (today/7d/30d/custom/all) isn't cycle-shaped, so
+  // Rentcast just snaps to whichever cycle contains that window's end —
+  // "today" and "30d" both land on the current cycle, a custom past date
+  // lands on the (possibly older) cycle that contained it.
+  const vendorPlanForAnchor = await db.vendorPlan.findFirst({ where: { resource: RENTCAST_RESOURCE } });
+  const anchorDay = vendorPlanForAnchor?.periodAnchorDay ?? 1;
+  const rentcastReferenceInstant =
+    range === "billing_previous" ? new Date(currentVendorPeriod(now, anchorDay).periodStart.getTime() - 1) : range === "billing_current" ? now : windowEnd;
+  const rentcastCycle = currentVendorPeriod(rentcastReferenceInstant, anchorDay);
+
+  // Melissa/Sonnet/Haiku track the SAME billing-cycle bounds as Rentcast
+  // when the Period selector is itself billing-cycle-shaped (current/previous)
+  // — so every vendor card on this page reads "the same period" for those
+  // two selections instead of Rentcast reading the real vendor cycle while
+  // the others read resolveRange's calendar-month stand-in. For rolling
+  // Periods (today/7d/30d/custom/all) they keep using the literal selected
+  // window, same as before — only Rentcast is always cycle-snapped.
+  const usageWindowStart = range === "billing_current" || range === "billing_previous" ? rentcastCycle.periodStart : (windowStart ?? undefined);
+  const usageWindowEnd = range === "billing_current" || range === "billing_previous" ? rentcastCycle.periodEnd : windowEnd;
+
   const [melissaRate, sonnetRate, haikuRate, rentcastEcon, vendorPlan, melissaCalls, anthropicCalls] = await Promise.all([
     latestRate(db, MELISSA_RESOURCE, null, now),
     latestRate(db, ANTHROPIC_RESOURCE, SONNET_MODEL, now),
     latestRate(db, ANTHROPIC_RESOURCE, HAIKU_MODEL, now),
-    getRentcastEconomics(db, now),
-    db.vendorPlan.findFirst({ where: { resource: RENTCAST_RESOURCE } }),
+    getRentcastEconomics(db, rentcastReferenceInstant),
+    Promise.resolve(vendorPlanForAnchor),
     db.apiCall.findMany({
-      where: { resource: MELISSA_RESOURCE, createdAt: { gte: windowStart ?? undefined, lte: windowEnd } },
+      where: { resource: MELISSA_RESOURCE, createdAt: { gte: usageWindowStart, lte: usageWindowEnd } },
       select: { costCents: true, durationMs: true },
     }),
     db.apiCall.findMany({
-      where: { resource: ANTHROPIC_RESOURCE, createdAt: { gte: windowStart ?? undefined, lte: windowEnd } },
+      where: { resource: ANTHROPIC_RESOURCE, createdAt: { gte: usageWindowStart, lte: usageWindowEnd } },
       select: { model: true, costCents: true, inputTokens: true, outputTokens: true },
     }),
   ]);
