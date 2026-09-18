@@ -78,6 +78,10 @@ model User {
   // Admin audit trail back-relation — schema-only, no columns on User.
   adminActions AdminAction[] @relation("AdminActions")
 
+  // Member consent/audit trail + saved-cart back-relations — schema-only, no columns on User.
+  memberActions MemberAction[] @relation("MemberActions")
+  carts         Cart[]         @relation("Carts")
+
   @@unique([ghlLocationId], map: "User_ghlLocationId_key")
 }
 
@@ -396,6 +400,7 @@ enum FundingReason {
   tier_grant
   bundle_grant
   adjustment
+  admin_grant
 }
 
 enum ConsumptionOutcome {
@@ -463,6 +468,7 @@ model Tier {
 
   bundles       BundleTier[]
   subscriptions Subscription[]
+  cartLines     CartLine[]
 
   @@unique([featureId, level])
 }
@@ -530,6 +536,7 @@ model CreditPack {
   updatedAt     DateTime @updatedAt
 
   fundingEntries LedgerEntry[]
+  cartLines      CartLine[]
 }
 
 // Always a tool_sub: bundle membership is DERIVED (see lib/bundleQualify.ts),
@@ -737,7 +744,14 @@ enum AdminActionType {
   tool_deactivate
   credit_grant
   credit_adjust
-  // extend as write features are added (subscription_comp, etc.)
+  // v1.5 write-plan additions (2026-09-18) — appended, never reordered.
+  // No bundle_activate/bundle_deactivate: per §1, bundle availability is
+  // DERIVED from per-surface Tool.active — an admin acts on tools
+  // (tool_activate/tool_deactivate above), never on a bundle directly.
+  cart_stage
+  subscription_comp
+  subscription_cancel
+  service_cancel
 }
 
 // Admin write-action audit trail. ADMIN-EYES (never surfaced to members) and
@@ -771,6 +785,126 @@ model AdminAction {
 
   createdAt DateTime @default(now())
 
+  // Staged-by back-relation: carts an admin staged for a member (saved-cart
+  // sub-add flow, v1.5 dependency order item 5) — schema-only, no columns here.
+  stagedCarts Cart[] @relation("StagedCarts")
+
   @@index([adminUserId, createdAt])
   @@index([targetType, targetId, createdAt])
+}
+
+// --- Member consent/audit + saved-cart (v1.5 write plan, schema-only pass) -
+// Spec: .claude/docs/REItools-Architecture-v3.md §0 pipeline + "Open threads
+// — Reprice-on-break consent record" + 2026-09-18 changelog (v1.5 WRITE PLAN,
+// dependency order item 1). Nothing writes these tables yet.
+
+enum MemberActionType {
+  subscription_add
+  subscription_upgrade
+  subscription_downgrade
+  subscription_remove
+  bundle_activate
+  bundle_break
+  credit_pack_purchase
+}
+
+// Member-side twin of AdminAction — append-only, immutable (same discipline
+// as AdminAction/LedgerEntry, no update/delete path). Records member
+// price-consent at any change to their paid arrangement. NOT a ledger row —
+// carries no creditDelta, no money movement (§6 audience split); this is
+// consent evidence, not funding/consumption.
+model MemberAction {
+  id String @id @default(cuid())
+
+  userId String
+  user   User              @relation("MemberActions", fields: [userId], references: [id], onDelete: Restrict)
+  action MemberActionType
+
+  // Polymorphic target (subscription | tool | ...) — targetId is a plain
+  // string, typed by convention, NOT an FK, same pattern as AdminAction.
+  targetType String
+  targetId   String
+
+  // FROZEN evidence of what the member was shown and agreed to at the time —
+  // { timestamp, disclosureText, type }. Never re-derived after the fact.
+  consent Json
+
+  // Set for checkout-staged changes (member completed a saved Cart); null
+  // for in-place changes (e.g. a downgrade the member drives directly).
+  cartId String?
+  cart   Cart?   @relation(fields: [cartId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([targetType, targetId, createdAt])
+}
+
+enum CartMode {
+  subscription
+  credit_pack
+}
+
+enum CartStatus {
+  open
+  completed
+  expired
+}
+
+enum CartSource {
+  member_self
+  admin_staged
+}
+
+// Saved-cart / checkout-staging model (2026-09-18 changelog: "ADMIN
+// SUBSCRIPTION-ADD = SAVED-CART model" + v1.5 dependency order item 1).
+// Single-intent to match mintCheckout's mixed-cart rejection (lib/checkout.ts)
+// — a Cart is either all-subscription or all-credit-pack, never mixed. Lines
+// carry catalog refs, NEVER prices — same "stores zero numbers" discipline as
+// Subscription (§3). No bundleId: bundles are flattened to N priced tool_sub
+// lines before checkout, never a cart-layer concept (lib/checkout.ts, §5).
+model Cart {
+  id     String     @id @default(cuid())
+  userId String
+  user   User       @relation("Carts", fields: [userId], references: [id], onDelete: Cascade)
+  mode   CartMode
+  status CartStatus @default(open)
+  source CartSource
+
+  // Staged-by join — set when an admin stages this cart for a member
+  // (saved-cart sub-add flow); null for member-self carts.
+  adminActionId String?
+  adminAction   AdminAction? @relation("StagedCarts", fields: [adminActionId], references: [id], onDelete: SetNull)
+
+  stripeCheckoutSessionId String?
+  expiresAt               DateTime?
+  createdAt               DateTime @default(now())
+
+  lines         CartLine[]
+  memberActions MemberAction[]
+
+  @@index([userId, status])
+  // Partial-unique (userId, mode) WHERE status='open' — one open cart per
+  // (user, mode) — is a hand-edit in the migration SQL (Phase 2), same
+  // convention as the Subscription/BundlePriceOverride partial indexes;
+  // Prisma's schema DSL can't express the WHERE predicate.
+}
+
+// Cart line — catalog refs only, never a price. Exactly one of tierId /
+// creditPackId is set, matching the cart's mode (enforced app-side, not by
+// the DB — same convention as Subscription's tier-vs-feature denormalization).
+model CartLine {
+  id     String @id @default(cuid())
+  cartId String
+  cart   Cart   @relation(fields: [cartId], references: [id], onDelete: Cascade)
+
+  tierId String?
+  tier   Tier?   @relation(fields: [tierId], references: [id])
+
+  creditPackId String?
+  creditPack   CreditPack? @relation(fields: [creditPackId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([cartId])
 }
