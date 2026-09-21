@@ -166,6 +166,103 @@ describe('handleSubscriptionEvent (webhook, N tool_subs per subscription)', () =
       await teardownDisposableUser(secondUser)
     }
   })
+
+  // §3's own warning: "a single-item test passes even with the bug present."
+  // This drives the ADAPTER through real transitions on a MULTI-ITEM bundle
+  // subscription (score + ask sharing one stripeSubscriptionId), so a
+  // same-feature tier change (score plus -> pro -> plus) actually exercises
+  // cancel-before-upsert + the status-agnostic resurrect, the way the v1.5
+  // extraction plan (landSubscriptionItem) is required to preserve.
+  it('multi-item bundle: in-bundle upgrade then downgrade-back on the SAME feature — no P2002, and downgrade-back RESURRECTS the original row by id (no duplicate)', async () => {
+    const bundleUserId = await createDisposableUser()
+    try {
+      const [scorePlus, scorePro, askBase] = await Promise.all([
+        testPrisma.tier.findFirstOrThrow({ where: { feature: { slug: 'score' }, level: 'plus' } }),
+        testPrisma.tier.findFirstOrThrow({ where: { feature: { slug: 'score' }, level: 'pro' } }),
+        testPrisma.tier.findFirstOrThrow({ where: { feature: { slug: 'ask' }, level: 'base' } }),
+      ])
+      if (!scorePlus.stripePriceId || !scorePro.stripePriceId || !askBase.stripePriceId) {
+        throw new Error('Test fixture requires the 09-14 backfill (prisma/backfill-stripe-prices.ts) to have run against SEED_DATABASE_URL first.')
+      }
+
+      const stripeSubscriptionId = `sub_fake_bundle_${bundleUserId}`
+
+      // Initial land: score/plus + ask/base on one sub (bundle-plus shape).
+      const initial = fakeSubscription({
+        id: stripeSubscriptionId,
+        userId: bundleUserId,
+        status: 'active',
+        priceIds: [scorePlus.stripePriceId, askBase.stripePriceId],
+      })
+      await testPrisma.$transaction(async (tx) => {
+        await handleSubscriptionEvent(tx as unknown as Prisma.TransactionClient, initial, 'customer.subscription.created')
+      }, { timeout: 20000 })
+
+      const scorePlusRow = await testPrisma.subscription.findFirstOrThrow({
+        where: { stripeSubscriptionId, tierId: scorePlus.id },
+      })
+      expect(scorePlusRow.status).toBe('active')
+
+      // (a) In-bundle upgrade: score plus -> pro. Same feature, new tierId —
+      // this is the exact shape that trips P2002 if cancel doesn't precede
+      // upsert (insert score/pro while score/plus is still active on the
+      // same (userId, featureId) slot).
+      const upgraded = fakeSubscription({
+        id: stripeSubscriptionId,
+        userId: bundleUserId,
+        status: 'active',
+        priceIds: [scorePro.stripePriceId, askBase.stripePriceId],
+      })
+      await expect(
+        testPrisma.$transaction(async (tx) => {
+          await handleSubscriptionEvent(tx as unknown as Prisma.TransactionClient, upgraded, 'customer.subscription.updated')
+        }, { timeout: 20000 }),
+      ).resolves.not.toThrow()
+
+      const afterUpgrade = await testPrisma.subscription.findMany({
+        where: { stripeSubscriptionId, tierId: { in: [scorePlus.id, scorePro.id] } },
+      })
+      const plusAfterUpgrade = afterUpgrade.find((r) => r.tierId === scorePlus.id)
+      const proAfterUpgrade = afterUpgrade.find((r) => r.tierId === scorePro.id)
+      expect(plusAfterUpgrade?.status).toBe('canceled')
+      expect(proAfterUpgrade?.status).toBe('active')
+
+      // (b) Downgrade-BACK: pro -> plus. The plus row already exists
+      // (canceled) — this must RESURRECT it by id, not create a duplicate.
+      const downgradedBack = fakeSubscription({
+        id: stripeSubscriptionId,
+        userId: bundleUserId,
+        status: 'active',
+        priceIds: [scorePlus.stripePriceId, askBase.stripePriceId],
+      })
+      await expect(
+        testPrisma.$transaction(async (tx) => {
+          await handleSubscriptionEvent(tx as unknown as Prisma.TransactionClient, downgradedBack, 'customer.subscription.updated')
+        }, { timeout: 20000 }),
+      ).resolves.not.toThrow()
+
+      const scoreSlotRows = await testPrisma.subscription.findMany({
+        where: { stripeSubscriptionId, featureId: scorePlus.featureId },
+      })
+      // Row count on the (userId, featureId) slot did not grow across the
+      // full upgrade -> downgrade-back cycle: still exactly the two tier
+      // slots ever touched (plus, pro), never a third duplicate row.
+      expect(scoreSlotRows).toHaveLength(2)
+
+      const resurrectedPlus = scoreSlotRows.find((r) => r.tierId === scorePlus.id)
+      const proAfterDowngrade = scoreSlotRows.find((r) => r.tierId === scorePro.id)
+      expect(resurrectedPlus?.id).toBe(scorePlusRow.id) // same row, updated back — not a new one
+      expect(resurrectedPlus?.status).toBe('active')
+      expect(proAfterDowngrade?.status).toBe('canceled')
+
+      const askRow = await testPrisma.subscription.findFirstOrThrow({
+        where: { stripeSubscriptionId, tierId: askBase.id },
+      })
+      expect(askRow.status).toBe('active') // untouched line stays active throughout
+    } finally {
+      await teardownDisposableUser(bundleUserId)
+    }
+  })
 })
 
 describe('resolveStripePriceId (accessor)', () => {

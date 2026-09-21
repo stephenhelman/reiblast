@@ -1,6 +1,7 @@
 import Stripe from "stripe";
 import { Prisma } from "@prisma/client";
 import { fund } from "@/lib/engine/funding";
+import { landSubscriptionItem, cancelOrphanSubscriptions } from "@/lib/engine/subscriptionLand";
 import { mapStripeSubscriptionStatus } from "@/lib/webhooks/subscriptionStatus";
 
 type TxClient = Prisma.TransactionClient;
@@ -153,32 +154,21 @@ export async function handleSubscriptionEvent(
   // `items` again, so upserting first would leave its row silently active
   // forever; upserting after frees the (userId, featureId) slot before any
   // same-feature tier change tries to claim it. Rows are kept (never
-  // deleted), same as the .deleted branch.
-  await tx.subscription.updateMany({
-    where: {
-      stripeSubscriptionId: subscription.id,
-      tierId: { notIn: currentTierIds },
-      status: { not: "canceled" },
-    },
-    data: { status: "canceled" },
-  });
+  // deleted), same as the .deleted branch. Scoped by stripeSubscriptionId —
+  // the shared helper (lib/engine/subscriptionLand.ts) the comp caller also
+  // uses, scoped there by {userId, featureId} instead (no stripeSubscriptionId
+  // on a comped sub).
+  await cancelOrphanSubscriptions(tx, { stripeSubscriptionId: subscription.id, excludeTierIds: currentTierIds });
 
-  // Pass 3: upsert current items. find-then-write rather than
-  // tx.subscription.upsert() — no Prisma-recognized compound unique target
-  // exists for the partial index, and this is safe here because the whole
-  // handler already runs inside the outer per-event transaction (the
-  // ProcessedStripeEvent marker), so there's no cross-request race on this
-  // find+write pair.
-  //
-  // The findFirst is deliberately status-agnostic (no `status` in the
-  // where): the per-item unique index (stripeSubscriptionId, tierId) has no
-  // status filter, so a previously-canceled row still occupies that slot. A
-  // downgrade back to a tier held earlier on the SAME subscription (e.g.
-  // plus -> pro -> plus) must RESURRECT that canceled row via update, not
-  // create() a second row for the same slot — create() would trip the
-  // per-item unique index's own P2002.
+  // Pass 3: land current items via the extracted core (status-agnostic
+  // locate + resurrect-or-create — see lib/engine/subscriptionLand.ts for the
+  // full rationale). Safe to call per-item directly rather than
+  // tx.subscription.upsert(): no Prisma-recognized compound unique target
+  // exists for the partial index, and there's no cross-request race here
+  // since the whole handler already runs inside the outer per-event
+  // transaction (the ProcessedStripeEvent marker).
   for (const item of prepared) {
-    const data = {
+    await landSubscriptionItem(tx, {
       userId,
       tierId: item.tierId,
       featureId: item.featureId,
@@ -186,17 +176,7 @@ export async function handleSubscriptionEvent(
       periodStart: item.periodStart,
       periodEnd: item.periodEnd,
       stripeSubscriptionId: subscription.id,
-    };
-
-    const existing = await tx.subscription.findFirst({
-      where: { stripeSubscriptionId: subscription.id, tierId: item.tierId },
     });
-
-    if (existing) {
-      await tx.subscription.update({ where: { id: existing.id }, data });
-    } else {
-      await tx.subscription.create({ data });
-    }
   }
 }
 
