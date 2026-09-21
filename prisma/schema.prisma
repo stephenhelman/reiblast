@@ -752,6 +752,11 @@ enum AdminActionType {
   subscription_comp
   subscription_cancel
   service_cancel
+  // 2026-09-21 — mirrors MemberActionType's directional pair (§6a: admin/
+  // member audit twins label tier-change direction the same way). Appended,
+  // never reordered.
+  subscription_upgrade
+  subscription_downgrade
 }
 
 // Admin write-action audit trail. ADMIN-EYES (never surfaced to members) and
