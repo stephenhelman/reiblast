@@ -22,15 +22,26 @@ export interface AccountMeteredFeature {
 export type AccountSubscriptionKind = "tool_sub";
 export type AccountSubscriptionStatus = "active" | "past_due" | "canceled";
 
+/** The next lower Tier on this line's feature, if one exists — the member's downgrade target. */
+export interface AccountDowngradeTarget {
+  tierId: string;
+  displayName: string;
+  priceCents: number;
+}
+
 export interface AccountSubscription {
   id: string;
   kind: AccountSubscriptionKind;
+  /** Keys the phase-3 break/cancel gate (lib/engine/subscriptionBreak.ts) — one active row per (userId, featureId). */
+  featureId: string;
   /** REItools+ / REIscore Pro / etc. */
   displayName: string;
   /** "REIscore — 175 analyses/mo", one line per covered feature. */
   grants: string[];
   status: AccountSubscriptionStatus;
   periodEnd: string; // ISO
+  /** null if this line is already at its lowest tier (or has no lower tier defined) — no Downgrade control in that case. */
+  downgradeTarget: AccountDowngradeTarget | null;
 }
 
 export type LedgerRowKind = "funding" | "credit-debit" | "allowance-covered";

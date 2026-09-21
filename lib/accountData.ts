@@ -6,7 +6,7 @@
 // LedgerEntry — it was never selectable from this client-eyes surface even
 // before the column moved, and still isn't.
 
-import type { FundingReason, PrismaClient, Subscription, Tier } from "@prisma/client";
+import type { FundingReason, PrismaClient, Subscription, Tier, TierLevel } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { resolveSessionUserId } from "@/lib/toolsSession";
 import { resolveFeature } from "@/lib/engine/resolver";
@@ -16,6 +16,7 @@ import { deriveTierName } from "@/lib/catalogDerive";
 import { mockAccountData } from "@/config/account.mock";
 import type {
   AccountData,
+  AccountDowngradeTarget,
   AccountLedgerRow,
   AccountMeteredFeature,
   AccountSubscription,
@@ -32,23 +33,63 @@ const FUNDING_REASON_LABEL: Record<FundingReason, string> = {
 type FeatureWithSurfaces = { unifiedName: string | null; surfaces: { name: string; unit: string }[] };
 type SubWithTier = Subscription & { tier: Tier & { feature: FeatureWithSurfaces } };
 
+const TIER_LEVEL_ORDER: TierLevel[] = ["base", "plus", "pro"];
+
+// One lower-level Tier per active line's feature, keyed by Subscription.id —
+// phase 3's downgrade target. Fetched in one query per page load (not N+1)
+// against the small set of features the member actually holds.
+async function computeDowngradeTargets(
+  client: PrismaClient,
+  subs: SubWithTier[],
+): Promise<Map<string, AccountDowngradeTarget>> {
+  const featureIds = [...new Set(subs.map((s) => s.featureId))];
+  if (featureIds.length === 0) return new Map();
+
+  const tiers = await client.tier.findMany({ where: { featureId: { in: featureIds } } });
+  const byFeature = new Map<string, Tier[]>();
+  for (const tier of tiers) {
+    const list = byFeature.get(tier.featureId) ?? [];
+    list.push(tier);
+    byFeature.set(tier.featureId, list);
+  }
+
+  const result = new Map<string, AccountDowngradeTarget>();
+  for (const sub of subs) {
+    const currentIdx = TIER_LEVEL_ORDER.indexOf(sub.tier.level);
+    if (currentIdx <= 0) continue; // already at the lowest tier — no downgrade target
+    const lowerLevel = TIER_LEVEL_ORDER[currentIdx - 1];
+    const lowerTier = byFeature.get(sub.featureId)?.find((t) => t.level === lowerLevel);
+    if (!lowerTier) continue;
+
+    const toolName = sub.tier.feature.surfaces[0]?.name ?? sub.tier.feature.unifiedName ?? "Tool";
+    result.set(sub.id, {
+      tierId: lowerTier.id,
+      displayName: deriveTierName(toolName, lowerTier),
+      priceCents: lowerTier.priceCents,
+    });
+  }
+  return result;
+}
+
 // Every row is a tool_sub now — bundle membership is derived (see
 // getCurrentBundleSlug), never stored, so a bundle member shows as their N
 // individual tool_sub lines. AccountData.currentBundleSlug (set in
 // getRealAccountData below) carries the "part of Bundle Pro" grouping
 // separately, for a caller that wants to label these lines together without
 // needing a fake per-row bundle kind.
-function buildSubscription(sub: SubWithTier): AccountSubscription {
+function buildSubscription(sub: SubWithTier, downgradeTarget: AccountDowngradeTarget | null): AccountSubscription {
   const toolName = sub.tier.feature.surfaces[0]?.name ?? sub.tier.feature.unifiedName ?? "Tool";
   const name = deriveTierName(toolName, sub.tier);
   const allowanceText = sub.tier.allowance === null ? "Unlimited" : `${sub.tier.allowance}`;
   return {
     id: sub.id,
     kind: "tool_sub",
+    featureId: sub.featureId,
     displayName: name,
     grants: [`${allowanceText} included this period`],
     status: sub.status,
     periodEnd: sub.periodEnd.toISOString(),
+    downgradeTarget,
   };
 }
 
@@ -164,9 +205,10 @@ async function getRealAccountData(userId: string, client: PrismaClient): Promise
     getCurrentBundleSlug(client, userId),
   ]);
 
-  const [meteredFeatures, ledger] = await Promise.all([
+  const [meteredFeatures, ledger, downgradeTargets] = await Promise.all([
     buildMeteredFeatures(client, userId),
     buildLedger(client, userId),
+    computeDowngradeTargets(client, subs),
   ]);
 
   return {
@@ -178,7 +220,7 @@ async function getRealAccountData(userId: string, client: PrismaClient): Promise
       walletBalance: wallet?.balance ?? 0,
     },
     meteredFeatures,
-    subscriptions: subs.map(buildSubscription),
+    subscriptions: subs.map((sub) => buildSubscription(sub, downgradeTargets.get(sub.id) ?? null)),
     ledger,
   };
 }
