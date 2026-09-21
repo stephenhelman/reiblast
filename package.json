@@ -6,7 +6,12 @@
     "postinstall": "prisma generate",
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test:engine": "vitest run lib/engine/__tests__",
+    "db:status:dev": "PRISMA_TARGET=dev prisma migrate status",
+    "db:status:prod": "PRISMA_TARGET=prod prisma migrate status",
+    "migrate:dev": "PRISMA_TARGET=dev prisma migrate dev",
+    "migrate:deploy:prod": "PRISMA_TARGET=prod prisma migrate deploy"
   },
   "dependencies": {
     "@gohighlevel/api-client": "^3.0.0",
@@ -35,6 +40,7 @@
     "dotenv": "^17.4.2",
     "tailwindcss": "^4",
     "tsx": "^4.22.3",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^2.1.9"
   }
 }
