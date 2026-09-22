@@ -13,12 +13,12 @@
 
 import { prisma } from '@/lib/prisma'
 import { resolveSessionUserId } from '@/lib/toolsSession'
-import { computeBreakDisclosure, breakSubscriptionCore, type ChangeType } from '@/lib/engine/subscriptionBreak'
+import { computeBreakDisclosure, breakSubscriptionCore, type ChangeType, type SurvivorLine } from '@/lib/engine/subscriptionBreak'
 
-export type { ChangeType }
+export type { ChangeType, SurvivorLine }
 
 export type PreviewSubscriptionChangeResult =
-  | { ok: true; breaks: boolean; disclosureText: string }
+  | { ok: true; breaks: boolean; disclosureText: string; survivorLines: SurvivorLine[] }
   | { error: string }
 
 export async function previewSubscriptionChangeAction(
@@ -31,7 +31,7 @@ export async function previewSubscriptionChangeAction(
 
   try {
     const disclosure = await computeBreakDisclosure(prisma, { userId, featureId, changeType, newTierId })
-    return { ok: true, breaks: disclosure.breaks, disclosureText: disclosure.disclosureText }
+    return { ok: true, breaks: disclosure.breaks, disclosureText: disclosure.disclosureText, survivorLines: disclosure.survivorLines }
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Could not preview this change.' }
   }

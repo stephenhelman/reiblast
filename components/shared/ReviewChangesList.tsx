@@ -10,14 +10,41 @@ import { useRouter } from 'next/navigation'
 import Card from '@/components/shared/Card'
 import Button from '@/components/shared/Button'
 import Modal from '@/components/shared/Modal'
+import Tag from '@/components/shared/Tag'
 import { previewProposalAction, commitProposalAction } from '@/app/tools/account/reviewActions'
 import { previewCheckoutConsentAction, commitCheckoutConsentAction } from '@/app/tools/store/checkoutConsentActions'
+import { declineStagedCartAction } from '@/app/tools/store/cartActions'
 import type { ReviewItem } from '@/lib/reviewFeed'
 
 const DIRECTION_LABEL: Record<string, string> = {
   subscription_upgrade: 'upgrade',
   subscription_downgrade: 'downgrade',
   subscription_cancel: 'cancel',
+}
+
+// Slice 2 — change-path proposals have no decline engine core (that's a
+// future schema chat: an append-only rejection back to the admin). They're
+// safe-by-construction without one — nothing is written until the member
+// approves — so "Decline" here is copy + a client-side, session-scoped
+// dismissal, same mechanism as the tools-entry popup's neutral dismissal
+// (components/tools/ReviewChangesPopup.tsx). No DB write, no persistence.
+const DECLINED_KEY = 'reitools:reviewChangesDeclined'
+
+function loadDeclined(): Set<string> {
+  try {
+    const raw = sessionStorage.getItem(DECLINED_KEY)
+    return raw ? new Set(JSON.parse(raw)) : new Set()
+  } catch {
+    return new Set()
+  }
+}
+
+function saveDeclined(ids: Set<string>) {
+  try {
+    sessionStorage.setItem(DECLINED_KEY, JSON.stringify([...ids]))
+  } catch {
+    // sessionStorage unavailable — decline still applies for this mount.
+  }
 }
 
 interface PendingReview {
@@ -45,6 +72,7 @@ export default function ReviewChangesList({ items }: { items: ReviewItem[] }) {
   const [review, setReview] = useState<PendingReview | null>(null)
   const [checkout, setCheckout] = useState<PendingCheckout | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [declined, setDeclined] = useState<Set<string>>(() => loadDeclined())
 
   function openReview(adminActionId: string, featureSlug: string) {
     setReview({ adminActionId, featureSlug, disclosureText: null, error: null })
@@ -86,6 +114,30 @@ export default function ReviewChangesList({ items }: { items: ReviewItem[] }) {
     })
   }
 
+  function declineChange(adminActionId: string) {
+    setDeclined((current) => {
+      const next = new Set(current)
+      next.add(adminActionId)
+      saveDeclined(next)
+      return next
+    })
+    setReview(null)
+  }
+
+  function declineAdd(cartId: string) {
+    startTransition(async () => {
+      const result = await declineStagedCartAction(cartId)
+      if ('error' in result) {
+        setToast(result.error)
+        setTimeout(() => setToast(null), 4000)
+        return
+      }
+      setToast('Declined — the proposal was removed.')
+      setTimeout(() => setToast(null), 4000)
+      router.refresh()
+    })
+  }
+
   function approveCheckout() {
     if (!checkout || !checkout.disclosureText || !checkout.type) return
     const { cartId, disclosureText, type } = checkout
@@ -102,13 +154,15 @@ export default function ReviewChangesList({ items }: { items: ReviewItem[] }) {
     })
   }
 
-  if (items.length === 0) {
+  const visibleItems = items.filter((item) => item.kind !== 'change' || !declined.has(item.adminActionId))
+
+  if (visibleItems.length === 0) {
     return <p className="text-sm text-silver">No changes awaiting your review.</p>
   }
 
   return (
     <div className="flex flex-col gap-3">
-      {items.map((item) => {
+      {visibleItems.map((item) => {
         if (item.kind === 'add') {
           return (
             <Card key={item.cartId} className="text-sm">
@@ -123,9 +177,14 @@ export default function ReviewChangesList({ items }: { items: ReviewItem[] }) {
                       : 'Complete checkout to accept — nothing is charged or activated until you do.'}
                   </p>
                 </div>
-                <Button variant="gold-outline" size="sm" onClick={() => openCheckoutConsent(item.cartId)}>
-                  Complete checkout
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button variant="quiet" size="sm" disabled={isPending} onClick={() => declineAdd(item.cartId)}>
+                    Decline
+                  </Button>
+                  <Button variant="gold-outline" size="sm" onClick={() => openCheckoutConsent(item.cartId)}>
+                    Complete checkout
+                  </Button>
+                </div>
               </div>
             </Card>
           )
@@ -133,11 +192,14 @@ export default function ReviewChangesList({ items }: { items: ReviewItem[] }) {
 
         const direction = DIRECTION_LABEL[item.action] ?? item.action
         return (
-          <Card key={item.adminActionId} className="text-sm">
+          <Card key={item.adminActionId} variant={item.raisesBill ? 'highlight' : 'default'} className="text-sm">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <div className="font-semibold">
-                  An admin proposed a {direction} on this line
+                <div className="flex flex-wrap items-center gap-2">
+                  <div className="font-semibold">
+                    An admin proposed a {direction} on this line
+                  </div>
+                  {item.raisesBill && <Tag tone="gold">Raises your bill</Tag>}
                 </div>
                 <p className="text-silver mt-1">
                   {item.state === 'consented' ? 'You approved this — finishing up.' : 'Review the details and approve to confirm.'}
@@ -165,8 +227,8 @@ export default function ReviewChangesList({ items }: { items: ReviewItem[] }) {
               </div>
             )}
             <div className="flex justify-end gap-3">
-              <Button variant="quiet" size="sm" onClick={() => setReview(null)}>
-                Not now
+              <Button variant="quiet" size="sm" onClick={() => declineChange(review.adminActionId)}>
+                Decline
               </Button>
               <Button variant="gold" size="sm" disabled={!review.disclosureText} loading={isPending} onClick={approve}>
                 Approve &amp; confirm

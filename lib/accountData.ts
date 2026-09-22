@@ -27,6 +27,7 @@ const FUNDING_REASON_LABEL: Record<FundingReason, string> = {
   pack_purchase: "Credit pack purchase",
   tier_grant: "Plan grant",
   bundle_grant: "Bundle grant",
+  admin_grant: "Admin grant",
   adjustment: "Adjustment",
 };
 

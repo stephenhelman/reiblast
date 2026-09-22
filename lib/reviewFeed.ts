@@ -9,6 +9,7 @@
 
 import type { AdminActionType, PrismaClient, Prisma, TierLevel } from "@prisma/client";
 import { projectEntitlementLines, type EntitlementLine } from "@/lib/engine/comp";
+import { computeBreakDisclosure } from "@/lib/engine/subscriptionBreak";
 import { deriveTierName } from "@/lib/catalogDerive";
 
 type ReadClient = PrismaClient | Prisma.TransactionClient;
@@ -29,6 +30,10 @@ export interface AddReviewItem {
   cartId: string;
   adminActionId: string;
   lines: AddReviewLine[];
+  // Add-path items are always a member-consensual add — never a bill-raise
+  // signal (see raisesBill on ChangeReviewItem below). Carried here too so
+  // callers can read item.raisesBill uniformly across the ReviewItem union.
+  raisesBill: false;
 }
 
 // 5a — the member's OWN open cart (source member_self), for the store
@@ -54,12 +59,56 @@ export interface ChangeReviewItem {
   featureId: string;
   before: EntitlementLine[];
   after: EntitlementLine[];
+  // Derived at read time (no persisted column, §6a) — does this proposal
+  // raise the member's recurring cost? A pure upgrade never does. A
+  // downgrade/cancel that breaks the member's bundle qualification reprices
+  // every survivor line to à la carte (§5's retention lock), which can raise
+  // the net bill despite removing/downgrading one line — that's the sharp
+  // case this flags. Reuses computeBreakDisclosure's own breaks/survivorLines
+  // read (§5b) rather than re-deriving pricing here.
+  raisesBill: boolean;
 }
 
 export type ReviewItem = AddReviewItem | ChangeReviewItem;
 
 function entitlementLineMatches(live: EntitlementLine[], target: EntitlementLine): boolean {
   return live.some((l) => l.featureId === target.featureId && l.tierId === target.tierId && l.status === target.status);
+}
+
+// A pure upgrade is never a bill-raise (§5: more allowance, not less) — skip
+// the read entirely. cancel/downgrade reuse computeBreakDisclosure's own
+// `breaks` read (does this change break bundle qualification and reprice the
+// survivors to à la carte?) rather than reimplementing any pricing here.
+// Defensive: this is a read-surface signal, not a write path — if the
+// underlying entitlement state can't support the read (e.g. the line already
+// finalized out from under this candidate), fail closed to neutral rather
+// than throwing on the review feed.
+async function computeRaisesBill(
+  client: ReadClient,
+  params: { userId: string; featureId: string; action: ChangeActionType; after: EntitlementLine[] },
+): Promise<boolean> {
+  if (params.action === "subscription_upgrade") return false;
+  try {
+    if (params.action === "subscription_cancel") {
+      const disclosure = await computeBreakDisclosure(client, {
+        userId: params.userId,
+        featureId: params.featureId,
+        changeType: "cancel",
+      });
+      return disclosure.breaks;
+    }
+    const newTierId = params.after[0]?.tierId;
+    if (!newTierId) return false;
+    const disclosure = await computeBreakDisclosure(client, {
+      userId: params.userId,
+      featureId: params.featureId,
+      changeType: "downgrade",
+      newTierId,
+    });
+    return disclosure.breaks;
+  } catch {
+    return false;
+  }
 }
 
 // (a) open admin_staged Carts — the ADD path. member_self is included for
@@ -86,6 +135,7 @@ async function getOpenAddItems(client: ReadClient, userId: string): Promise<AddR
       state: memberAction ? "consented" : "pending",
       cartId: cart.id,
       adminActionId: cart.adminActionId,
+      raisesBill: false,
       lines: cart.lines
         .filter((l): l is typeof l & { tierId: string; tier: NonNullable<typeof l.tier> } => l.tierId !== null && l.tier !== null)
         .map((l) => ({
@@ -136,24 +186,28 @@ async function getOpenChangeItems(client: ReadClient, userId: string): Promise<C
       const live = await projectEntitlementLines(client, userId, featureId);
       const landed = after.every((line) => entitlementLineMatches(live, line));
       if (landed) continue;
+      const action = candidate.action as ChangeActionType;
       items.push({
         kind: "change",
         state: "consented",
         adminActionId: candidate.id,
-        action: candidate.action as ChangeActionType,
+        action,
         featureId,
         before: candidate.before as unknown as EntitlementLine[],
         after,
+        raisesBill: await computeRaisesBill(client, { userId, featureId, action, after }),
       });
     } else {
+      const action = candidate.action as ChangeActionType;
       items.push({
         kind: "change",
         state: "pending",
         adminActionId: candidate.id,
-        action: candidate.action as ChangeActionType,
+        action,
         featureId,
         before: candidate.before as unknown as EntitlementLine[],
         after,
+        raisesBill: await computeRaisesBill(client, { userId, featureId, action, after }),
       });
     }
   }

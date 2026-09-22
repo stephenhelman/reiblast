@@ -16,10 +16,23 @@ function isBundleFeatureSlug(slug: string): slug is BundleFeatureSlug {
 
 export type ChangeType = 'downgrade' | 'cancel'
 
+// The from side of `delta` is ALWAYS null on this DB-only leg — Subscription
+// stores zero prices (§3) and BundlePriceOverride carries no priceCents
+// column, so the member's actual prior in-bundle rate isn't queryable
+// without a Stripe round-trip (§13's go-live item). `priceCents` is kept
+// as-is (the pre-existing "to" price, unchanged) so no caller of this shape
+// breaks; `delta` is purely additive, the seam a future BundlePriceOverride
+// price cache fills in by populating `from` — nothing else changes then.
+export interface SurvivorLineDelta {
+  to: number
+  from: number | null
+}
+
 export interface SurvivorLine {
   featureSlug: string
   tierLevel: TierLevel
   priceCents: number
+  delta: SurvivorLineDelta
 }
 
 export interface BreakDisclosure {
@@ -99,7 +112,12 @@ export async function computeBreakDisclosure(
     const sub = activeSubs.find((s) => s.tier.feature.slug === slug)
     if (!sub) continue
     const tier = await client.tier.findUniqueOrThrow({ where: { featureId_level: { featureId: sub.featureId, level } } })
-    survivorLines.push({ featureSlug: slug, tierLevel: level, priceCents: tier.priceCents })
+    survivorLines.push({
+      featureSlug: slug,
+      tierLevel: level,
+      priceCents: tier.priceCents,
+      delta: { to: tier.priceCents, from: null },
+    })
   }
 
   const lineText = survivorLines

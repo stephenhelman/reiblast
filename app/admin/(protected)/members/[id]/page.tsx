@@ -3,9 +3,11 @@ import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getAdminMemberDetail, type PlanFitData } from '@/lib/adminMemberDetail'
 import { getSubscribableCatalog } from '@/lib/adminSubscribableCatalog'
+import { getGrantCompContext, getRecentGrantCompActions } from '@/lib/adminGrantComp'
 import { formatCents } from '@/lib/money'
 import MemberToolUsage from '@/components/admin/MemberToolUsage'
 import MemberSubscriptionsPanel from '@/components/admin/MemberSubscriptionsPanel'
+import MemberGrantCompPanel from '@/components/admin/MemberGrantCompPanel'
 
 export const dynamic = 'force-dynamic'
 
@@ -62,7 +64,12 @@ function PlanFitChart({ planFit }: { planFit: PlanFitData }) {
 }
 
 export default async function AdminMemberDetailPage({ params }: { params: { id: string } }) {
-  const [data, catalog] = await Promise.all([getAdminMemberDetail(params.id, prisma), getSubscribableCatalog(prisma)])
+  const [data, catalog, grantCompContext, recentGrantCompActions] = await Promise.all([
+    getAdminMemberDetail(params.id, prisma),
+    getSubscribableCatalog(prisma),
+    getGrantCompContext(prisma, params.id),
+    getRecentGrantCompActions(prisma, params.id),
+  ])
   if (!data) notFound()
 
   return (
@@ -116,14 +123,11 @@ export default async function AdminMemberDetailPage({ params }: { params: { id: 
         <div className="rounded-xl border border-border-default bg-surface p-5">
           <div className="mb-4 flex items-center justify-between">
             <span className="text-sm font-semibold text-white">Wallet</span>
-            <button type="button" disabled className="rounded-md bg-gold px-3 py-1.5 text-xs font-semibold text-black disabled:cursor-not-allowed disabled:opacity-50">
-              + Add credits
-            </button>
           </div>
           <div className={`font-display text-3xl font-bold tabular-nums ${data.wallet.balance < 0 ? 'text-red' : 'text-white'}`}>
             {data.wallet.balance} <span className="text-[15px] font-normal text-white/40">cr</span>
           </div>
-          <div className="mt-1 text-[11.5px] text-white/40">shared credit balance</div>
+          <div className="mt-1 text-[11.5px] text-white/40">shared credit balance — grant/comp below</div>
         </div>
 
         <MemberSubscriptionsPanel
@@ -134,6 +138,14 @@ export default async function AdminMemberDetailPage({ params }: { params: { id: 
           catalog={catalog}
         />
       </div>
+
+      <MemberGrantCompPanel
+        memberUserId={data.id}
+        memberName={data.name}
+        context={grantCompContext}
+        recentActions={recentGrantCompActions}
+        catalog={catalog}
+      />
 
       <div className="rounded-xl border border-border-default bg-surface p-5">
         <div className="mb-4 text-sm font-semibold text-white">Money · all time</div>

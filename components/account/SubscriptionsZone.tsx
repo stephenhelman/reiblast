@@ -11,6 +11,7 @@ import {
   previewSubscriptionChangeAction,
   commitSubscriptionChangeAction,
   type ChangeType,
+  type SurvivorLine,
 } from '@/app/tools/account/breakActions'
 import type { AccountSubscription } from '@/types/account'
 
@@ -49,6 +50,7 @@ interface PendingChange {
   /** null while the preview call is in flight. */
   disclosureText: string | null
   breaks: boolean | null
+  survivorLines: SurvivorLine[]
   error: string | null
 }
 
@@ -69,6 +71,7 @@ export default function SubscriptionsZone({ subscriptions, currentBundleSlug }: 
       targetDisplayName,
       disclosureText: null,
       breaks: null,
+      survivorLines: [],
       error: null,
     }
     setPending(next)
@@ -77,7 +80,7 @@ export default function SubscriptionsZone({ subscriptions, currentBundleSlug }: 
       setPending((current) => {
         if (!current || current.featureId !== next.featureId || current.changeType !== next.changeType) return current
         if ('error' in result) return { ...current, error: result.error }
-        return { ...current, disclosureText: result.disclosureText, breaks: result.breaks }
+        return { ...current, disclosureText: result.disclosureText, breaks: result.breaks, survivorLines: result.survivorLines }
       })
     })
   }
@@ -198,6 +201,29 @@ export default function SubscriptionsZone({ subscriptions, currentBundleSlug }: 
                 }`}
               >
                 {pending.breaks && <div className="font-semibold text-gold mb-1">This breaks your current bundle.</div>}
+                {pending.breaks && pending.survivorLines.length > 0 && (
+                  <ul className="flex flex-col gap-1 mb-2">
+                    {pending.survivorLines.map((line) => (
+                      <li key={line.featureSlug} className="flex items-center justify-between text-sm">
+                        <span className="text-silver">
+                          {line.featureSlug} ({line.tierLevel})
+                        </span>
+                        <span>
+                          {/* Delta-ready: the from slot exists and renders whenever a
+                              real prior rate is available. It's always null on this
+                              DB-only leg (§13 go-live item) — nothing here changes
+                              when that cache lands, only this condition starts firing. */}
+                          {line.delta.from !== null && (
+                            <span className="line-through text-silver/50 mr-1.5">
+                              ${(line.delta.from / 100).toFixed(2)}
+                            </span>
+                          )}
+                          <span className="text-gold font-medium">${(line.delta.to / 100).toFixed(2)}/mo</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 <div className="text-silver leading-relaxed">{pending.disclosureText}</div>
               </div>
             )}
