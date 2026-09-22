@@ -102,6 +102,13 @@ describe('subscriptionBreak (phase 3 — member break/cancel gate)', () => {
       expect(consent.type).toBe('subscription_downgrade')
       expect(consent.disclosureText).toBe(disclosure.disclosureText)
       expect(typeof consent.timestamp).toBe('string')
+
+      // Member-initiated break still produces exactly ONE MemberAction,
+      // targetType 'subscription' — behaviorally unchanged by the
+      // entitlement-write/consent-write split (lib/engine/subscriptionTransition.ts).
+      const allMemberActions = await testPrisma.memberAction.findMany({ where: { userId } })
+      expect(allMemberActions).toHaveLength(1)
+      expect(allMemberActions[0]?.targetType).toBe('subscription')
     })
   })
 
@@ -148,6 +155,10 @@ describe('subscriptionBreak (phase 3 — member break/cancel gate)', () => {
       expect(memberAction.targetId).toBe(askRow.id)
       const consent = memberAction.consent as { disclosureText: string }
       expect(consent.disclosureText).toBe(disclosure.disclosureText)
+
+      const allMemberActions = await testPrisma.memberAction.findMany({ where: { userId } })
+      expect(allMemberActions).toHaveLength(1)
+      expect(allMemberActions[0]?.targetType).toBe('subscription')
     })
   })
 

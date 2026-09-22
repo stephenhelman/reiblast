@@ -3,13 +3,17 @@ import { landSubscriptionItem, cancelOrphanSubscriptions } from './subscriptionL
 
 type TxClient = Prisma.TransactionClient
 
-interface EntitlementLine {
+export interface EntitlementLine {
   featureId: string
   tierId: string
   status: string
 }
 
-async function projectEntitlementLines(tx: TxClient, userId: string, featureId: string): Promise<EntitlementLine[]> {
+// Shared projection — the Subscription-row shape every AdminAction
+// before/after uses (§6a: "the same projection read off Subscription rows
+// ... NOT a diff"). Exported so other admin-write cores (lib/engine/
+// adminProposals.ts) reuse this exact read instead of re-deriving it.
+export async function projectEntitlementLines(tx: TxClient, userId: string, featureId: string): Promise<EntitlementLine[]> {
   const rows = await tx.subscription.findMany({ where: { userId, featureId } })
   return rows.map((r) => ({ featureId: r.featureId, tierId: r.tierId, status: r.status }))
 }

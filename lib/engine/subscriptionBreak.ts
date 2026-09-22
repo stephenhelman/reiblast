@@ -1,6 +1,6 @@
 import { MemberActionType, Prisma, PrismaClient, TierLevel } from '@prisma/client'
 import { qualifyBundle, type QualifyingTiers } from '@/lib/bundleQualify'
-import { landSubscriptionItem, cancelOrphanSubscriptions } from './subscriptionLand'
+import { applySubscriptionTransition } from './subscriptionTransition'
 
 type TxClient = Prisma.TransactionClient
 type ReadClient = PrismaClient | TxClient
@@ -127,11 +127,15 @@ function memberActionTypeFor(changeType: ChangeType): MemberActionType {
 
 // The write core — mirrors lib/engine/comp.ts's shape (plain args, tx
 // NON-OPTIONAL: consent + effect must commit atomically, so this never opens
-// its own transaction). Does the §3-ordered entitlement write (reusing the
-// shared cores, never reimplemented) + the MemberAction write, nothing else.
-// disclosureText is a REQUIRED input — this function does not compute it;
-// the caller (server action) already showed the member this exact text via
-// computeBreakDisclosure and is passing through what was approved.
+// its own transaction). Calls applySubscriptionTransition for the §3-ordered
+// entitlement write (extracted out — see lib/engine/subscriptionTransition.ts
+// for why: entitlement-write and consent-write used to be welded here, which
+// forced Phase 4's finalize into either a double MemberAction write or a
+// bypass around this core for upgrades) + writes its OWN single MemberAction,
+// nothing else. disclosureText is a REQUIRED input — this function does not
+// compute it; the caller (server action) already showed the member this
+// exact text via computeBreakDisclosure and is passing through what was
+// approved. External behavior is UNCHANGED from before the split.
 export async function breakSubscriptionCore(
   tx: TxClient,
   params: {
@@ -142,55 +146,12 @@ export async function breakSubscriptionCore(
     disclosureText: string
   },
 ): Promise<{ subscriptionId: string; memberActionId: string }> {
-  const currentRow = await tx.subscription.findFirst({
-    where: { userId: params.userId, featureId: params.featureId, status: 'active' },
+  const { subscriptionId } = await applySubscriptionTransition(tx, {
+    userId: params.userId,
+    featureId: params.featureId,
+    changeType: params.changeType,
+    newTierId: params.newTierId,
   })
-  if (!currentRow) {
-    throw new Error(`breakSubscriptionCore: no active subscription for user ${params.userId} on feature ${params.featureId}`)
-  }
-
-  let landedRowId: string
-
-  if (params.changeType === 'downgrade') {
-    if (!params.newTierId) throw new Error('breakSubscriptionCore: downgrade requires newTierId')
-
-    // §3 ordering (load-bearing, do not reorder): cancel BEFORE upsert — a
-    // same-feature tier change against the partial (userId, featureId)
-    // WHERE status='active' index trips P2002 if the new-tier row is
-    // inserted while the old-tier row is still active.
-    await cancelOrphanSubscriptions(tx, {
-      userId: params.userId,
-      featureId: params.featureId,
-      excludeTierId: params.newTierId,
-    })
-
-    await landSubscriptionItem(tx, {
-      userId: params.userId,
-      tierId: params.newTierId,
-      featureId: params.featureId,
-      status: 'active',
-      periodStart: currentRow.periodStart,
-      periodEnd: currentRow.periodEnd,
-      stripeSubscriptionId: currentRow.stripeSubscriptionId,
-    })
-
-    const landed = await tx.subscription.findFirstOrThrow({
-      where: { stripeSubscriptionId: currentRow.stripeSubscriptionId, tierId: params.newTierId },
-    })
-    landedRowId = landed.id
-  } else {
-    // cancel: no survivor tier on this feature slot. Reuse the shared
-    // cancel-orphan helper (never reimplemented) with a sentinel
-    // excludeTierId that can never match a real Tier row, so every active
-    // row on this (userId, featureId) slot — exactly one, per
-    // replace-not-stack — is canceled and nothing is landed.
-    await cancelOrphanSubscriptions(tx, {
-      userId: params.userId,
-      featureId: params.featureId,
-      excludeTierId: '__no_survivor_tier__',
-    })
-    landedRowId = currentRow.id
-  }
 
   const action = memberActionTypeFor(params.changeType)
 
@@ -199,7 +160,7 @@ export async function breakSubscriptionCore(
       userId: params.userId,
       action,
       targetType: 'subscription',
-      targetId: landedRowId,
+      targetId: subscriptionId,
       consent: {
         timestamp: new Date().toISOString(),
         disclosureText: params.disclosureText,
@@ -209,5 +170,5 @@ export async function breakSubscriptionCore(
     },
   })
 
-  return { subscriptionId: landedRowId, memberActionId: memberAction.id }
+  return { subscriptionId, memberActionId: memberAction.id }
 }
