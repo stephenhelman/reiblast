@@ -757,6 +757,12 @@ enum AdminActionType {
   // never reordered.
   subscription_upgrade
   subscription_downgrade
+  // 2026-09-22 (§5a) — an admin replacing a member's open member_self cart to
+  // stage a proposal, with the member's verbal consent on a call. Distinct
+  // from cart_stage (which only creates a staged cart with no prior cart to
+  // destroy) so overrides are queryable as their own category. Appended,
+  // never reordered.
+  cart_override
 }
 
 // Admin write-action audit trail. ADMIN-EYES (never surfaced to members) and
