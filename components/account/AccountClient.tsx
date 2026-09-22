@@ -9,13 +9,17 @@ import { buildStoreLink } from '@/lib/storeLink'
 import WalletZone from '@/components/account/WalletZone'
 import SubscriptionsZone from '@/components/account/SubscriptionsZone'
 import LedgerZone from '@/components/account/LedgerZone'
+import ReviewZone from '@/components/account/ReviewZone'
 import type { AccountData } from '@/types/account'
+import type { ReviewItem } from '@/lib/reviewFeed'
 
 interface AccountClientProps {
   account: AccountData
+  /** Phase 4 — open admin proposals awaiting this member (getOpenChangesForMember). */
+  openChanges: ReviewItem[]
 }
 
-export default function AccountClient({ account }: AccountClientProps) {
+export default function AccountClient({ account, openChanges }: AccountClientProps) {
   return (
     <main className="min-h-screen bg-black text-white">
       <AppHeader
@@ -44,6 +48,7 @@ export default function AccountClient({ account }: AccountClientProps) {
           <p className="text-gray text-sm mt-1.25">Your balance, plans, and transaction history.</p>
         </div>
 
+        <ReviewZone items={openChanges} />
         <WalletZone member={account.member} meteredFeatures={account.meteredFeatures} />
         <SubscriptionsZone subscriptions={account.subscriptions} currentBundleSlug={account.currentBundleSlug} />
         <LedgerZone ledger={account.ledger} />

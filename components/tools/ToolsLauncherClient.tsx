@@ -7,17 +7,21 @@ import AppHeader from '@/components/shared/AppHeader'
 import Button from '@/components/shared/Button'
 import ToolCard from '@/components/tools/ToolCard'
 import ChoiceModal from '@/components/tools/ChoiceModal'
+import ReviewChangesPopup from '@/components/tools/ReviewChangesPopup'
 import { buildStoreLink } from '@/lib/storeLink'
 import { portalBrand } from '@/lib/brandAssets'
 import type { LauncherMember, LauncherTool } from '@/types/launcher'
+import type { ReviewItem } from '@/lib/reviewFeed'
 
 interface ToolsLauncherClientProps {
   member: LauncherMember
   tools: LauncherTool[]
+  /** Phase 4 — open admin proposals awaiting this member, server-fetched (getOpenChangesForMember). Drives the entry popup below. */
+  openChanges: ReviewItem[]
 }
 
 /** Presentational shell + interaction state (choice modal). Data is resolved server-side by app/tools/page.tsx via getLauncherData(). */
-export default function ToolsLauncherClient({ member, tools }: ToolsLauncherClientProps) {
+export default function ToolsLauncherClient({ member, tools, openChanges }: ToolsLauncherClientProps) {
   const [choiceTool, setChoiceTool] = useState<LauncherTool | null>(null)
   const firstName = member.name.split(' ')[0]
 
@@ -57,6 +61,8 @@ export default function ToolsLauncherClient({ member, tools }: ToolsLauncherClie
       {choiceTool && (
         <ChoiceModal open={!!choiceTool} onClose={() => setChoiceTool(null)} tool={choiceTool} />
       )}
+
+      <ReviewChangesPopup items={openChanges} />
     </main>
   )
 }
