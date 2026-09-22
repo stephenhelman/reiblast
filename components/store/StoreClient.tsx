@@ -82,6 +82,13 @@ export default function StoreClient({ store, arrival, stripePublishableKey, cart
   const [reminders, setReminders] = useState(cartReminders)
   const [remindersDismissed, setRemindersDismissed] = useState(false)
   const [proposalBlocked, setProposalBlocked] = useState<{ mode: 'subscription' | 'credit_pack'; cartId: string } | null>(null)
+  // The DB cart ids the live write-through last synced to — 5b's checkout
+  // consent flow needs the real cartId (its disclosure + MemberAction both
+  // key off it), never a client-only concept.
+  const [dbCartIds, setDbCartIds] = useState<{ subscription: string | null; creditPack: string | null }>({
+    subscription: null,
+    creditPack: null,
+  })
 
   const arrivalTool = arrival.from ? tools.find((t) => t.slug === arrival.from) : undefined
   const showArrival = !!arrivalTool && !arrivalDismissed
@@ -116,6 +123,11 @@ export default function StoreClient({ store, arrival, stripePublishableKey, cart
       if ('blocked' in subResult) setProposalBlocked({ mode: 'subscription', cartId: subResult.cartId })
       else if ('blocked' in packResult) setProposalBlocked({ mode: 'credit_pack', cartId: packResult.cartId })
       else setProposalBlocked(null)
+
+      setDbCartIds({
+        subscription: 'ok' in subResult ? subResult.cartId : null,
+        creditPack: 'ok' in packResult ? packResult.cartId : null,
+      })
     }
     sync()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -145,6 +157,16 @@ export default function StoreClient({ store, arrival, stripePublishableKey, cart
     const { cartId } = proposalBlocked
     void declineStagedCartAction(cartId).then(() => setProposalBlocked(null))
   }
+  // Cart is single-intent by construction (checkout already enforces this) —
+  // the DB cartId 5b's consent flow needs is whichever mode the local items
+  // actually are.
+  const cartMode: 'subscription' | 'credit_pack' | null = cart.some((i) => i.kind === 'credits')
+    ? 'credit_pack'
+    : cart.some((i) => i.kind === 'sub')
+      ? 'subscription'
+      : null
+  const activeCartId = cartMode === 'subscription' ? dbCartIds.subscription : cartMode === 'credit_pack' ? dbCartIds.creditPack : null
+
   const applySwap = (bundle: StoreBundle) => {
     setCart((prev) => [
       ...prev.filter((i) => !i.featureSlug || !bundle.coversFeatureSlugs.includes(i.featureSlug)),
@@ -296,6 +318,7 @@ export default function StoreClient({ store, arrival, stripePublishableKey, cart
         open={cartOpen}
         onClose={() => setCartOpen(false)}
         cart={cart}
+        cartId={activeCartId}
         bundles={bundles}
         tools={tools}
         packs={packs}

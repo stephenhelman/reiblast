@@ -2,10 +2,11 @@
 
 import { useState } from "react";
 import Image from "next/image";
+import Modal from "@/components/shared/Modal";
 import Drawer from "@/components/shared/Drawer";
 import Button from "@/components/shared/Button";
 import { formatCents } from "@/lib/money";
-import { startCheckoutAction } from "@/app/tools/store/actions";
+import { previewCheckoutConsentAction, commitCheckoutConsentAction } from "@/app/tools/store/checkoutConsentActions";
 import CheckoutForm from "./CheckoutForm";
 import BundleNudgeModal from "./BundleNudgeModal";
 import { computeBundleNudge } from "./bundleNudge";
@@ -27,6 +28,8 @@ interface CartDrawerProps {
   open: boolean;
   onClose: () => void;
   cart: CartItem[];
+  /** 5b — the DB Cart id the live write-through last synced to for this cart's mode; the consent flow keys off THIS, not local state. Null until the write-through catches up. */
+  cartId: string | null;
   bundles: StoreBundle[];
   tools: StoreTool[];
   packs: StorePack[];
@@ -46,6 +49,7 @@ export default function CartDrawer({
   open,
   onClose,
   cart,
+  cartId,
   bundles,
   tools,
   packs,
@@ -58,6 +62,10 @@ export default function CartDrawer({
   const [checkoutLoading, setCheckoutLoading] = useState(false);
   const [clientSecret, setClientSecret] = useState<string | null>(null);
   const [nudgeOpen, setNudgeOpen] = useState(false);
+  // 5b — consent-before-checkout. null while closed; set once the preview
+  // call returns, so the modal can show "computing…" then the real text.
+  const [consentPreview, setConsentPreview] = useState<{ disclosureText: string; type: "subscription_add" | "credit_pack_purchase" } | null>(null);
+  const [consentOpen, setConsentOpen] = useState(false);
 
   // A bundle cart item fans out to N tool_sub lines (never one Price) —
   // checkout needs every line's own priceId, not the group item's (which is
@@ -66,17 +74,40 @@ export default function CartDrawer({
   const allItemsCheckoutEligible =
     cart.length > 0 && priceIds.every((id): id is string => !!id);
 
-  const handleCheckout = async () => {
+  // Opens the consent modal and previews the disclosure — NO write yet
+  // (same rule as every other consent gate: approval is the consent event,
+  // not modal-open). cartId comes from the live write-through (5a); if it
+  // hasn't caught up yet, surface that rather than minting without consent.
+  const handleCheckoutClick = async () => {
     if (!allItemsCheckoutEligible) return;
+    if (!cartId) {
+      setCheckoutError("Still syncing your cart — try again in a moment.");
+      return;
+    }
+    setCheckoutError(null);
+    setConsentPreview(null);
+    setConsentOpen(true);
+    const result = await previewCheckoutConsentAction(cartId);
+    if ("error" in result) {
+      setCheckoutError(result.error);
+      setConsentOpen(false);
+      return;
+    }
+    setConsentPreview({ disclosureText: result.disclosureText, type: result.type });
+  };
+
+  const handleApproveConsent = async () => {
+    if (!cartId || !consentPreview) return;
     setCheckoutLoading(true);
     setCheckoutError(null);
-    const result = await startCheckoutAction(priceIds as string[]);
+    const result = await commitCheckoutConsentAction(cartId, consentPreview.disclosureText, consentPreview.type);
     setCheckoutLoading(false);
+    setConsentOpen(false);
     if ("error" in result) {
       setCheckoutError(result.error);
       return;
     }
-    setClientSecret(result.clientSecret);
+    if (result.clientSecret) setClientSecret(result.clientSecret);
     // One dialog on screen at a time — the checkout modal takes over from here
     // (it's portaled independently, so it stays mounted after this closes).
     onClose();
@@ -231,13 +262,36 @@ export default function CartDrawer({
               size="sm"
               className="w-full"
               disabled={!allItemsCheckoutEligible || checkoutLoading}
-              onClick={handleCheckout}
+              onClick={handleCheckoutClick}
             >
               {checkoutLoading ? "Starting checkout…" : "Checkout"}
             </Button>
           </div>
         )}
       </Drawer>
+
+      {/* 5b — consent-before-checkout. Approval is the consent event: the
+          MemberAction commits on approve, THEN the mint path runs. */}
+      <Modal open={consentOpen} onClose={() => setConsentOpen(false)}>
+        <h2 className="text-lg font-semibold mb-1">Confirm your purchase</h2>
+        {checkoutError && <p className="text-[12.5px] text-red mb-3">{checkoutError}</p>}
+        {!consentPreview && !checkoutError && (
+          <p className="text-sm text-silver mb-4">Computing what you're about to approve…</p>
+        )}
+        {consentPreview && (
+          <div className="rounded-lg border border-gold bg-gold/5 p-3 mb-4 text-sm text-silver leading-relaxed">
+            {consentPreview.disclosureText}
+          </div>
+        )}
+        <div className="flex justify-end gap-3">
+          <button onClick={() => setConsentOpen(false)} className="text-sm text-gray hover:text-white px-3 py-2">
+            Never mind
+          </button>
+          <Button variant="gold" size="sm" disabled={!consentPreview || checkoutLoading} loading={checkoutLoading} onClick={handleApproveConsent}>
+            Approve &amp; checkout
+          </Button>
+        </div>
+      </Modal>
 
       {clientSecret && (
         <CheckoutForm

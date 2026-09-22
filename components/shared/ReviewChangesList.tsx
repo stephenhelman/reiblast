@@ -6,13 +6,12 @@
 // so the preview/commit logic lives exactly once.
 
 import { useState, useTransition } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import Card from '@/components/shared/Card'
 import Button from '@/components/shared/Button'
 import Modal from '@/components/shared/Modal'
-import { buildStoreLink } from '@/lib/storeLink'
 import { previewProposalAction, commitProposalAction } from '@/app/tools/account/reviewActions'
+import { previewCheckoutConsentAction, commitCheckoutConsentAction } from '@/app/tools/store/checkoutConsentActions'
 import type { ReviewItem } from '@/lib/reviewFeed'
 
 const DIRECTION_LABEL: Record<string, string> = {
@@ -28,10 +27,23 @@ interface PendingReview {
   error: string | null
 }
 
+// 5b, PATH 2 — completing an admin-staged cart IS consent by construction:
+// the member checking out the cart themselves is the approval. Same
+// preview-then-approve shape as the change-path review above, keyed by
+// cartId instead of adminActionId, and the consent write (targetType:'Cart')
+// is a different carrier — see lib/engine/checkoutConsent.ts.
+interface PendingCheckout {
+  cartId: string
+  disclosureText: string | null
+  type: 'subscription_add' | 'credit_pack_purchase' | null
+  error: string | null
+}
+
 export default function ReviewChangesList({ items }: { items: ReviewItem[] }) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
   const [review, setReview] = useState<PendingReview | null>(null)
+  const [checkout, setCheckout] = useState<PendingCheckout | null>(null)
   const [toast, setToast] = useState<string | null>(null)
 
   function openReview(adminActionId: string, featureSlug: string) {
@@ -62,6 +74,34 @@ export default function ReviewChangesList({ items }: { items: ReviewItem[] }) {
     })
   }
 
+  function openCheckoutConsent(cartId: string) {
+    setCheckout({ cartId, disclosureText: null, type: null, error: null })
+    startTransition(async () => {
+      const result = await previewCheckoutConsentAction(cartId)
+      setCheckout((current) => {
+        if (!current || current.cartId !== cartId) return current
+        if ('error' in result) return { ...current, error: result.error }
+        return { ...current, disclosureText: result.disclosureText, type: result.type }
+      })
+    })
+  }
+
+  function approveCheckout() {
+    if (!checkout || !checkout.disclosureText || !checkout.type) return
+    const { cartId, disclosureText, type } = checkout
+    startTransition(async () => {
+      const result = await commitCheckoutConsentAction(cartId, disclosureText, type)
+      if ('error' in result) {
+        setCheckout((current) => (current ? { ...current, error: result.error } : current))
+        return
+      }
+      setCheckout(null)
+      setToast('Approved — checkout confirmed.')
+      setTimeout(() => setToast(null), 4000)
+      router.refresh()
+    })
+  }
+
   if (items.length === 0) {
     return <p className="text-sm text-silver">No changes awaiting your review.</p>
   }
@@ -83,11 +123,9 @@ export default function ReviewChangesList({ items }: { items: ReviewItem[] }) {
                       : 'Complete checkout to accept — nothing is charged or activated until you do.'}
                   </p>
                 </div>
-                <Link href={buildStoreLink({ from: 'review-feed', intent: 'addon' })}>
-                  <Button variant="gold-outline" size="sm">
-                    Go to checkout
-                  </Button>
-                </Link>
+                <Button variant="gold-outline" size="sm" onClick={() => openCheckoutConsent(item.cartId)}>
+                  Complete checkout
+                </Button>
               </div>
             </Card>
           )
@@ -132,6 +170,32 @@ export default function ReviewChangesList({ items }: { items: ReviewItem[] }) {
               </Button>
               <Button variant="gold" size="sm" disabled={!review.disclosureText} loading={isPending} onClick={approve}>
                 Approve &amp; confirm
+              </Button>
+            </div>
+          </>
+        )}
+      </Modal>
+
+      {/* 5b, PATH 2 — completing the staged cart IS consent by construction. */}
+      <Modal open={checkout !== null} onClose={() => setCheckout(null)}>
+        {checkout && (
+          <>
+            <h2 className="text-lg font-semibold mb-1">Confirm this checkout</h2>
+            {checkout.error && <div className="rounded-lg border border-red bg-red/10 text-red text-sm p-3 mb-4">{checkout.error}</div>}
+            {!checkout.disclosureText && !checkout.error && (
+              <div className="text-sm text-silver mb-4">Computing what you're about to approve…</div>
+            )}
+            {checkout.disclosureText && (
+              <div className="rounded-lg border border-gold bg-gold/5 p-3 mb-4 text-sm text-silver leading-relaxed">
+                {checkout.disclosureText}
+              </div>
+            )}
+            <div className="flex justify-end gap-3">
+              <Button variant="quiet" size="sm" onClick={() => setCheckout(null)}>
+                Not now
+              </Button>
+              <Button variant="gold" size="sm" disabled={!checkout.disclosureText} loading={isPending} onClick={approveCheckout}>
+                Approve &amp; checkout
               </Button>
             </div>
           </>
