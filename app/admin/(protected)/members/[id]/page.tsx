@@ -2,8 +2,10 @@ import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { getAdminMemberDetail, type PlanFitData } from '@/lib/adminMemberDetail'
+import { getSubscribableCatalog } from '@/lib/adminSubscribableCatalog'
 import { formatCents } from '@/lib/money'
 import MemberToolUsage from '@/components/admin/MemberToolUsage'
+import MemberSubscriptionsPanel from '@/components/admin/MemberSubscriptionsPanel'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,7 +62,7 @@ function PlanFitChart({ planFit }: { planFit: PlanFitData }) {
 }
 
 export default async function AdminMemberDetailPage({ params }: { params: { id: string } }) {
-  const data = await getAdminMemberDetail(params.id, prisma)
+  const [data, catalog] = await Promise.all([getAdminMemberDetail(params.id, prisma), getSubscribableCatalog(prisma)])
   if (!data) notFound()
 
   return (
@@ -124,36 +126,13 @@ export default async function AdminMemberDetailPage({ params }: { params: { id: 
           <div className="mt-1 text-[11.5px] text-white/40">shared credit balance</div>
         </div>
 
-        <div className="rounded-xl border border-border-default bg-surface p-5">
-          <div className="mb-4 flex items-center justify-between">
-            <span className="text-sm font-semibold text-white">Subscriptions</span>
-            <button type="button" disabled className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-white/40 disabled:cursor-not-allowed disabled:opacity-50">
-              Manage
-            </button>
-          </div>
-          <div className="space-y-2.5">
-            {data.subs.length === 0 && <p className="text-sm text-white/40">No active subscriptions.</p>}
-            {data.subs.map((s) => (
-              <div key={s.featureSlug} className="flex items-center justify-between rounded-lg border border-border-default bg-black px-3 py-2.5">
-                <img src={s.wordmark} alt={s.displayName} className="h-4.5 w-auto" />
-                <div className="flex items-center gap-2">
-                  <span className="rounded-md border border-border-default bg-white/5 px-2 py-0.5 text-[10.5px] font-semibold text-white/70">{s.displayName}</span>
-                  <span className="text-xs font-semibold tabular-nums text-white/70">{formatCents(s.priceCents)}/mo</span>
-                </div>
-              </div>
-            ))}
-            {data.bundleSlug && (
-              <span className="inline-block rounded-md border border-gold-hover/60 bg-gold/10 px-2 py-0.5 text-[10.5px] font-semibold text-gold">
-                {BUNDLE_LABEL[data.bundleSlug]}
-              </span>
-            )}
-          </div>
-          <div className="mt-3 flex justify-end">
-            <button type="button" disabled className="rounded-md border border-border-default px-3 py-1.5 text-xs font-semibold text-white/40 disabled:cursor-not-allowed disabled:opacity-50">
-              + Add subscription
-            </button>
-          </div>
-        </div>
+        <MemberSubscriptionsPanel
+          memberUserId={data.id}
+          bundleSlug={data.bundleSlug}
+          bundleLabel={data.bundleSlug ? BUNDLE_LABEL[data.bundleSlug] : null}
+          subs={data.subs}
+          catalog={catalog}
+        />
       </div>
 
       <div className="rounded-xl border border-border-default bg-surface p-5">

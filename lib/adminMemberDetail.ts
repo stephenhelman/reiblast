@@ -50,7 +50,16 @@ function deriveStatus(userStatus: string, subStatuses: string[]): MemberStatus {
 
 export type FlagDetail = { flag: MemberFlag; title: string; detail: string };
 
-export type SubRow = { featureSlug: string; displayName: string; tierLevel: TierLevel; priceCents: number; wordmark: string };
+export type SubRow = {
+  featureSlug: string;
+  /** Keys the Phase 3.5 admin proposal cores (lib/engine/adminProposals.ts) — one active row per (userId, featureId). */
+  featureId: string;
+  tierId: string;
+  displayName: string;
+  tierLevel: TierLevel;
+  priceCents: number;
+  wordmark: string;
+};
 
 export type LedgerRow = {
   id: string;
@@ -171,6 +180,8 @@ export async function getAdminMemberDetail(userId: string, db: PrismaClient = de
     .filter((s) => s.status === "active")
     .map((s) => ({
       featureSlug: s.tier.feature.slug,
+      featureId: s.featureId,
+      tierId: s.tierId,
       displayName: deriveTierName(s.tier.feature.unifiedName ?? s.tier.feature.slug, s.tier),
       tierLevel: s.tier.level,
       priceCents: s.tier.priceCents,
