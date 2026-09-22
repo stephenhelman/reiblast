@@ -81,6 +81,7 @@ async function buildStoreBundle(bundle: BundleWithCoverage): Promise<StoreBundle
     bundle.tiers.map(async (bt) => ({
       featureSlug: bt.tier.feature.slug,
       level: bt.tier.level,
+      tierId: bt.tier.id,
       priceCents: bt.tier.priceCents,
       stripePriceId: await resolveStripePriceId(prisma, {
         featureId: bt.tier.featureId,

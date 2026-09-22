@@ -148,8 +148,8 @@ export const mockStoreData: StoreData = {
       level: "plus",
       priceCents: 4600,
       lines: [
-        { featureSlug: "score", level: "plus", priceCents: 2900, stripePriceId: null },
-        { featureSlug: "ask", level: "base", priceCents: 2900, stripePriceId: null },
+        { featureSlug: "score", level: "plus", tierId: "preview-tier-score-plus", priceCents: 2900, stripePriceId: null },
+        { featureSlug: "ask", level: "base", tierId: "preview-tier-ask-base", priceCents: 2900, stripePriceId: null },
       ],
       tagline: "Placeholder tagline: for active dispo.",
       available: false,
@@ -163,9 +163,9 @@ export const mockStoreData: StoreData = {
       level: "pro",
       priceCents: 17300,
       lines: [
-        { featureSlug: "score", level: "pro", priceCents: 4900, stripePriceId: null },
-        { featureSlug: "ask", level: "plus", priceCents: 4900, stripePriceId: null },
-        { featureSlug: "bots", level: "base", priceCents: 9900, stripePriceId: null },
+        { featureSlug: "score", level: "pro", tierId: "preview-tier-score-pro", priceCents: 4900, stripePriceId: null },
+        { featureSlug: "ask", level: "plus", tierId: "preview-tier-ask-plus", priceCents: 4900, stripePriceId: null },
+        { featureSlug: "bots", level: "base", tierId: "preview-tier-bots-base", priceCents: 9900, stripePriceId: null },
       ],
       tagline: "Placeholder tagline: full pipeline coverage.",
       bestValue: true,

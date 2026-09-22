@@ -1,13 +1,17 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Image from 'next/image'
+import Link from 'next/link'
 import AppHeader from '@/components/shared/AppHeader'
 import Button from '@/components/shared/Button'
 import { portalBrand } from '@/lib/brandAssets'
 import { formatCents } from '@/lib/money'
 import { resolveArrival, type ParsedStoreLink, type StoreTab } from '@/lib/storeLink'
 import type { StoreBundle, StoreData } from '@/types/store'
+import type { MemberCartReminder } from '@/lib/reviewFeed'
+import { syncMemberCartAction, declineStagedCartAction } from '@/app/tools/store/cartActions'
+import type { CartLineRef } from '@/lib/engine/memberCart'
 import { CreditsPanel, ToolsPanel, BundlesPanel, AddonsPanel } from './panels'
 import LearnMoreModal from './LearnMoreModal'
 import CartDrawer from './CartDrawer'
@@ -17,6 +21,29 @@ interface StoreClientProps {
   store: StoreData
   arrival: ParsedStoreLink
   stripePublishableKey: string
+  /** 5a — the member's own open cart(s), server-fetched (getMemberCartReminders). Drives the "you still have X in your cart" banner below. */
+  cartReminders: MemberCartReminder[]
+}
+
+// Local cart -> the DB refs 5a's live write-through needs, split by mode
+// (Cart is single-intent — subscription vs credit_pack — mirroring
+// mintCheckout's own mixed-cart rejection). 'once' items (op-direct) are
+// never synced: no Tier row exists for them.
+function deriveCartRefs(cart: CartItem[]): { subscription: CartLineRef[]; creditPack: CartLineRef[] } {
+  const subscription: CartLineRef[] = []
+  const creditPack: CartLineRef[] = []
+  for (const item of cart) {
+    if (item.kind === 'credits' && item.creditPackId) {
+      creditPack.push({ creditPackId: item.creditPackId })
+    } else if (item.kind === 'sub') {
+      if (item.lines && item.lines.length > 0) {
+        for (const line of item.lines) subscription.push({ tierId: line.tierId })
+      } else if (item.tierId) {
+        subscription.push({ tierId: item.tierId })
+      }
+    }
+  }
+  return { subscription, creditPack }
 }
 
 const TABS: { id: StoreTab; label: string }[] = [
@@ -37,7 +64,7 @@ function CartIcon({ className = '' }: { className?: string }) {
   )
 }
 
-export default function StoreClient({ store, arrival, stripePublishableKey }: StoreClientProps) {
+export default function StoreClient({ store, arrival, stripePublishableKey, cartReminders }: StoreClientProps) {
   const { member, tools, packs, bundles, coreBaseline, addons, membership } = store
 
   // Resolved once against the fetched catalog (hasHigherTier is precomputed
@@ -52,9 +79,13 @@ export default function StoreClient({ store, arrival, stripePublishableKey }: St
     resolved.openToolSlug ? { kind: 'tool', toolSlug: resolved.openToolSlug } : null,
   )
   const [arrivalDismissed, setArrivalDismissed] = useState(false)
+  const [reminders, setReminders] = useState(cartReminders)
+  const [remindersDismissed, setRemindersDismissed] = useState(false)
+  const [proposalBlocked, setProposalBlocked] = useState<{ mode: 'subscription' | 'credit_pack'; cartId: string } | null>(null)
 
   const arrivalTool = arrival.from ? tools.find((t) => t.slug === arrival.from) : undefined
   const showArrival = !!arrivalTool && !arrivalDismissed
+  const showReminders = reminders.length > 0 && !remindersDismissed && cart.length === 0
 
   const addToCart = (item: CartItem) => {
     setCart((prev) => [...prev, item])
@@ -62,6 +93,58 @@ export default function StoreClient({ store, arrival, stripePublishableKey }: St
   }
   const removeFromCart = (id: string) => setCart((prev) => prev.filter((i) => i.id !== id))
   const toolNames = Object.fromEntries(tools.map((t) => [t.featureSlug, t.name]))
+
+  // Live write-through (5a, Direction 1) — the DB write is the source of
+  // truth; local `cart` state stays for snappy rendering, but every change
+  // syncs to the member's own Cart/CartLine rows. Skips the very first
+  // render (cart starts empty; nothing to sync until the member acts) and
+  // whenever a blocked proposal is already showing (don't keep re-writing
+  // against a slot an admin_staged cart occupies).
+  const isFirstRender = useRef(true)
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
+    const { subscription, creditPack } = deriveCartRefs(cart)
+
+    async function sync() {
+      const [subResult, packResult] = await Promise.all([
+        syncMemberCartAction('subscription', subscription),
+        syncMemberCartAction('credit_pack', creditPack),
+      ])
+      if ('blocked' in subResult) setProposalBlocked({ mode: 'subscription', cartId: subResult.cartId })
+      else if ('blocked' in packResult) setProposalBlocked({ mode: 'credit_pack', cartId: packResult.cartId })
+      else setProposalBlocked(null)
+    }
+    sync()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart])
+
+  function checkoutReminder() {
+    setRemindersDismissed(true)
+    setCartOpen(true)
+    // The drawer reads local `cart`; a full browser->DB cart rehydrate is
+    // Phase 5b's checkout-finalize concern, not this wiring pass — the
+    // reminder's "checkout" affordance opens the drawer the member already
+    // has context for.
+  }
+  // Removes the MEMBER'S OWN reminded cart (source member_self) — clears it
+  // via the same live write-through path (empty lines expires it in
+  // upsertMemberCartCore), never declineStagedCartAction, which is scoped to
+  // an ADMIN's staged proposal, a different case entirely.
+  function removeReminder(cartId: string, mode: 'subscription' | 'credit_pack') {
+    setReminders((prev) => prev.filter((r) => r.cartId !== cartId))
+    void syncMemberCartAction(mode, []).catch(() => {})
+  }
+  // The proposal-route: the member's add hit an admin_staged cart already
+  // occupying this slot. Declining frees the slot so their own add can
+  // proceed on retry; nothing here writes an entitlement or a MemberAction.
+  function declineProposal() {
+    if (!proposalBlocked) return
+    const { cartId } = proposalBlocked
+    void declineStagedCartAction(cartId).then(() => setProposalBlocked(null))
+  }
   const applySwap = (bundle: StoreBundle) => {
     setCart((prev) => [
       ...prev.filter((i) => !i.featureSlug || !bundle.coversFeatureSlugs.includes(i.featureSlug)),
@@ -118,6 +201,46 @@ export default function StoreClient({ store, arrival, stripePublishableKey }: St
             <button onClick={() => setArrivalDismissed(true)} className="ml-auto text-gold/70 hover:text-gold">
               ×
             </button>
+          </div>
+        )}
+
+        {/* 5a load-time reminder — "you still have X in your cart" */}
+        {showReminders &&
+          reminders.map((reminder) => (
+            <div
+              key={reminder.cartId}
+              className="mt-4 flex flex-wrap items-center gap-2.5 rounded-lg bg-surface border border-border-default px-3.5 py-2.25 text-[12.7px] text-silver"
+            >
+              <span>
+                You still have{' '}
+                <b className="text-white">{reminder.lines.map((l) => l.displayName).join(', ')}</b> in your cart.
+              </span>
+              <div className="ml-auto flex items-center gap-2">
+                <button onClick={() => checkoutReminder()} className="text-gold hover:text-gold-hover font-semibold">
+                  Checkout
+                </button>
+                <button onClick={() => removeReminder(reminder.cartId, reminder.mode)} className="text-silver/70 hover:text-white">
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
+
+        {/* 5a Direction 1 — an admin's staged proposal occupies this slot */}
+        {proposalBlocked && (
+          <div className="mt-4 flex flex-wrap items-center gap-2.5 rounded-lg bg-gold/10 border border-gold-hover px-3.5 py-2.25 text-[12.7px] text-gold">
+            <span>
+              An admin has proposed a change to your{' '}
+              {proposalBlocked.mode === 'subscription' ? 'subscription' : 'credits'} cart. Review it before adding more.
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <Link href="/tools/account" className="text-gold hover:text-gold-hover font-semibold">
+                Review
+              </Link>
+              <button onClick={declineProposal} className="text-gold/70 hover:text-gold">
+                Decline &amp; start my own
+              </button>
+            </div>
           </div>
         )}
 

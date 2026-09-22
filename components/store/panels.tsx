@@ -121,6 +121,7 @@ export function CreditsPanel({ tools, packs, initialToolSlug, upgradeMaxedToolSl
                     name: `${pack.credits} credits`,
                     priceCents: pack.priceCents,
                     stripePriceId: pack.stripePriceId,
+                    creditPackId: pack.id,
                   })
                 }
               >

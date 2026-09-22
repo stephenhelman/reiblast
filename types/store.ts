@@ -58,6 +58,8 @@ export interface StorePack {
 export interface StoreBundleLine {
   featureSlug: string;
   level: "base" | "plus" | "pro";
+  /** The real Tier row id — 5a's live-cart write-through resolves CartLine.tierId from this, never re-derived. */
+  tierId: string;
   /** In-bundle price if this line has an override, else the tier's own à-la-carte price. */
   priceCents: number;
   /** Stripe test-mode Price id for this specific line (override-else-à-la-carte); null until backfilled. */

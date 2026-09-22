@@ -6,6 +6,8 @@ export type CartItemKind = "sub" | "once" | "credits";
 export interface CartLineItem {
   featureSlug: string;
   level: "base" | "plus" | "pro";
+  /** The real Tier row id — 5a's live-cart write-through resolves CartLine.tierId from this. */
+  tierId: string;
   /** Display name for the nested row, e.g. "REIscore Pro". */
   name: string;
   /** In-bundle price for this line. */
@@ -29,6 +31,10 @@ export interface CartItem {
   bundleSlug?: string;
   /** Present only for a bundle purchase — the N priced tool_sub lines it fans out into (never a single Price). */
   lines?: CartLineItem[];
+  /** kind 'sub' (solo, non-bundle) only — the real Tier row id, for 5a's live-cart write-through. Absent for bundle items (see `lines[].tierId` instead) and 'once' (op-direct — no Tier row exists). */
+  tierId?: string;
+  /** kind 'credits' only — the real CreditPack row id, for 5a's live-cart write-through. */
+  creditPackId?: string;
 }
 
 export type LearnMoreSubject =
@@ -57,6 +63,7 @@ export function composeBundleCartItem(bundle: StoreBundle, toolNames: Record<str
       return {
         featureSlug: line.featureSlug,
         level: line.level,
+        tierId: line.tierId,
         name: `${toolName}${LEVEL_SUFFIX[line.level]}`,
         priceCents: line.priceCents,
         alaCartePriceCents: line.priceCents,

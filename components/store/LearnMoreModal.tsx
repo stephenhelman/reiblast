@@ -146,6 +146,9 @@ export default function LearnMoreModal({
       stripePriceId: tier.stripePriceId,
       featureSlug: subject.kind === 'tool' ? subjectFeatureSlug : undefined,
       level: subjectStoreTier?.level,
+      // Only a real StoreTool tier is a real Tier row — op-direct 'once'
+      // items reuse tier.id for a service config id, no Tier row exists.
+      tierId: subject.kind === 'tool' ? tier.id : undefined,
     }
     onAddToCart(item)
     onClose()

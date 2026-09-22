@@ -9,7 +9,11 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Modal from '@/components/shared/Modal'
 import { formatCents } from '@/lib/money'
-import { stageSubscriptionAddAction, proposeSubscriptionChangeAction } from '@/app/admin/(protected)/members/[id]/actions'
+import {
+  stageSubscriptionAddAction,
+  proposeSubscriptionChangeAction,
+  overrideMemberCartAction,
+} from '@/app/admin/(protected)/members/[id]/actions'
 import type { SubRow } from '@/lib/adminMemberDetail'
 import type { SubscribableFeature } from '@/lib/adminSubscribableCatalog'
 
@@ -29,6 +33,10 @@ interface MemberSubscriptionsPanelProps {
 
 type ManageTarget = { sub: SubRow } | null
 type AddState = { featureId: string; tierId: string } | null
+// Direction 2 (5a) — the member already has an open cart. Set only after
+// stageSubscriptionAddAction returns requiresOverrideConfirm; the admin must
+// explicitly confirm before overrideMemberCartAction runs.
+type OverrideConfirm = { tierId: string } | null
 
 export default function MemberSubscriptionsPanel({ memberUserId, bundleSlug, bundleLabel, subs, catalog }: MemberSubscriptionsPanelProps) {
   const router = useRouter()
@@ -36,6 +44,7 @@ export default function MemberSubscriptionsPanel({ memberUserId, bundleSlug, bun
   const [manageTarget, setManageTarget] = useState<ManageTarget>(null)
   const [addOpen, setAddOpen] = useState(false)
   const [addState, setAddState] = useState<AddState>(null)
+  const [overrideConfirm, setOverrideConfirm] = useState<OverrideConfirm>(null)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
 
@@ -56,14 +65,37 @@ export default function MemberSubscriptionsPanel({ memberUserId, bundleSlug, bun
 
   function submitAdd() {
     if (!addState || !addState.tierId) return
+    const tierId = addState.tierId
     startTransition(async () => {
-      const result = await stageSubscriptionAddAction(memberUserId, addState.featureId, addState.tierId)
+      const result = await stageSubscriptionAddAction(memberUserId, addState.featureId, tierId)
       if ('error' in result) {
         setError(result.error)
         return
       }
+      if ('requiresOverrideConfirm' in result) {
+        // Direction 2 (5a): block, don't auto-expire. Nothing was written —
+        // route to the confirm prompt.
+        setAddOpen(false)
+        setOverrideConfirm({ tierId })
+        return
+      }
       setAddOpen(false)
       showToast('Staged — the member will see this to complete at checkout.')
+      router.refresh()
+    })
+  }
+
+  function confirmOverride() {
+    if (!overrideConfirm) return
+    const { tierId } = overrideConfirm
+    startTransition(async () => {
+      const result = await overrideMemberCartAction(memberUserId, tierId)
+      if ('error' in result) {
+        setError(result.error)
+        return
+      }
+      setOverrideConfirm(null)
+      showToast('Cart replaced — the member will see this to complete at checkout.')
       router.refresh()
     })
   }
@@ -212,6 +244,24 @@ export default function MemberSubscriptionsPanel({ memberUserId, bundleSlug, bun
           </button>
           <button type="button" className={btnPrimary} disabled={isPending || !addState?.tierId} onClick={submitAdd}>
             Stage it
+          </button>
+        </div>
+      </Modal>
+
+      {/* Direction 2 (5a): the member has an active cart — block, don't auto-expire. */}
+      <Modal open={overrideConfirm !== null} onClose={() => setOverrideConfirm(null)}>
+        <h2 className="text-lg font-semibold text-white mb-1">This member has an active cart</h2>
+        <p className="text-sm text-white/60 mb-4">
+          Confirm they've agreed — on the call — to replace it with this proposal. Their in-progress cart will be discarded and
+          replaced.
+        </p>
+        {error && <div className="rounded-lg border border-red bg-red/10 text-red text-sm p-3 mb-4">{error}</div>}
+        <div className="flex justify-end gap-3">
+          <button type="button" className={btnQuiet} onClick={() => setOverrideConfirm(null)}>
+            Don't override
+          </button>
+          <button type="button" className={btnPrimary} disabled={isPending} onClick={confirmOverride}>
+            Confirm — replace their cart
           </button>
         </div>
       </Modal>
