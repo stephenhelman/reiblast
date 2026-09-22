@@ -13,6 +13,7 @@ import {
   proposeSubscriptionChangeCore,
   type ProposeChangeParams,
 } from '@/lib/engine/adminProposals'
+import { overrideMemberCartCore } from '@/lib/engine/memberCart'
 
 async function requireAdminUserId(): Promise<string | { error: string }> {
   try {
@@ -24,7 +25,14 @@ async function requireAdminUserId(): Promise<string | { error: string }> {
   }
 }
 
-export type StageSubscriptionAddResult = { ok: true } | { error: string }
+export type StageSubscriptionAddResult =
+  | { ok: true }
+  // Direction 2 (5a) — an open member_self cart is in the way. Nothing was
+  // written. The dossier surfaces this as a confirm prompt; a second call to
+  // overrideMemberCartAction (below), only after the admin explicitly
+  // confirms, performs the actual override.
+  | { requiresOverrideConfirm: true; memberCartId: string }
+  | { error: string }
 
 export async function stageSubscriptionAddAction(
   memberUserId: string,
@@ -35,10 +43,33 @@ export async function stageSubscriptionAddAction(
   if (typeof adminUserId !== 'string') return adminUserId
 
   try {
-    await prisma.$transaction((tx) => stageSubscriptionAddCore(tx, { adminUserId, memberUserId, featureId, tierId }))
+    const result = await prisma.$transaction((tx) => stageSubscriptionAddCore(tx, { adminUserId, memberUserId, featureId, tierId }))
+    if ('requiresOverrideConfirm' in result) return result
     return { ok: true }
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Could not stage this subscription.' }
+  }
+}
+
+export type OverrideMemberCartResult = { ok: true } | { error: string }
+
+// The CONFIRMED half of Direction 2 — only reached after the admin has seen
+// the requiresOverrideConfirm prompt and explicitly confirmed the member's
+// verbal agreement (on a call) to replace their in-progress cart. Runs
+// overrideMemberCartCore in its own tx: expire the member_self cart, stage
+// the admin_staged replacement, write the cart_override AdminAction — one
+// atomic unit, same as every other admin-write core here.
+export async function overrideMemberCartAction(memberUserId: string, tierId: string): Promise<OverrideMemberCartResult> {
+  const adminUserId = await requireAdminUserId()
+  if (typeof adminUserId !== 'string') return adminUserId
+
+  try {
+    await prisma.$transaction((tx) =>
+      overrideMemberCartCore(tx, { adminUserId, memberUserId, mode: 'subscription', proposalTierIds: [tierId] }),
+    )
+    return { ok: true }
+  } catch (err) {
+    return { error: err instanceof Error ? err.message : 'Could not override this cart.' }
   }
 }
 

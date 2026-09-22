@@ -13,6 +13,15 @@ const LEVEL_RANK: Record<TierLevel, number> = { base: 0, plus: 1, pro: 2 }
 // comp (lib/engine/comp.ts) is the one admin-direct exception and does NOT
 // go through this file.
 
+export type StageSubscriptionAddResult =
+  | { ok: true; adminActionId: string; cartId: string }
+  // Direction 2 (5a) — an open member_self cart occupies this (userId, mode)
+  // slot. NOT thrown: the caller (admin server action) surfaces this as a
+  // confirm prompt ("this member has an active cart — confirm they've agreed
+  // to replace it") rather than an error. Nothing is written on this branch —
+  // check-then-bail, same atomicity discipline as a check-then-write.
+  | { requiresOverrideConfirm: true; memberCartId: string }
+
 // (1) STAGE ADD — carrier = Cart (Admin -> Cart -> Member). tx non-optional:
 // the AdminAction + Cart + CartLine must land atomically, and the Cart's
 // adminActionId join needs the AdminAction's id from inside the same tx.
@@ -25,9 +34,24 @@ export async function stageSubscriptionAddCore(
     tierId: string
     note?: string
   },
-): Promise<{ adminActionId: string; cartId: string }> {
+): Promise<StageSubscriptionAddResult> {
   if (!params.tierId) {
     throw new Error('stageSubscriptionAddCore: tierId is required (CartLine must have exactly one catalog ref)')
+  }
+
+  // Check BEFORE any write (partial-unique handling): one open cart per
+  // (userId, mode) regardless of source (Cart_userId_mode_open_key is on
+  // (userId, mode) WHERE status='open', no source column). admin_staged ->
+  // latest admin intent wins, expire it below after the AdminAction write.
+  // member_self -> STOP here, before writing anything — see
+  // StageSubscriptionAddResult's requiresOverrideConfirm branch. Never
+  // silently expire a member's own cart (Direction 2's confirmed override,
+  // lib/engine/memberCart.ts#overrideMemberCartCore, is the only path that does).
+  const existingOpenCart = await tx.cart.findFirst({
+    where: { userId: params.memberUserId, mode: 'subscription', status: 'open' },
+  })
+  if (existingOpenCart?.source === 'member_self') {
+    return { requiresOverrideConfirm: true, memberCartId: existingOpenCart.id }
   }
 
   const before = await projectEntitlementLines(tx, params.memberUserId, params.featureId)
@@ -45,22 +69,8 @@ export async function stageSubscriptionAddCore(
     },
   })
 
-  // Partial-unique handling: one open cart per (userId, mode) regardless of
-  // source (the index has no source column — Cart_userId_mode_open_key is on
-  // (userId, mode) WHERE status='open'). If an open cart already occupies
-  // this slot: admin_staged -> latest admin intent wins, expire it first in
-  // THIS tx. member_self -> STOP, never silently expire a member's own cart
-  // (this is the (userId,mode,source) key-collision case flagged as a future
-  // schema concern; surfacing it here rather than working around it).
-  const existingOpenCart = await tx.cart.findFirst({
-    where: { userId: params.memberUserId, mode: 'subscription', status: 'open' },
-  })
   if (existingOpenCart) {
-    if (existingOpenCart.source === 'member_self') {
-      throw new Error(
-        `stageSubscriptionAddCore: an open member_self cart already exists for user ${params.memberUserId} (mode subscription) — refusing to expire a member's own cart. This is the (userId,mode,source) key-collision case; do not work around it.`,
-      )
-    }
+    // admin_staged (only remaining case here) — latest admin intent wins.
     await tx.cart.update({ where: { id: existingOpenCart.id }, data: { status: 'expired' } })
   }
 
@@ -78,7 +88,7 @@ export async function stageSubscriptionAddCore(
     data: { cartId: cart.id, tierId: params.tierId },
   })
 
-  return { adminActionId: adminAction.id, cartId: cart.id }
+  return { ok: true, adminActionId: adminAction.id, cartId: cart.id }
 }
 
 export type ProposeChangeParams =

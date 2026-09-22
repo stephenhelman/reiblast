@@ -76,7 +76,7 @@ describe('reviewFeed (Phase 4 — the union feed + three-state derivation)', () 
   it('an open admin_staged cart appears in the feed as an add item, state=pending', async () => {
     const userId = await createDisposableUser()
     try {
-      const { cartId, adminActionId } = await testPrisma.$transaction((tx) =>
+      const stageResult = await testPrisma.$transaction((tx) =>
         stageSubscriptionAddCore(tx as unknown as Prisma.TransactionClient, {
           adminUserId,
           memberUserId: userId,
@@ -84,6 +84,8 @@ describe('reviewFeed (Phase 4 — the union feed + three-state derivation)', () 
           tierId: askBase.id,
         }),
       )
+      if (!('ok' in stageResult)) throw new Error('expected ok result, got requiresOverrideConfirm')
+      const { cartId, adminActionId } = stageResult
 
       const items = await getOpenChangesForMember(testPrisma, userId)
       const item = items.find((i) => i.kind === 'add' && i.cartId === cartId)

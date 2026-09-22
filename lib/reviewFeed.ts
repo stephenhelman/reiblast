@@ -31,6 +31,18 @@ export interface AddReviewItem {
   lines: AddReviewLine[];
 }
 
+// 5a — the member's OWN open cart (source member_self), for the store
+// load-time "you still have X in your cart" reminder. Not a proposal (no
+// AdminAction, no review action) — kept out of ReviewItem/getOpenChangesForMember
+// on purpose so the review feed stays "proposals awaiting the member," but
+// still sourced from the SAME query as the add-path items below (one
+// cart.findMany call, not a second query).
+export interface MemberCartReminder {
+  cartId: string;
+  mode: "subscription" | "credit_pack";
+  lines: AddReviewLine[];
+}
+
 const CHANGE_ACTION_TYPES: AdminActionType[] = ["subscription_upgrade", "subscription_downgrade", "subscription_cancel"];
 type ChangeActionType = (typeof CHANGE_ACTION_TYPES)[number];
 
@@ -151,4 +163,32 @@ async function getOpenChangeItems(client: ReadClient, userId: string): Promise<C
 export async function getOpenChangesForMember(client: ReadClient, userId: string): Promise<ReviewItem[]> {
   const [addItems, changeItems] = await Promise.all([getOpenAddItems(client, userId), getOpenChangeItems(client, userId)]);
   return [...addItems, ...changeItems];
+}
+
+// 5a load-time reminder — "you still have X in your cart." Deliberately a
+// SEPARATE query from getOpenAddItems above, not a second query on the same
+// data: that one is scoped to mode:'subscription' + source in
+// (admin_staged, member_self) for the review-feed's admin-proposal purpose;
+// this one needs source:'member_self' across BOTH modes (subscription AND
+// credit_pack — the member's own cart isn't restricted to the admin-proposal
+// surface's scope). Still exactly one query, never per-mode.
+export async function getMemberCartReminders(client: ReadClient, userId: string): Promise<MemberCartReminder[]> {
+  const openCarts = await client.cart.findMany({
+    where: { userId, status: "open", source: "member_self" },
+    include: { lines: { include: { tier: { include: { feature: { include: { surfaces: true } } } } } } },
+  });
+
+  return openCarts.map((cart) => ({
+    cartId: cart.id,
+    mode: cart.mode,
+    lines: cart.lines
+      .filter((l): l is typeof l & { tierId: string; tier: NonNullable<typeof l.tier> } => l.tierId !== null && l.tier !== null)
+      .map((l) => ({
+        tierId: l.tierId,
+        featureSlug: l.tier.feature.slug,
+        tierLevel: l.tier.level,
+        displayName: deriveTierName(l.tier.feature.unifiedName ?? l.tier.feature.surfaces[0]?.name ?? l.tier.feature.slug, l.tier),
+        priceCents: l.tier.priceCents,
+      })),
+  }));
 }

@@ -34,6 +34,7 @@ describe('adminProposals (Phase 3.5 — admin change PRODUCER, proposals only)',
             tierId: askBase.id,
           }),
         )
+        if (!('ok' in result)) throw new Error('expected ok result, got requiresOverrideConfirm')
 
         const adminAction = await testPrisma.adminAction.findUniqueOrThrow({ where: { id: result.adminActionId } })
         expect(adminAction.action).toBe('cart_stage')
@@ -74,6 +75,7 @@ describe('adminProposals (Phase 3.5 — admin change PRODUCER, proposals only)',
             tierId: askBase.id,
           }),
         )
+        if (!('ok' in first)) throw new Error('expected ok result, got requiresOverrideConfirm')
 
         const second = await testPrisma.$transaction((tx) =>
           stageSubscriptionAddCore(tx as unknown as Prisma.TransactionClient, {
@@ -83,6 +85,7 @@ describe('adminProposals (Phase 3.5 — admin change PRODUCER, proposals only)',
             tierId: scorePlus.id,
           }),
         )
+        if (!('ok' in second)) throw new Error('expected ok result, got requiresOverrideConfirm')
 
         const firstCart = await testPrisma.cart.findUniqueOrThrow({ where: { id: first.cartId } })
         expect(firstCart.status).toBe('expired')
