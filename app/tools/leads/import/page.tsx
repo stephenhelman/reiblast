@@ -38,6 +38,7 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
   const [importResult, setImportResult] = useState<{ added: number; skipped: number; failed: number } | null>(null)
   const [showTagModal, setShowTagModal] = useState(false)
   const [tagName, setTagName] = useState('')
+  const [showFilenameModal, setShowFilenameModal] = useState(false)
   const [page, setPage] = useState(0)
   const [dragging, setDragging] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -126,7 +127,7 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
     })
   }
 
-  function handleDownload() {
+  function handleDownload(filename: string) {
     if (!result) return
     const data = Array.from(selected).map((i) => {
       const c = result.contacts[i]
@@ -141,7 +142,7 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
         Email: c.email,
       }
     })
-    downloadCSV(data, `BatchLeads_Cleaned_${dateTag()}.csv`)
+    downloadCSV(data, `${filename}.csv`)
   }
 
   async function handleImport() {
@@ -401,7 +402,7 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
             ← Process Another File
           </button>
           <button
-            onClick={handleDownload}
+            onClick={() => setShowFilenameModal(true)}
             disabled={selected.size === 0}
             style={{
               color: 'rgba(255,255,255,0.7)',
@@ -418,20 +419,20 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
           </button>
         </div>
         <button
-          onClick={() => setShowTagModal(true)}
-          disabled={selected.size === 0 || importing}
+          disabled
+          title="Coming soon"
           style={{
-            background: selected.size === 0 || importing ? 'rgba(245,200,66,0.4)' : GOLD,
-            color: '#000',
+            background: 'rgba(245,200,66,0.15)',
+            color: 'rgba(0,0,0,0.4)',
             fontWeight: 700,
             padding: '10px 24px',
             borderRadius: 8,
             border: 'none',
-            cursor: selected.size === 0 || importing ? 'not-allowed' : 'pointer',
+            cursor: 'not-allowed',
             fontSize: 15,
           }}
         >
-          {importing ? 'Importing…' : `Push to CRM →`}
+          Push to CRM → (Coming soon)
         </button>
       </div>
 
@@ -443,6 +444,15 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
           onTagChange={setTagName}
           onConfirm={handleImport}
           onCancel={() => setShowTagModal(false)}
+        />
+      )}
+
+      {/* Filename modal */}
+      {showFilenameModal && (
+        <FilenameModal
+          defaultName={`BatchLeads_Cleaned_${dateTag()}`}
+          onConfirm={(name) => { handleDownload(name); setShowFilenameModal(false) }}
+          onCancel={() => setShowFilenameModal(false)}
         />
       )}
     </div>
@@ -457,6 +467,7 @@ function DealMachineTab({ locationId }: { locationId: string }) {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [showTagModal, setShowTagModal] = useState(false)
   const [tagName, setTagName] = useState('')
+  const [showFilenameModal, setShowFilenameModal] = useState(false)
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ added: number; skipped: number; failed: number } | null>(null)
   const [page, setPage] = useState(0)
@@ -486,13 +497,13 @@ function DealMachineTab({ locationId }: { locationId: string }) {
     })
   }
 
-  function handleDownload() {
+  function handleDownload(filename: string) {
     if (!result) return
     const data = Array.from(selected).map((i) => {
       const c = result.contacts[i]
       return { Address: c.address, City: c.city, State: c.state, Zip: c.zip }
     })
-    downloadCSV(data, `DealMachine_${dateTag()}.csv`)
+    downloadCSV(data, `${filename}.csv`)
   }
 
   async function handleImport() {
@@ -686,7 +697,7 @@ function DealMachineTab({ locationId }: { locationId: string }) {
             ← Format Another List
           </button>
           <button
-            onClick={handleDownload}
+            onClick={() => setShowFilenameModal(true)}
             disabled={selected.size === 0}
             style={{
               color: 'rgba(255,255,255,0.7)',
@@ -740,20 +751,20 @@ function DealMachineTab({ locationId }: { locationId: string }) {
           </div>
         </div>
         <button
-          onClick={() => setShowTagModal(true)}
-          disabled={selected.size === 0 || importing}
+          disabled
+          title="Coming soon"
           style={{
-            background: selected.size === 0 || importing ? 'rgba(245,200,66,0.4)' : GOLD,
-            color: '#000',
+            background: 'rgba(245,200,66,0.15)',
+            color: 'rgba(0,0,0,0.4)',
             fontWeight: 700,
             padding: '10px 24px',
             borderRadius: 8,
             border: 'none',
-            cursor: selected.size === 0 || importing ? 'not-allowed' : 'pointer',
+            cursor: 'not-allowed',
             fontSize: 15,
           }}
         >
-          {importing ? 'Importing…' : 'Push Addresses to CRM →'}
+          Push Addresses to CRM → (Coming soon)
         </button>
       </div>
 
@@ -764,6 +775,14 @@ function DealMachineTab({ locationId }: { locationId: string }) {
           onTagChange={setTagName}
           onConfirm={handleImport}
           onCancel={() => setShowTagModal(false)}
+        />
+      )}
+
+      {showFilenameModal && (
+        <FilenameModal
+          defaultName={`DealMachine_${dateTag()}`}
+          onConfirm={(name) => { handleDownload(name); setShowFilenameModal(false) }}
+          onCancel={() => setShowFilenameModal(false)}
         />
       )}
     </div>
@@ -867,6 +886,88 @@ function TagModal({
             }}
           >
             Import {count} Contacts →
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function FilenameModal({
+  defaultName,
+  onConfirm,
+  onCancel,
+}: {
+  defaultName: string
+  onConfirm: (name: string) => void
+  onCancel: () => void
+}) {
+  const [name, setName] = useState(defaultName)
+  const sanitized = name.trim().replace(/[\\/:*?"<>|]/g, '')
+
+  return (
+    <div style={{
+      position: 'fixed',
+      inset: 0,
+      background: 'rgba(0,0,0,0.75)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      zIndex: 100,
+    }}>
+      <div style={{
+        background: '#141414',
+        border: '1px solid rgba(255,255,255,0.12)',
+        borderRadius: 16,
+        padding: 32,
+        width: '100%',
+        maxWidth: 440,
+      }}>
+        <h3 style={{ color: '#fff', fontSize: 18, fontWeight: 700, marginBottom: 8 }}>Name Your File</h3>
+        <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13, marginBottom: 20 }}>
+          Choose a name for the exported CSV.
+        </p>
+        <input
+          autoFocus
+          type="text"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          onKeyDown={(e) => e.key === 'Enter' && sanitized && onConfirm(sanitized)}
+          style={{
+            width: '100%',
+            background: '#1a1a1a',
+            border: '1px solid rgba(255,255,255,0.15)',
+            borderRadius: 8,
+            padding: '12px 14px',
+            color: '#fff',
+            fontSize: 14,
+            outline: 'none',
+            boxSizing: 'border-box',
+            marginBottom: 20,
+          }}
+        />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
+          <button
+            onClick={onCancel}
+            style={{ color: 'rgba(255,255,255,0.4)', background: 'transparent', border: 'none', cursor: 'pointer', fontSize: 14 }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={() => sanitized && onConfirm(sanitized)}
+            disabled={!sanitized}
+            style={{
+              background: sanitized ? GOLD : 'rgba(245,200,66,0.3)',
+              color: '#000',
+              fontWeight: 700,
+              padding: '10px 20px',
+              borderRadius: 8,
+              border: 'none',
+              cursor: sanitized ? 'pointer' : 'not-allowed',
+              fontSize: 14,
+            }}
+          >
+            Download →
           </button>
         </div>
       </div>

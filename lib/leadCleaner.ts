@@ -85,6 +85,10 @@ function normalizeAddress(address: string): string {
   return address.toLowerCase().replace(/\s+/g, ' ').replace(/[.,]/g, '').trim()
 }
 
+function lc(value: string): string {
+  return value ? value.toLowerCase() : value
+}
+
 function cell(row: string[], index: number): string {
   return index >= 0 ? row[index]?.toString().trim() || '' : ''
 }
@@ -111,7 +115,7 @@ function parseAddress(
   const zipVal = zipRaw ? zipRaw.split('-')[0] : ''
 
   if (streetVal && (cityVal || stateVal || zipVal)) {
-    return { street: streetVal, city: cityVal, state: stateVal, zip: zipVal }
+    return { street: lc(streetVal), city: lc(cityVal), state: lc(stateVal), zip: zipVal }
   }
 
   // Try: Street, City, ST 00000
@@ -119,9 +123,9 @@ function parseAddress(
   const fullMatch = fullAddress.match(fullPattern)
   if (fullMatch) {
     return {
-      street: fullMatch[1].trim(),
-      city: fullMatch[2].trim(),
-      state: fullMatch[3].trim().toUpperCase(),
+      street: lc(fullMatch[1].trim()),
+      city: lc(fullMatch[2].trim()),
+      state: fullMatch[3].trim().toLowerCase(),
       zip: fullMatch[4].split('-')[0],
     }
   }
@@ -131,9 +135,9 @@ function parseAddress(
   const noZipMatch = fullAddress.match(noZipPattern)
   if (noZipMatch) {
     return {
-      street: noZipMatch[1].trim(),
-      city: noZipMatch[2].trim(),
-      state: noZipMatch[3].trim().toUpperCase(),
+      street: lc(noZipMatch[1].trim()),
+      city: lc(noZipMatch[2].trim()),
+      state: noZipMatch[3].toLowerCase(),
       zip: '',
     }
   }
@@ -153,7 +157,7 @@ function parseAddress(
 
   const stateMatch = remaining.match(/,?\s*([A-Za-z]{2})\s*$/)
   if (stateMatch) {
-    state = stateMatch[1].toUpperCase()
+    state = stateMatch[1].toLowerCase()
     remaining = remaining.slice(0, remaining.length - stateMatch[0].length).trim()
   }
 
@@ -165,7 +169,7 @@ function parseAddress(
     street = remaining
   }
 
-  return { street, city, state, zip }
+  return { street: lc(street), city: lc(city), state, zip }
 }
 
 function getFirstAvailableMobilePhone(
@@ -221,11 +225,11 @@ export function cleanLeads(rows: string[][], headers: string[]): CleaningResult 
     if (contactNameRaw.toLowerCase().includes('trust')) {
       const parts = contactNameRaw.split(/\s+/)
       if (parts.length === 1) {
-        firstName = capitalize(parts[0])
+        firstName = parts[0]
         lastName = ''
       } else {
-        firstName = parts.slice(0, -1).map(capitalize).join(' ')
-        lastName = capitalize(parts[parts.length - 1])
+        firstName = parts.slice(0, -1).join(' ')
+        lastName = parts[parts.length - 1]
       }
     }
 
@@ -233,15 +237,15 @@ export function cleanLeads(rows: string[][], headers: string[]): CleaningResult 
     const email = cell(row, headerMap.email)
 
     contacts.push({
-      firstName,
-      lastName,
+      firstName: lc(firstName),
+      lastName: lc(lastName),
       propertyAddress: parsed.street,
       city: parsed.city,
       state: parsed.state,
       zip: parsed.zip,
       phone: phoneData.number,
       phoneType: phoneData.type,
-      email,
+      email: lc(email),
     })
 
     stats.mobileFound++
@@ -249,11 +253,6 @@ export function cleanLeads(rows: string[][], headers: string[]): CleaningResult 
   }
 
   return { contacts, stats }
-}
-
-function capitalize(word: string): string {
-  if (!word) return ''
-  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase()
 }
 
 /**
@@ -377,15 +376,15 @@ export function cleanPropstreamExport(rows: string[][], headers: string[]): Clea
     }
 
     contacts.push({
-      firstName,
-      lastName,
-      propertyAddress: get(row, 'street address'),
-      city: get(row, 'city'),
-      state: get(row, 'state'),
+      firstName: lc(firstName),
+      lastName: lc(lastName),
+      propertyAddress: lc(get(row, 'street address')),
+      city: lc(get(row, 'city')),
+      state: lc(get(row, 'state')),
       zip: get(row, 'zip'),
       phone,
       phoneType: 'Cell',
-      email,
+      email: lc(email),
     })
   }
 
@@ -506,7 +505,7 @@ export function cleanDealMachineExport(rows: string[][], headers: string[]): Cle
       city = addrParts[1]
       // Last part may be "IN 46221"
       const stateZip = addrParts[2].trim().split(/\s+/)
-      state = stateZip[0]?.toUpperCase() || ''
+      state = stateZip[0]?.toLowerCase() || ''
       zip = stateZip[1]?.split('-')[0] || ''
     } else if (addrParts.length === 2) {
       street = addrParts[0]
@@ -520,7 +519,7 @@ export function cleanDealMachineExport(rows: string[][], headers: string[]): Cle
       city = get(row, 'primary_mailing_city')
     }
     if (!state) {
-      state = get(row, 'primary_mailing_state').toUpperCase()
+      state = get(row, 'primary_mailing_state').toLowerCase()
     }
     if (!zip) {
       zip = get(row, 'primary_mailing_zip').split('-')[0]
@@ -535,15 +534,15 @@ export function cleanDealMachineExport(rows: string[][], headers: string[]): Cle
         : selectedPhone
 
     const contact: CleanedContact = {
-      firstName: get(row, 'first_name'),
-      lastName: get(row, 'last_name'),
-      propertyAddress: street,
-      city,
-      state,
+      firstName: lc(get(row, 'first_name')),
+      lastName: lc(get(row, 'last_name')),
+      propertyAddress: lc(street),
+      city: lc(city),
+      state: lc(state),
       zip,
       phone: formattedPhone,
       phoneType: 'Wireless',
-      email: get(row, 'email_address_1'),
+      email: lc(get(row, 'email_address_1')),
     }
 
     contacts.push(contact)
@@ -594,13 +593,13 @@ export function formatDealMachineData(rawText: string): DealMachineResult {
 
     if (cityMatch) {
       const city = cityMatch[1].trim()
-      const state = cityMatch[2].toUpperCase()
+      const state = cityMatch[2].toLowerCase()
       const zip = cityMatch[3].split('-')[0]
-      contacts.push({ address: line, city, state, zip })
+      contacts.push({ address: lc(line), city: lc(city), state, zip })
       stats.parsed++
       i += 2
     } else {
-      contacts.push({ address: line, city: '', state: '', zip: '' })
+      contacts.push({ address: lc(line), city: '', state: '', zip: '' })
       stats.parsed++
       i++
     }
