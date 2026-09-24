@@ -45,7 +45,13 @@ function resolveDatasourceUrl(): string {
   return url;
 }
 
-const resolvedUrl = resolveDatasourceUrl();
+// `prisma generate` (npm postinstall, Vercel builds) never connects to a
+// database, so it must not require PRISMA_TARGET. Every command that can
+// connect (migrate, db, studio) still fails closed.
+const isGenerate = process.argv.includes("generate");
+const resolvedUrl = isGenerate
+  ? "postgresql://placeholder:placeholder@localhost:5432/placeholder"
+  : resolveDatasourceUrl();
 
 // schema.prisma declares `url = env("DATABASE_URL")` (not editable per task
 // constraints), and the Prisma CLI resolves that literal env() at schema-load
