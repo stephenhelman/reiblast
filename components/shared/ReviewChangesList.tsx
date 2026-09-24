@@ -11,7 +11,7 @@ import Card from '@/components/shared/Card'
 import Button from '@/components/shared/Button'
 import Modal from '@/components/shared/Modal'
 import Tag from '@/components/shared/Tag'
-import { previewProposalAction, commitProposalAction } from '@/app/tools/account/reviewActions'
+import { previewProposalAction, commitProposalAction, type SurvivorLine } from '@/app/tools/account/reviewActions'
 import { previewCheckoutConsentAction, commitCheckoutConsentAction } from '@/app/tools/store/checkoutConsentActions'
 import { declineStagedCartAction } from '@/app/tools/store/cartActions'
 import type { ReviewItem } from '@/lib/reviewFeed'
@@ -51,6 +51,8 @@ interface PendingReview {
   adminActionId: string
   featureSlug: string
   disclosureText: string | null
+  breaks: boolean | null
+  survivorLines: SurvivorLine[]
   error: string | null
 }
 
@@ -75,13 +77,13 @@ export default function ReviewChangesList({ items }: { items: ReviewItem[] }) {
   const [declined, setDeclined] = useState<Set<string>>(() => loadDeclined())
 
   function openReview(adminActionId: string, featureSlug: string) {
-    setReview({ adminActionId, featureSlug, disclosureText: null, error: null })
+    setReview({ adminActionId, featureSlug, disclosureText: null, breaks: null, survivorLines: [], error: null })
     startTransition(async () => {
       const result = await previewProposalAction(adminActionId)
       setReview((current) => {
         if (!current || current.adminActionId !== adminActionId) return current
         if ('error' in result) return { ...current, error: result.error }
-        return { ...current, disclosureText: result.disclosureText }
+        return { ...current, disclosureText: result.disclosureText, breaks: result.breaks, survivorLines: result.survivorLines }
       })
     })
   }
@@ -223,6 +225,28 @@ export default function ReviewChangesList({ items }: { items: ReviewItem[] }) {
             )}
             {review.disclosureText && (
               <div className="rounded-lg border border-gold bg-gold/5 p-3 mb-4 text-sm text-silver leading-relaxed">
+                {review.breaks && review.survivorLines.length > 0 && (
+                  <ul className="flex flex-col gap-1 mb-2">
+                    {review.survivorLines.map((line) => (
+                      <li key={line.featureSlug} className="flex items-center justify-between text-sm">
+                        <span className="text-silver">
+                          {line.featureSlug} ({line.tierLevel})
+                        </span>
+                        <span>
+                          {/* Delta-ready, mirrors SubscriptionsZone's survivor-line
+                              render (§13 go-live item) — from is always null on this
+                              DB-only leg, so today this renders to-only. */}
+                          {line.delta.from !== null && (
+                            <span className="line-through text-silver/50 mr-1.5">
+                              ${(line.delta.from / 100).toFixed(2)}
+                            </span>
+                          )}
+                          <span className="text-gold font-medium">${(line.delta.to / 100).toFixed(2)}/mo</span>
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
                 {review.disclosureText}
               </div>
             )}

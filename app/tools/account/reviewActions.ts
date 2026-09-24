@@ -13,9 +13,12 @@
 import { prisma } from '@/lib/prisma'
 import { resolveSessionUserId } from '@/lib/toolsSession'
 import { computeProposalDisclosure, finalizeProposedChangeCore } from '@/lib/engine/finalizeProposal'
+import type { SurvivorLine } from '@/lib/engine/subscriptionBreak'
+
+export type { SurvivorLine }
 
 export type PreviewProposalResult =
-  | { ok: true; disclosureText: string }
+  | { ok: true; disclosureText: string; breaks: boolean; survivorLines: SurvivorLine[] }
   | { error: string }
 
 export async function previewProposalAction(adminActionId: string): Promise<PreviewProposalResult> {
@@ -24,7 +27,12 @@ export async function previewProposalAction(adminActionId: string): Promise<Prev
 
   try {
     const disclosure = await computeProposalDisclosure(prisma, { userId, adminActionId })
-    return { ok: true, disclosureText: disclosure.disclosureText }
+    return {
+      ok: true,
+      disclosureText: disclosure.disclosureText,
+      breaks: disclosure.breaks,
+      survivorLines: disclosure.survivorLines,
+    }
   } catch (err) {
     return { error: err instanceof Error ? err.message : 'Could not preview this proposal.' }
   }

@@ -1,5 +1,5 @@
 import { MemberActionType, Prisma, PrismaClient } from '@prisma/client'
-import { computeBreakDisclosure } from './subscriptionBreak'
+import { computeBreakDisclosure, type SurvivorLine } from './subscriptionBreak'
 import { applySubscriptionTransition } from './subscriptionTransition'
 import type { EntitlementLine } from './comp'
 
@@ -14,6 +14,13 @@ export interface ProposalDisclosure {
   direction: ProposalDirection
   newTierId?: string
   disclosureText: string
+  // ADDITIVE (slice 3) — the delta-ready survivor lines computeBreakDisclosure
+  // already derives from the same à-la-carte price source disclosureText is
+  // built from (§6b "written once, read by both"). Frozen disclosureText is
+  // unchanged; this is a structured rendering of the same numbers, never a
+  // second source of truth. Empty when the change doesn't break a bundle.
+  breaks: boolean
+  survivorLines: SurvivorLine[]
 }
 
 function directionFor(action: string): ProposalDirection {
@@ -95,6 +102,8 @@ export async function computeProposalDisclosure(
     direction,
     newTierId: direction === 'cancel' ? undefined : proposedTierId,
     disclosureText,
+    breaks: breakDisclosure.breaks,
+    survivorLines: breakDisclosure.survivorLines,
   }
 }
 
