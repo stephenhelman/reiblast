@@ -7,7 +7,7 @@ tags, or stages, and never write to GHL. See `docs/ghl-server-contract.md`.
 |---|---|
 | `replay` | Re-runs `GhlEvent` rows that failed (unprocessed, `attempts < 5`, received > 5 min ago) through `processPaymentEvent`. |
 | `tx_sweep` | Rolling 35-day window of `GET /payments/transactions` through `ingestTransaction` (catches missed webhooks). |
-| `wallet_usage` | Previous 2 UTC days of agency wallet transactions → `UsageRollup` (per location incl. HQ, plus `_agency` / `_unattributed`). Replaces per (scopeKey, day). |
+| `wallet_usage` | Previous 2 UTC days of agency wallet transactions → `WalletTransaction` (every raw row, insert-or-ignore on GHL id) and `UsageRollup` (per location incl. HQ, plus `_agency` / `_unattributed`; replaces per (scopeKey, day)). On **UTC day 3 only** it also refreshes the whole previous calendar month as ≤7-day windows. Each finished window runs the rollup-vs-rows check (below). |
 | `balances` | Wallet balance per location (incl. HQ) → `WalletBalanceSnapshot`, one row per location per UTC day. |
 
 ## Trigger
@@ -46,3 +46,45 @@ since. Continuations refresh `lastStartAt`, so a long chain stays guarded. Ignor
 `scripts/billing/run-replay.ts`, `run-tx-sweep.ts`, `run-wallet-usage.ts`, `run-balances.ts`,
 `job-health.ts` (staleness: no success in 26 h), and `backfill-usage.ts` (monthly windows per location, bucketed by
 UTC day; `--from`, `--to`).
+
+## Wallet evidence layer (`WalletTransaction`)
+
+`UsageRollup` is the derived summary; `WalletTransaction` holds one row per GHL wallet transaction (`id` = GHL wallet
+transaction id, `scopeKey`, `ghlAccountId`, `settlementTime`, `category`, `description`, signed `amount`) so every cost
+figure can be drilled to individual transactions. Written by `wallet_usage` and `backfill-usage.ts` in the same pass that
+builds the rollup, with `createMany({ skipDuplicates: true })` — an existing row is never modified.
+
+- **Rollup-vs-rows check.** After each window the job compares, per (scopeKey, UTC day, category), `UsageRollup.count/amount`
+  to `COUNT/SUM` of `WalletTransaction` and puts **every** disagreement in the job summary
+  (`rollupCheck.mismatches`, `mismatchCount`; the nightly summary aggregates `mismatchCount` across windows). Expect zero.
+  Because inserts are ignore-on-conflict, an upstream amount correction (or a row GHL later removes) surfaces here as a
+  mismatch — by design.
+- **`settlementTime` is UTC.** GHL returns it zoneless (`"2026-06-19 08:06:55.147"`) and the request asks for
+  `timezone: "UTC"`; it is parsed explicitly as UTC (never with the machine's zone). `UsageRollup.day` is the UTC day.
+- **Month refresh queue.** The job cursor carries a queue of windows (previous 2 days, then on UTC day 3 the previous
+  month in ≤7-day chunks), the position, and the in-window cursor, so it resumes across continuations. Each window keeps
+  its own bounded `seenIds`.
+- **Size.** ~85–100k rows/month, roughly 0.4–0.5 KB/row including 4 indexes (see "Storage" in the task-4 report). Decide a
+  retention policy before it matters (e.g. keep raw rows 13 months, older months live only in `UsageRollup`).
+
+## Reporting rules
+
+- **Reporting timezone: `America/Denver`** (HQ location timezone is `US/Mountain`, read from `GET /locations/{HQ}`).
+  Dashboard cost views bucket by month/day from `WalletTransaction.settlementTime` converted to Denver time — **not** from
+  `UsageRollup.day`, which is a UTC day, so the two can differ near month boundaries. Revenue views bucket
+  `BillingLedgerEntry.occurredAt` the same way.
+- **Net revenue** = `SUM(amount − amountRefunded)` over ledger rows with `status IN ('succeeded', 'refunded')`.
+  A fully refunded row (`status = 'refunded'`, `amountRefunded = amount`) nets to zero. `failed` and `pending` rows never
+  count. Test-mode transactions are not in the ledger at all (ignored at ingest).
+- **`refundDetectedAt`** is set the first time an update raises `amountRefunded` on an existing row, and never changed after.
+  It is null for rows already refunded before the column existed ("predates tracking" — the 2 refunded rows on the
+  pipeline branch), and for rows first ingested already refunded. Refunds are attributed to the original transaction date;
+  `refundDetectedAt` is when we noticed, not when GHL refunded.
+
+## Auto-recharge account matching
+
+`ingestTransaction` matches a payment to a `GhlAccount` by `contactId`. For `wallet_auto_recharge` rows with no such match
+it falls back to the `/location/<id>/` URL in the description and matches `GhlAccount.locationId`. The method used
+(`contactId` | `descriptionLocation` | none) is returned per row and counted in the `tx_sweep` summary (`match:*`) and in
+the historical-load report. `scripts/billing/relink-auto-recharge.ts` (dry-run by default) applies the same fallback to
+existing unmatched rows; it only fills a null `ghlAccountId`.

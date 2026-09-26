@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { parseWalletCategory } from "./walletCategories";
 
 /** Integer micro-units (amount × 1e6) so accumulation is exact; the DB column is Decimal(12,6). */
@@ -54,4 +55,48 @@ export function daysInWindow(fromIso: string, toIso: string): string[] {
 export function previousUtcWindow(now: Date, n = 2): { from: string; to: string } {
   const today = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
   return { from: new Date(today - n * 864e5).toISOString(), to: new Date(today - 1).toISOString() };
+}
+
+/**
+ * GHL wallet settlementTime looks like "2026-06-19 08:06:55.147" (space, no zone). The request asks for timezone UTC,
+ * so treat it as UTC explicitly — `new Date()` on that string would use the machine's local zone.
+ */
+export function parseSettlementTime(s: string): Date {
+  const iso = /[zZ]|[+-]\d{2}:?\d{2}$/.test(s.trim()) ? s.trim().replace(" ", "T") : `${s.trim().replace(" ", "T")}Z`;
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) throw new Error(`unparseable settlementTime: ${s}`);
+  return d;
+}
+
+/** WalletTransaction insert payload for one raw GHL row; amount goes through the same micros rounding as the rollup so the two reconcile exactly. */
+export function toWalletTransactionData(row: WalletTxRow, scopeKey: string, ghlAccountId: string | null) {
+  return {
+    id: row.id,
+    scopeKey,
+    ghlAccountId,
+    settlementTime: parseSettlementTime(row.settlementTime),
+    category: parseWalletCategory(row.description),
+    description: (row.description ?? "").trim(),
+    amount: new Prisma.Decimal(microsToDecimalString(toMicros(row.amount))),
+  };
+}
+
+export type UsageWindow = { from: string; to: string };
+
+/**
+ * Windows the nightly wallet_usage job works through, in order: the previous 2 UTC days, plus — on UTC day-of-month 3
+ * only — the whole previous calendar month as ≤7-day windows (keeps each window's cursor and page count bounded).
+ */
+export function planUsageWindows(now: Date): UsageWindow[] {
+  const windows: UsageWindow[] = [previousUtcWindow(now, 2)];
+  if (now.getUTCDate() !== 3) return windows;
+  const y = now.getUTCFullYear();
+  const m = now.getUTCMonth();
+  const monthStart = Date.UTC(y, m - 1, 1); // Date.UTC normalizes m-1 = -1 to December of the previous year
+  const nextMonthStart = Date.UTC(y, m, 1);
+  for (let start = monthStart; start < nextMonthStart; start += 7 * 864e5) {
+    const end = Math.min(start + 7 * 864e5, nextMonthStart) - 1;
+    windows.push({ from: new Date(start).toISOString(), to: new Date(end).toISOString() });
+  }
+  return windows;
 }

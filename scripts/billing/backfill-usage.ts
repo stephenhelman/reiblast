@@ -39,6 +39,8 @@ async function main() {
   console.log(`Range ${fromDay} → ${toDay}: ${windows.length} monthly window(s), ${locs.length} locations (incl. HQ)`);
   console.log(`Estimated GHL API calls: min ${windows.length * (locs.length + 1)} (one per location + one unfiltered per window), typically ~1.7× that once multi-page locations are counted\n`);
 
+  const allMismatches: unknown[] = [];
+  let txInserted = 0;
   const totals = new Map<string, { count: number; micros: number }>(); // `${scope}|${category}`
   for (const w of windows) {
     const collected = new Map<string, RollupRow[]>();
@@ -47,7 +49,9 @@ async function main() {
       { db, apply, cursor: null, now: new Date(), shouldYield: () => false },
       { window: w, onScope: (scope, rows) => collected.set(scope, rows) },
     );
-    console.log(`${w.from.slice(0, 10)} → ${w.to.slice(0, 10)}: calls=${apiStats.calls - before} rowsSeen=${(r.summary as any).rowsSeen} unfiltered=${(r.summary as any).unfilteredRows} rollupRows=${(r.summary as any).rollupRows}`);
+    console.log(`${w.from.slice(0, 10)} → ${w.to.slice(0, 10)}: calls=${apiStats.calls - before} rowsSeen=${(r.summary as any).rowsSeen} unfiltered=${(r.summary as any).unfilteredRows} rollupRows=${(r.summary as any).rollupRows} txInserted=${(r.summary as any).txInserted ?? 0} check=${apply ? `${(r.summary as any).rollupCheck?.mismatchCount} mismatches` : "skipped"}`);
+    txInserted += (r.summary as any).txInserted ?? 0;
+    allMismatches.push(...((r.summary as any).rollupCheck?.mismatches ?? []));
     for (const [scope, rows] of collected) {
       for (const row of rows) {
         const k = `${scope}|${row.category}`;
@@ -59,6 +63,9 @@ async function main() {
     }
   }
   console.log(`\nTotal GHL API calls: ${apiStats.calls}`);
+  console.log(`WalletTransaction rows inserted: ${txInserted}`);
+  console.log(`Rollup-vs-rows mismatches: ${allMismatches.length}`);
+  for (const m of allMismatches) console.log("  ", JSON.stringify(m));
   console.log("\nScope | category | rows | amount");
   const hq = process.env.GHL_HQ_LOCATION_ID;
   const label = (s: string) => (s === hq ? "HQ" : s.startsWith("_") ? s : "member");

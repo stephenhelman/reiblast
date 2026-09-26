@@ -1,27 +1,44 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { classify, CLASSIFIER_VERSION } from "./classify";
 import { getBillingDb } from "./db";
+import { locationIdFromDescription, shouldStampRefundDetected, type MatchMethod } from "./matchAccount";
 import { normalizeTransaction, unwrapTransaction } from "./normalizeTransaction";
 
 type Db = Pick<PrismaClient, "ghlAccount" | "billingLedgerEntry">;
 
 export type IngestResult =
   | { action: "ignored"; reason: string }
-  | { action: "written"; classification: string; matchedAccount: boolean; ghlTransactionId: string };
+  | { action: "written"; classification: string; matchedAccount: boolean; matchMethod: MatchMethod | null; ghlTransactionId: string; refundDetected: boolean };
 
 /**
  * The ONLY writer of BillingLedgerEntry. Shared by the webhook route and the historical load.
  * Accepts a transaction in either GHL shape. No GHL calls, no state changes, no tags, no stage moves.
  */
-export async function ingestTransaction(txn: unknown, db?: Db): Promise<IngestResult> {
+export async function ingestTransaction(txn: unknown, db?: Db, opts: { now?: Date } = {}): Promise<IngestResult> {
   const client: Db = db ?? (await getBillingDb());
   const t = normalizeTransaction(txn);
   const c = classify(t);
   if (c.classification === "ignore") return { action: "ignored", reason: c.reason };
 
-  const account = t.contactId
+  let account = t.contactId
     ? await client.ghlAccount.findUnique({ where: { contactId: t.contactId }, select: { id: true } })
     : null;
+  let matchMethod: MatchMethod | null = account ? "contactId" : null;
+
+  // Fallback for auto-recharges whose payer contact isn't a known member: the description embeds the member's location URL.
+  if (!account && c.classification === "wallet_auto_recharge") {
+    const locationId = locationIdFromDescription(t.description);
+    if (locationId) {
+      account = await client.ghlAccount.findUnique({ where: { locationId }, select: { id: true } });
+      if (account) matchMethod = "descriptionLocation";
+    }
+  }
+
+  const existing = await client.billingLedgerEntry.findUnique({
+    where: { ghlTransactionId: t.id },
+    select: { amountRefunded: true, refundDetectedAt: true },
+  });
+  const stampRefund = !!existing && shouldStampRefundDetected(Number(existing.amountRefunded), t.amountRefunded, existing.refundDetectedAt);
 
   const raw = unwrapTransaction(txn) as Prisma.InputJsonObject; // exactly as received (array unwrapped)
   const fields = {
@@ -45,8 +62,8 @@ export async function ingestTransaction(txn: unknown, db?: Db): Promise<IngestRe
       ...fields,
     },
     // Refresh only what can change after the fact; a later-created account may link an earlier unmatched row.
-    update: { ...fields, ...(account ? { ghlAccountId: account.id } : {}) },
+    update: { ...fields, ...(account ? { ghlAccountId: account.id } : {}), ...(stampRefund ? { refundDetectedAt: opts.now ?? new Date() } : {}) },
   });
 
-  return { action: "written", classification: c.classification, matchedAccount: !!account, ghlTransactionId: t.id };
+  return { action: "written", classification: c.classification, matchedAccount: !!account, matchMethod, ghlTransactionId: t.id, refundDetected: stampRefund };
 }

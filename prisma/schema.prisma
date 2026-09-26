@@ -989,11 +989,16 @@ model BillingLedgerEntry {
   // shape from the webhook; a row can switch shapes on update). ONLY lib/billing/normalizeTransaction.ts
   // may read this column.
   raw               Json
+  // First time an update raised amountRefunded above its prior value. Null = never detected (rows refunded before this
+  // column existed stay null: "predates tracking").
+  refundDetectedAt  DateTime?
   createdAt         DateTime     @default(now())
   updatedAt         DateTime     @default(now()) @updatedAt
 
   @@index([ghlAccountId, occurredAt])
   @@index([classification, occurredAt])
+  @@index([occurredAt])
+  @@index([status, occurredAt])
 }
 
 // Inbox for GHL → server events (contract rule 5: record before side effects).
@@ -1025,6 +1030,23 @@ model UsageRollup {
   @@unique([scopeKey, day, category])
   @@index([ghlAccountId, day])
   @@index([day])
+}
+
+// Evidence layer for UsageRollup: one row per GHL wallet transaction (insert-or-ignore on id).
+model WalletTransaction {
+  id             String   @id // GHL wallet transaction id
+  scopeKey       String // member locationId, HQ locationId, "_agency", "_unattributed"
+  ghlAccountId   String?
+  settlementTime DateTime
+  category       String
+  description    String
+  amount         Decimal  @db.Decimal(12, 6) // signed like UsageRollup: charges negative, recharges positive
+  createdAt      DateTime @default(now())
+
+  @@index([scopeKey, settlementTime])
+  @@index([ghlAccountId, settlementTime])
+  @@index([category, settlementTime])
+  @@index([settlementTime])
 }
 
 model WalletBalanceSnapshot {

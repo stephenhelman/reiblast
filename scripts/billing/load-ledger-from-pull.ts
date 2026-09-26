@@ -92,6 +92,9 @@ async function main() {
   console.log("\nClassification | rows | matched to GhlAccount | unmatched");
   for (const [k, o] of Object.entries(byClass).sort((a, b) => b[1].n - a[1].n)) console.log(`  ${k.padEnd(22)} ${String(o.n).padStart(4)}  ${String(o.matched).padStart(4)}  ${String(o.unmatched).padStart(4)}`);
   const written = Object.values(byClass).reduce((a, o) => a + o.n, 0);
+  const byMethod: Record<string, number> = {};
+  for (const { res } of results) if (res.action === "written") byMethod[res.matchMethod ?? "none"] = (byMethod[res.matchMethod ?? "none"] ?? 0) + 1;
+  console.log("\nMatch method (written rows):", byMethod);
   console.log(`  ${"TOTAL written".padEnd(22)} ${String(written).padStart(4)}   (+${ignored} ignored = ${written + ignored})`);
 
   console.log(`\nUnclassified: ${unclassified.length}`);

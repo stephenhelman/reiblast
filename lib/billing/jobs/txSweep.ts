@@ -39,6 +39,10 @@ export const runTxSweep: JobFn = async (ctx) => {
         if (ctx.apply) {
           const r = await ingestTransaction(rec, ctx.db);
           bump(r.action === "ignored" ? "ignored" : `written:${r.classification}`);
+          if (r.action === "written") {
+            bump(`match:${r.matchMethod ?? "none"}`);
+            if (r.refundDetected) bump("refund_detected");
+          }
         } else {
           const n = normalizeTransaction(rec);
           const cl = classify(n);
