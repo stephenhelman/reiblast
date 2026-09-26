@@ -82,6 +82,9 @@ model User {
   memberActions MemberAction[] @relation("MemberActions")
   carts         Cart[]         @relation("Carts")
 
+  // GHL billing/lifecycle account — schema-only, no column on User.
+  ghlAccount GhlAccount?
+
   @@unique([ghlLocationId], map: "User_ghlLocationId_key")
 }
 
@@ -918,4 +921,73 @@ model CartLine {
   createdAt DateTime @default(now())
 
   @@index([cartId])
+}
+
+// ── GHL billing/lifecycle record (see docs/ghl-server-contract.md) ──────────
+
+enum BillingState {
+  trial
+  active
+  payment_failed
+  paused
+  inactive
+  churned
+}
+
+enum PauseReason {
+  non_payment
+  expired_invoice
+  voluntary
+  manual_killswitch
+}
+
+enum BillingClass {
+  core_subscription
+  wallet_auto_recharge
+  wallet_manual_recharge
+  trial_auth
+  failed_signup
+  refund
+  unclassified
+}
+
+model GhlAccount {
+  id                   String               @id @default(cuid())
+  userId               String               @unique
+  user                 User                 @relation(fields: [userId], references: [id])
+  contactId            String               @unique
+  locationId           String?              @unique
+  billingState         BillingState? // null = not yet seeded
+  pauseReason          PauseReason?
+  warningCount         Int                  @default(0)
+  trialOffer           String?
+  trialEndsAt          DateTime?
+  legacyUnreconciled   Boolean              @default(false)
+  onboardingStage      String?
+  locationToken        String?
+  locationTokenExpires DateTime?
+  ledgerEntries        BillingLedgerEntry[]
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+}
+
+model BillingLedgerEntry {
+  id                String       @id @default(cuid())
+  ghlTransactionId  String       @unique
+  ghlAccountId      String?
+  ghlAccount        GhlAccount?  @relation(fields: [ghlAccountId], references: [id])
+  contactId         String?
+  classification    BillingClass
+  classifierVersion Int
+  status            String
+  amount            Decimal      @db.Decimal(12, 6)
+  amountRefunded    Decimal      @default(0) @db.Decimal(12, 6)
+  provider          String
+  subscriptionId    String?
+  occurredAt        DateTime
+  raw               Json
+  createdAt         DateTime     @default(now())
+
+  @@index([ghlAccountId, occurredAt])
+  @@index([classification, occurredAt])
 }
