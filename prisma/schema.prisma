@@ -985,9 +985,27 @@ model BillingLedgerEntry {
   provider          String
   subscriptionId    String?
   occurredAt        DateTime
+  // Stored exactly as received (list-endpoint shape from the historical load, single-transaction
+  // shape from the webhook; a row can switch shapes on update). ONLY lib/billing/normalizeTransaction.ts
+  // may read this column.
   raw               Json
   createdAt         DateTime     @default(now())
 
   @@index([ghlAccountId, occurredAt])
   @@index([classification, occurredAt])
+}
+
+// Inbox for GHL → server events (contract rule 5: record before side effects).
+model GhlEvent {
+  id          String    @id @default(cuid())
+  source      String // e.g. "payment", later "stage_change"
+  externalId  String? // e.g. GHL transaction id, when present
+  payload     Json
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?
+
+  @@index([source, processedAt])
+  @@index([externalId])
 }

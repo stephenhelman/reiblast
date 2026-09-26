@@ -8,6 +8,7 @@
     "build": "next build",
     "start": "next start",
     "test:engine": "vitest run lib/engine/__tests__",
+    "test:billing": "vitest run lib/billing/__tests__",
     "db:status:dev": "PRISMA_TARGET=dev prisma migrate status",
     "db:status:prod": "PRISMA_TARGET=prod prisma migrate status",
     "migrate:dev": "PRISMA_TARGET=dev prisma migrate dev",
