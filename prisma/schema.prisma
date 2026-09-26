@@ -990,6 +990,7 @@ model BillingLedgerEntry {
   // may read this column.
   raw               Json
   createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @default(now()) @updatedAt
 
   @@index([ghlAccountId, occurredAt])
   @@index([classification, occurredAt])
@@ -1008,4 +1009,44 @@ model GhlEvent {
 
   @@index([source, processedAt])
   @@index([externalId])
+}
+
+// Cost side of the billing dashboard: daily usage per scope and category (see lib/billing/walletCategories.ts).
+model UsageRollup {
+  id           String   @id @default(cuid())
+  scopeKey     String // member/HQ locationId, "_agency" (blank-name rows), or "_unattributed" (named, non-member)
+  ghlAccountId String? // set when scopeKey matches a GhlAccount.locationId
+  day          DateTime @db.Date // UTC day of settlementTime
+  category     String // parsed category, e.g. outbound_sms, a2p_registration, agency_auto_recharge, wallet_sales_tax, other
+  count        Int
+  amount       Decimal  @db.Decimal(12, 6) // signed: charges negative, recharges positive
+  updatedAt    DateTime @updatedAt
+
+  @@unique([scopeKey, day, category])
+  @@index([ghlAccountId, day])
+  @@index([day])
+}
+
+model WalletBalanceSnapshot {
+  id           String   @id @default(cuid())
+  locationId   String
+  ghlAccountId String?
+  takenOn      DateTime @db.Date
+  status       String // "ok" | "unavailable" | "error"
+  balance      Decimal? @db.Decimal(12, 6)
+  raw          Json?
+  createdAt    DateTime @default(now())
+
+  @@unique([locationId, takenOn])
+}
+
+// Bookkeeping for the nightly jobs (replay | tx_sweep | wallet_usage | balances).
+model JobRun {
+  id          String    @id @default(cuid())
+  job         String    @unique
+  lastStartAt DateTime?
+  lastOkAt    DateTime?
+  cursor      Json?
+  lastError   String?
+  lastSummary Json?
 }

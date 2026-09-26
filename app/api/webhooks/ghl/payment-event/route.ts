@@ -1,24 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createHash, timingSafeEqual } from "crypto";
 import { Prisma } from "@prisma/client";
 import { getBillingDb } from "@/lib/billing/db";
-import { fetchTransactionById } from "@/lib/billing/ghlTransactions";
-import { ingestTransaction } from "@/lib/billing/ingestTransaction";
+import { secretMatches } from "@/lib/billing/secret";
+import { processPaymentEvent } from "@/lib/billing/processPaymentEvent";
 
 // GHL → server payment event (docs/ghl-server-contract.md rules 3, 5, 6):
 // record the event first, fetch the full transaction by id, ingest idempotently.
 // Always returns 200; failures live in GhlEvent.lastError/attempts.
 
 const ok = () => NextResponse.json({ received: true });
-
-// Hash both sides so timingSafeEqual always compares equal-length buffers (length mismatch can't throw or leak).
-function secretMatches(incoming: string | null): boolean {
-  const expected = process.env.GHL_BILLING_WEBHOOK_SECRET;
-  if (!incoming || !expected) return false;
-  const a = createHash("sha256").update(incoming).digest();
-  const b = createHash("sha256").update(expected).digest();
-  return timingSafeEqual(a, b);
-}
 
 function extractTransactionId(body: Record<string, unknown>): string | null {
   const custom = body.customData as Record<string, unknown> | undefined;
@@ -28,7 +18,7 @@ function extractTransactionId(body: Record<string, unknown>): string | null {
 
 export async function POST(req: NextRequest) {
   try {
-    if (!secretMatches(req.headers.get("x-reiblast-billing-secret"))) {
+    if (!secretMatches(req.headers.get("x-reiblast-billing-secret"), "GHL_BILLING_WEBHOOK_SECRET")) {
       console.warn("[payment-event] auth failed — ignoring");
       return ok();
     }
@@ -44,24 +34,11 @@ export async function POST(req: NextRequest) {
     }
 
     const transactionId = extractTransactionId(body);
-    const prisma = await getBillingDb();
-    const event = await prisma.ghlEvent.create({
+    const db = await getBillingDb();
+    const event = await db.ghlEvent.create({
       data: { source: "payment", externalId: transactionId, payload: body as Prisma.InputJsonObject },
     });
-
-    try {
-      if (!transactionId) throw new Error("no transactionId in body");
-      const full = await fetchTransactionById(transactionId);
-      await ingestTransaction(full, prisma);
-      await prisma.ghlEvent.update({ where: { id: event.id }, data: { processedAt: new Date(), lastError: null } });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      console.error("[payment-event] processing failed:", message);
-      await prisma.ghlEvent.update({
-        where: { id: event.id },
-        data: { attempts: { increment: 1 }, lastError: message.slice(0, 500) },
-      });
-    }
+    await processPaymentEvent(event.id, { db });
   } catch (err) {
     console.error("[payment-event] unexpected error:", err instanceof Error ? err.message : err);
   }
