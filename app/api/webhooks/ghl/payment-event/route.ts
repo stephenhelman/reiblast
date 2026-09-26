@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHash, timingSafeEqual } from "crypto";
 import { Prisma } from "@prisma/client";
-import { prisma } from "@/lib/prisma";
+import { getBillingDb } from "@/lib/billing/db";
 import { fetchTransactionById } from "@/lib/billing/ghlTransactions";
 import { ingestTransaction } from "@/lib/billing/ingestTransaction";
 
@@ -44,6 +44,7 @@ export async function POST(req: NextRequest) {
     }
 
     const transactionId = extractTransactionId(body);
+    const prisma = await getBillingDb();
     const event = await prisma.ghlEvent.create({
       data: { source: "payment", externalId: transactionId, payload: body as Prisma.InputJsonObject },
     });
@@ -51,7 +52,7 @@ export async function POST(req: NextRequest) {
     try {
       if (!transactionId) throw new Error("no transactionId in body");
       const full = await fetchTransactionById(transactionId);
-      await ingestTransaction(full);
+      await ingestTransaction(full, prisma);
       await prisma.ghlEvent.update({ where: { id: event.id }, data: { processedAt: new Date(), lastError: null } });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

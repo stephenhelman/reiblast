@@ -1,5 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { classify, CLASSIFIER_VERSION } from "./classify";
+import { getBillingDb } from "./db";
 import { normalizeTransaction, unwrapTransaction } from "./normalizeTransaction";
 
 type Db = Pick<PrismaClient, "ghlAccount" | "billingLedgerEntry">;
@@ -13,7 +14,7 @@ export type IngestResult =
  * Accepts a transaction in either GHL shape. No GHL calls, no state changes, no tags, no stage moves.
  */
 export async function ingestTransaction(txn: unknown, db?: Db): Promise<IngestResult> {
-  const client: Db = db ?? (await import("@/lib/prisma")).prisma;
+  const client: Db = db ?? (await getBillingDb());
   const t = normalizeTransaction(txn);
   const c = classify(t);
   if (c.classification === "ignore") return { action: "ignored", reason: c.reason };
