@@ -1043,10 +1043,10 @@ model WalletTransaction {
   amount         Decimal  @db.Decimal(12, 6) // signed like UsageRollup: charges negative, recharges positive
   createdAt      DateTime @default(now())
 
+  // Member/scope drill-downs filter by scopeKey (= the member's locationId); ghlAccountId is a write-time snapshot and
+  // is not indexed. A bare settlementTime index was dropped as redundant.
   @@index([scopeKey, settlementTime])
-  @@index([ghlAccountId, settlementTime])
   @@index([category, settlementTime])
-  @@index([settlementTime])
 }
 
 model WalletBalanceSnapshot {

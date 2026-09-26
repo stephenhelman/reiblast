@@ -64,7 +64,13 @@ builds the rollup, with `createMany({ skipDuplicates: true })` — an existing r
 - **Month refresh queue.** The job cursor carries a queue of windows (previous 2 days, then on UTC day 3 the previous
   month in ≤7-day chunks), the position, and the in-window cursor, so it resumes across continuations. Each window keeps
   its own bounded `seenIds`.
-- **Size.** ~85–100k rows/month, roughly 0.4–0.5 KB/row including 4 indexes (see "Storage" in the task-4 report). Decide a
+- **Indexes.** `(scopeKey, settlementTime)` and `(category, settlementTime)` (plus the pkey). **Drill-downs filter by
+  `scopeKey`** — for a member it is their `GhlAccount.locationId`, and HQ / `_agency` / `_unattributed` are scopes too,
+  which a `ghlAccountId` filter cannot express. `ghlAccountId` is a write-time snapshot (null if the account was created
+  later) and is deliberately not indexed; resolve a member's `locationId` first, then query by `scopeKey`. Cross-scope date
+  ranges (e.g. a Denver-time month) scan by `settlementTime` using the category or scope index or a sequential scan —
+  fine at this size; revisit if a view needs a bare time-range index.
+- **Size.** ~85–100k rows/month, ~0.4 KB/row with the two secondary indexes (61 MB for the first 153k rows). Decide a
   retention policy before it matters (e.g. keep raw rows 13 months, older months live only in `UsageRollup`).
 
 ## Reporting rules
