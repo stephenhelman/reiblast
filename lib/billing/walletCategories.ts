@@ -20,7 +20,13 @@ export const WALLET_CATEGORIES = [
   "a2p_fast_track",
   "email",
   "email_notification",
+  "email_verification",
+  "ask_ai",
+  "domain_purchase",
+  "caller_id_verification",
+  "workflow_premium",
   "agency_auto_recharge",
+  "agency_manual_recharge",
   "wallet_sales_tax",
   "other",
 ] as const;
@@ -43,8 +49,15 @@ const PATTERNS: [WalletCategory, RegExp][] = [
   ["a2p_registration", /^A2P Registration/i],
   ["a2p_fast_track", /^A2P Fast Track/i],
   ["email_notification", /^EmailNotification/i],
+  ["email_verification", /^Email\s?Verification/i], // before "email"
   ["email", /^Email\b/i],
+  ["ask_ai", /^Ask\s?AI\b/i],
+  ["domain_purchase", /^Domain\s?Purchase/i],
+  ["caller_id_verification", /^Caller\s?ID Verification/i],
+  ["workflow_premium", /^Workflow\b|premium (action|workflow)/i],
+  // Agency cash paid to GHL (scope _agency), like each other:
   ["agency_auto_recharge", /^Auto-?Recharge for Agency/i],
+  ["agency_manual_recharge", /^Manual Recharge for Agency/i],
   ["wallet_sales_tax", /^WALLET_SALES_TAX/i],
 ];
 

@@ -24,6 +24,18 @@ const CASES: [string, string][] = [
     "agency_auto_recharge",
   ],
   ["WALLET_SALES_TAX ref: tax_abc123", "wallet_sales_tax"],
+  ["askai ref: AbCdEf123456", "ask_ai"],
+  ["Ask AI ref: AbCdEf123456", "ask_ai"],
+  ["EmailVerification ref: AbCdEf123456-1783717088", "email_verification"],
+  ["Email Verification ref: AbCdEf123456", "email_verification"],
+  ["domainPurchase ref: AbCdEf123456", "domain_purchase"],
+  ["Domain Purchase ref: AbCdEf123456", "domain_purchase"],
+  ["CallerID Verification", "caller_id_verification"],
+  ["Caller ID Verification", "caller_id_verification"],
+  ["Workflow Pro Plan — Free Tier (inbound_webhook)", "workflow_premium"],
+  ["Workflow AI Builder (premium_action)", "workflow_premium"],
+  ["Premium action: something (workflow)", "workflow_premium"],
+  ["Manual Recharge for Agency Wallet", "agency_manual_recharge"],
 ];
 
 describe("parseWalletCategory", () => {
@@ -37,6 +49,18 @@ describe("parseWalletCategory", () => {
   it("keeps Email and EmailNotification apart", () => {
     expect(parseWalletCategory("EmailNotification ref: x")).toBe("email_notification");
     expect(parseWalletCategory("Email ref: x")).toBe("email");
+  });
+
+  it("keeps EmailVerification out of email, and agency recharges apart from each other", () => {
+    expect(parseWalletCategory("EmailVerification ref: x")).toBe("email_verification");
+    expect(parseWalletCategory("Email ref: x")).toBe("email");
+    expect(parseWalletCategory("Auto-Recharge for Agency - X of USD 10 was successfully added")).toBe("agency_auto_recharge");
+    expect(parseWalletCategory("Manual Recharge for Agency Wallet")).toBe("agency_manual_recharge");
+  });
+
+  it("does not treat a sub-account manual recharge or unrelated Workflow-ish text as agency/premium", () => {
+    expect(parseWalletCategory("Manual Recharge for Location Wallet")).toBe("other");
+    expect(parseWalletCategory("Something about a workflow")).toBe("other");
   });
 
   it("unknown, empty, and missing descriptions are other", () => {
