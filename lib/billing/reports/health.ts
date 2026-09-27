@@ -47,8 +47,11 @@ export async function getJobsHealth(db: PrismaClient, now = new Date()): Promise
 
 export type LedgerRowLite = { ghlTransactionId: string; occurredAt: Date; status: string; amount: string; provider: string; classification: string };
 
+/** "Failed" the same way replay sees it: unprocessed with attempts ≥ 5 or a recorded error. */
+const failedEventWhere = { processedAt: null, OR: [{ attempts: { gte: 5 } }, { lastError: { not: null } }] };
+
 export async function getDataQuality(db: PrismaClient, now = new Date(), listLimit = 100) {
-  const [unclassifiedCount, unclassified, unmatchedByClass, failedEvents, recent] = await Promise.all([
+  const [unclassifiedCount, unclassified, unmatchedByClass, failedEvents, recentAll] = await Promise.all([
     db.billingLedgerEntry.count({ where: { classification: "unclassified" } }),
     db.billingLedgerEntry.findMany({
       where: { classification: "unclassified" },
@@ -57,15 +60,27 @@ export async function getDataQuality(db: PrismaClient, now = new Date(), listLim
       select: { ghlTransactionId: true, occurredAt: true, status: true, amount: true, provider: true, classification: true },
     }),
     db.billingLedgerEntry.groupBy({ by: ["classification"], where: { ghlAccountId: null }, _count: { _all: true } }),
-    db.ghlEvent.findMany({
-      where: { processedAt: null, OR: [{ attempts: { gte: 5 } }, { lastError: { not: null } }] },
-      orderBy: { receivedAt: "desc" },
-      take: listLimit,
-      select: { id: true, source: true, externalId: true, attempts: true, lastError: true, receivedAt: true },
-    }),
-    db.ghlEvent.findMany({ where: { receivedAt: { gte: new Date(now.getTime() - 864e5) } }, select: { processedAt: true, attempts: true, lastError: true } }),
+    // All sources here, not just "payment" — filtered/broken out below. job_trigger rows are processedAt-at-insert (never
+    // "failed" by this definition) so they fall out on their own; NON_REPLAYABLE_SOURCES is the belt-and-suspenders version.
+    db.ghlEvent.findMany({ where: { ...failedEventWhere, source: "payment" }, orderBy: { receivedAt: "desc" }, take: listLimit, select: { id: true, source: true, externalId: true, attempts: true, lastError: true, receivedAt: true } }),
+    db.ghlEvent.findMany({ where: { receivedAt: { gte: new Date(now.getTime() - 864e5) } }, select: { source: true, processedAt: true, attempts: true, lastError: true } }),
   ]);
-  const failedCount = await db.ghlEvent.count({ where: { processedAt: null, OR: [{ attempts: { gte: 5 } }, { lastError: { not: null } }] } });
+  const failedCount = await db.ghlEvent.count({ where: { ...failedEventWhere, source: "payment" } });
+
+  // "Failed events" and "last 24h" are payment-webhook health (the badge, the count, the historical framing below); the GHL
+  // stage-change/invoice events and job-trigger sections on the Health page cover their own sources with their own counts.
+  const recent = recentAll.filter((e) => e.source === "payment");
+
+  const bySource = new Map<string, { total: number; failed: number; pending: number }>();
+  for (const e of recentAll) {
+    if (e.source === "payment") continue;
+    const row = bySource.get(e.source) ?? { total: 0, failed: 0, pending: 0 };
+    row.total++;
+    if (!e.processedAt && (e.attempts >= 5 || e.lastError)) row.failed++;
+    else if (!e.processedAt) row.pending++;
+    bySource.set(e.source, row);
+  }
+
   return {
     unclassifiedCount,
     unclassified: unclassified.map((r) => ({ ...r, amount: r.amount.toFixed(6) })) as LedgerRowLite[],
@@ -79,6 +94,8 @@ export async function getDataQuality(db: PrismaClient, now = new Date(), listLim
       failed: recent.filter((e) => !e.processedAt && (e.attempts >= 5 || e.lastError)).length,
       pending: recent.filter((e) => !e.processedAt && e.attempts < 5 && !e.lastError).length,
     },
+    /** Last 24h, by source, for every source other than "payment" (typically stage_change, invoice, job_trigger). */
+    otherSourcesLast24h: [...bySource.entries()].map(([source, c]) => ({ source, ...c })).sort((a, b) => a.source.localeCompare(b.source)),
   };
 }
 

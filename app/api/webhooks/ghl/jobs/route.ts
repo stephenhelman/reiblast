@@ -28,7 +28,9 @@ async function record(
   const payload = { reason, headersPresent: headerNames(req), contentType: req.headers.get("content-type"), bodyKeys: extra.bodyKeys ?? [], ...(extra.jobRunId ? { jobRunId: extra.jobRunId } : {}) };
   if (db) {
     try {
-      await db.ghlEvent.create({ data: { source: "job_trigger", externalId: job ?? null, payload: payload as Prisma.InputJsonObject } });
+      // processedAt is set immediately: nothing ever "processes" a job_trigger row later, so it must never look unprocessed
+      // to the replay job or to Health's failed/pending event counts (NON_REPLAYABLE_SOURCES is the second line of defense).
+      await db.ghlEvent.create({ data: { source: "job_trigger", externalId: job ?? null, payload: payload as Prisma.InputJsonObject, processedAt: new Date() } });
     } catch (err) {
       console.error("[jobs] failed to record trigger attempt:", err instanceof Error ? err.message : err);
     }

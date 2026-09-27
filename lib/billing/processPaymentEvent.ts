@@ -19,12 +19,18 @@ export type ProcessOptions = {
   retryPending?: boolean;
 };
 
-/** Where an event is eligible for replay: unprocessed, under the attempt cap, and old enough. */
+/** Sources that are never a webhook to replay (nothing "processes" them later): recorded once, done. Currently just the
+ *  jobs route's own trigger-attempt log (source "job_trigger", see app/api/webhooks/ghl/jobs/route.ts). */
+export const NON_REPLAYABLE_SOURCES = ["job_trigger"] as const;
+
+/** Where an event is eligible for replay: unprocessed, under the attempt cap, old enough, and a source that IS a webhook
+ *  (excludes NON_REPLAYABLE_SOURCES even on the rare row where processedAt wasn't set at insert — belt and suspenders). */
 export function replayableWhere(now = new Date()) {
   return {
     processedAt: null,
     attempts: { lt: MAX_EVENT_ATTEMPTS },
     receivedAt: { lt: new Date(now.getTime() - MIN_EVENT_AGE_MS) },
+    source: { notIn: [...NON_REPLAYABLE_SOURCES] },
   };
 }
 

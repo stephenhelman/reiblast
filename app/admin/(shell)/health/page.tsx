@@ -61,14 +61,23 @@ export default async function HealthPage() {
       </Section>
 
       <Section
-        title="GHL events"
-        note={`Last 24 h: ${quality.last24h.total} received · ${quality.last24h.processed} processed · ${quality.last24h.pending} pending · ${quality.last24h.failed} failed. Failed = unprocessed with attempts ≥ 5 or a recorded error.`}
+        title="GHL payment events"
+        note={`Source = payment only (other sources below). Last 24 h: ${quality.last24h.total} received · ${quality.last24h.processed} processed · ${quality.last24h.pending} pending · ${quality.last24h.failed} failed. Failed = unprocessed with attempts ≥ 5 or a recorded error.`}
       >
         <Table
           head={["Event", "Source", "Transaction", "Attempts", "Received", "Last error"]}
           rows={quality.failedEvents.map((e) => [last4(e.id), e.source, e.externalId ?? "—", e.attempts, fmtDenver(e.receivedAt), e.lastError ?? "—"])}
-          empty="No failed events."
+          empty="No failed payment events."
         />
+        {quality.otherSourcesLast24h.length > 0 && (
+          <>
+            <p className="border-t border-border-default px-4 pt-3 text-xs text-white/50">Other sources, last 24 h (see the stage-change/invoice and job-trigger sections below for detail):</p>
+            <Table
+              head={["Source", "Received", "Failed", "Pending"]}
+              rows={quality.otherSourcesLast24h.map((s) => [s.source, s.total, s.failed, s.pending])}
+            />
+          </>
+        )}
       </Section>
 
       <Section
