@@ -79,6 +79,69 @@ with `ip` (first `x-forwarded-for`) and `createdAt`. Used for the login throttle
 
 ## Views
 
-Overview and Health (Task 5); Revenue, Costs, Margin, Members are placeholders (Task 6). All reads go through
-`getBillingDb()` and `lib/billing/reports/*`. Member counts exclude `internal` accounts. Every page shows the footer:
-"Gross collected via GHL — processor fees, chargebacks and payouts not included. Reporting timezone: America/Denver."
+All reads go through `getBillingDb()` and the shared query library `lib/billing/reports/*`; every page starts with
+`pageCtx()` (owner check, billing DB, link base) and every export handler with `ownerOr401`. Member logic filters
+`accountType = member`; labels come from `lib/admin/accountLabel.ts`. Money is exact decimal strings end to end
+(`lib/billing/reports/money.ts`); recharts receives rounded numbers for plotting only. Month buckets are **America/Denver**
+months (`occurredAt` for the ledger, `settlementTime` for wallet rows). Every page shows the footer: "Gross collected via
+GHL — processor fees, chargebacks and payouts not included. Reporting timezone: America/Denver."
+
+| Route | What it shows |
+|---|---|
+| `/` | Health badges, this month vs last month net revenue, agency cash paid, gross cash margin, members by state (each links to its page), negative balances, strikes |
+| `/revenue` | Net revenue by Denver month × class (chart + table), processor eras, Attempts table. Cells drill down to `/revenue/rows` |
+| `/costs` | Wallet costs by month / scope / category in four groups. Cells drill down to `/costs/rows` (raw rows, **one month at a time**) |
+| `/margin` | Agency gross cash margin by month, per-member margin (sortable), "Unmatched" line, optional fee estimate, "Partner split — formula pending" |
+| `/members`, `/members/[id]` | Member list (state filter, sortable) and drill-down (ledger, usage by category, wallet transactions, balance history, revenue-vs-usage chart) |
+| `/health` | Job/data-quality/balance/database health (Task 5) |
+
+### Rules (one definition each; page, drill-down and CSV share the same function)
+
+- **Net revenue** = `SUM(amount − amountRefunded)` over ledger rows with `status IN (succeeded, refunded)`, excluding
+  `trial_auth` and `failed_signup`, by Denver month of `occurredAt`; classes: core, wallet auto-recharge, wallet manual
+  recharge, and **Other / unclassified** (so the total never drops a row). Refunds are attributed to the original
+  transaction's month; `refundDetectedAt` is shown where present, "predates tracking" otherwise.
+- **Attempts** = every ledger row that is not revenue (failed/pending, `trial_auth`, `failed_signup`). Revenue and attempts
+  partition the ledger.
+- **Processor eras** come from `BillingLedgerEntry.provider` and dates over the whole ledger, always labelled
+  "GHL processor: <name>" (unrelated to the REItools Stripe integration).
+- **Costs** come from `WalletTransaction` by Denver month of `settlementTime`. Groups: **one-time** (`a2p_registration`,
+  `a2p_fast_track`, `domain_purchase`, `caller_id_verification`), **agency cash** (`agency_auto_recharge`,
+  `agency_manual_recharge`), **taxes** (`wallet_sales_tax`), **ongoing** (everything else). Scopes are kept separate:
+  members, REIblast HQ, `_agency`, `_unattributed`. Aggregates display costs positive; drill-downs and raw exports keep
+  the stored sign (charges negative, recharges positive).
+- **Gross cash margin** = net revenue − agency cash paid to GHL − wallet sales tax, per Denver month. This is a cash view;
+  processor fees, chargebacks and payouts are not in the data. If `ADMIN_PROCESSOR_FEE_PCT` (0–100, exclusive) is set, a
+  separate line labelled "estimate" shows that percentage of net revenue; unset hides it.
+- **Per-member margin** = wallet recharges + core subscription collected (net of refunds) − wallet usage charged (member
+  scope). Ledger rows with no account are the "Unmatched" line; revenue on a non-member account is surfaced, never dropped.
+- **Denver vs UTC**: monthly figures differ from UTC-month reports by the rows near midnight UTC. Example: August member
+  usage is −888.483003 by UTC month (matches `UsageRollup`) and −906.046875 by Denver month.
+- **Members**: "Covered until" = `GhlAccount.coreCoveredUntil` + `coreCoverageNote` (manual override) and "Expected next
+  charge (≈)" = latest succeeded core payment + 1 month, always labelled an estimate; if `coreCoveredUntil` is later than the
+  estimate (or there is no estimate) an "override applies" badge shows. Coverage ends at 00:00 America/Denver on the stored
+  date. Set it with `scripts/billing/set-coverage.ts` (see `docs/billing-jobs.md`, "Core coverage override").
+
+### CSV exports (`/api/admin/export/[view]`)
+
+Views: `revenue`, `attempts`, `costs`, `margin`, `members`, `member-ledger`, `member-usage`. The query string is the page's
+filters (`from`, `to`, `month`, `class`, `provider`, `account`, `group`, `scope`, `category`, `scopeKey`, `state`, `sort`,
+`dir`, `member`, `by=member`), parsed by the same code as the pages (`lib/admin/filters.ts`). Add `detail=1` to
+`revenue`/`attempts`/`costs` for row-level data.
+
+- **Raw wallet-transaction exports** (`costs&detail=1`, `member-usage`) require `month=YYYY-MM` (one Denver month, max);
+  aggregate exports do not. Largest month today (85k rows, 18 MB) streams in ~11 s.
+- Streamed with `papaparse.unparse` in chunks (keyset pagination on (timestamp, id)); metadata rows first ("REIblast admin
+  export", view, filters, generated-at Denver + UTC, classifier version, reporting timezone, the gross-collected
+  disclaimer), then the header, then data including every id. Dates are ISO UTC plus a Denver column.
+- Text columns (descriptions, labels, notes) starting with `= + - @` get a leading `'` (spreadsheet formula injection);
+  numeric columns are never altered.
+- Every export writes an `AdminAuditLog` row (`action: export`, view, filters, `rowCount`, `partial: true` if the client
+  aborted). Each handler starts with `ownerOr401` (middleware does not cover `/api`).
+
+### Tests
+
+`npm run test:admin` (auth, routing, CSV, filters, labels, alert rules), `npm run test:billing` (classifier, ingest, jobs and
+all report rules with synthetic data), and `REPORTS_TEST_DATABASE_URL=<non-production url> npm run test:reports-db` — SQL
+tests for the cost queries on synthetic rows in a `TEMP TABLE` that shadows `"WalletTransaction"` inside a transaction that
+is always rolled back (no real data is read or written; skipped when the URL is unset; refuses the production host).

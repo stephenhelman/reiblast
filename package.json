@@ -10,6 +10,7 @@
     "test:engine": "vitest run lib/engine/__tests__",
     "test:billing": "vitest run lib/billing/__tests__",
     "test:admin": "vitest run lib/admin/__tests__",
+    "test:reports-db": "vitest run lib/billing/__tests__/reports/costsSql.db.test.ts",
     "db:status:dev": "PRISMA_TARGET=dev prisma migrate status",
     "db:status:prod": "PRISMA_TARGET=prod prisma migrate status",
     "migrate:dev": "PRISMA_TARGET=dev prisma migrate dev",
@@ -29,6 +30,7 @@
     "prisma": "^6.19.3",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
+    "recharts": "^2.15.4",
     "resend": "^6.12.4",
     "xlsx": "^0.18.5"
   },

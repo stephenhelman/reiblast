@@ -31,14 +31,14 @@ export function Section({ title, note, children }: { title: string; note?: React
   );
 }
 
-export function Table({ head, rows, empty = "None." }: { head: string[]; rows: React.ReactNode[][]; empty?: string }) {
+export function Table({ head, rows, empty = "None." }: { head: React.ReactNode[]; rows: React.ReactNode[][]; empty?: string }) {
   if (rows.length === 0) return <p className="px-6 py-4 text-sm text-white/50">{empty}</p>;
   return (
     <table className="w-full text-left text-sm">
       <thead>
         <tr className="border-b border-border-default text-xs uppercase tracking-wide text-white/40">
-          {head.map((h) => (
-            <th key={h} className="px-4 py-2 font-medium">{h}</th>
+          {head.map((h, i) => (
+            <th key={i} className="px-4 py-2 font-medium">{h}</th>
           ))}
         </tr>
       </thead>
