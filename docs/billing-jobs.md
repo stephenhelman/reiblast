@@ -116,6 +116,21 @@ signups). Rules 2–4 still run first, so wallet recharges, $0 rows and anything
 `saas_subscription` without a subscriptionId) are unaffected.
 
 `scripts/billing/reclassify-ledger.ts` (dry-run default, `--apply`, refuses the production host) re-runs the classifier over
-every row from its stored raw and updates `classification` + `classifierVersion` **only where the classification changes**.
-Unchanged rows keep the version they were written with, so the ledger legitimately holds mixed versions; a row tagged v1 whose
-classification v2 would repeat is simply not rewritten. Test-mode rows the classifier would ignore are reported, never changed.
+every row from its stored raw. `classification` is updated **only where it changes**; `classifierVersion` is stamped with the
+current version on **every row it evaluates**, so after a run the whole ledger carries one version. Test-mode rows the
+classifier would ignore are reported and re-stamped, never reclassified; rows that fail to normalize are left untouched.
+Rows written by `ingestTransaction` after a classifier bump already carry the new version.
+
+## Core coverage override (`GhlAccount.coreCoveredUntil` / `coreCoverageNote`)
+
+A manual override for members who are covered for the core subscription without a matching payment on record (for example
+prepaid during a processor migration). `scripts/billing/set-coverage.ts` (dry-run default, `--apply`, refuses the production
+host) sets it: `--location-id`, `--until=YYYY-MM-DD` (a Denver date, **exclusive**: covered while now < 00:00
+America/Denver on that date), `--note`, and optionally `--state`, `--pause-reason=none|…` and `--legacy-unreconciled=true|false`
+to correct the account at the same time. It prints a before/after table. **DB only — it never writes to GHL, so the GHL
+pipeline stage is not moved; keep the stage consistent by hand.**
+
+**Dunning rule:** while `now < coreCoveredUntil`, a missing or failed core payment must not be treated as delinquency
+(see `docs/payments-webhook-system.md`). The dashboard shows "Covered until" and the note next to the estimated next charge
+(latest succeeded core payment + 1 month); if the override is later than that estimate the member list marks
+"override applies".

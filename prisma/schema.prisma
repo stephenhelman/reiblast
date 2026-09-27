@@ -974,6 +974,10 @@ model GhlAccount {
   // Display name seen in agency wallet rows for this location (wallet_usage keeps it fresh). Null = not yet known.
   locationName          String?
   locationNameUpdatedAt DateTime?
+  // Manual core-subscription coverage override (scripts/billing/set-coverage.ts). While now < coreCoveredUntil the account is
+  // covered even if no core payment is on record; dunning must not treat a missing/failed core payment as delinquency.
+  coreCoveredUntil DateTime?
+  coreCoverageNote String?
   onboardingStage      String?
   locationToken        String?
   locationTokenExpires DateTime?

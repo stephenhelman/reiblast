@@ -1,6 +1,7 @@
 /**
- * Re-run the classifier over every BillingLedgerEntry (from the stored raw, via normalizeTransaction) and update
- * `classification` + `classifierVersion` ONLY on rows whose classification changes. Unchanged rows are not touched.
+ * Re-run the classifier over every BillingLedgerEntry (from the stored raw, via normalizeTransaction). `classification` is
+ * updated only where it changes; `classifierVersion` is stamped with the CURRENT version on EVERY row it evaluates, so after
+ * a run the whole ledger carries one version.
  *
  *   PRISMA_TARGET=dev npx tsx scripts/billing/reclassify-ledger.ts            # dry-run: prints the before→after matrix
  *   PRISMA_TARGET=dev npx tsx scripts/billing/reclassify-ledger.ts --apply    # write the changes
@@ -20,11 +21,13 @@ async function main() {
   const versions = new Map<number, number>();
   const changes: { id: string; from: string; to: string; row: (typeof rows)[number] }[] = [];
   const wouldIgnore: string[] = [];
+  const restamp: string[] = []; // evaluated rows whose stored classifierVersion differs from the current one (ids)
   const errors: string[] = [];
 
   for (const r of rows) {
     versions.set(r.classifierVersion, (versions.get(r.classifierVersion) ?? 0) + 1);
     let after: string;
+    let errored = false;
     try {
       const c = classify(normalizeTransaction(r.raw));
       if (c.classification === "ignore") {
@@ -32,9 +35,11 @@ async function main() {
         after = r.classification; // never change on ignore
       } else after = c.classification;
     } catch (err) {
+      errored = true;
       errors.push(`…${r.ghlTransactionId.slice(-4)}: ${err instanceof Error ? err.message : err}`);
       after = r.classification;
     }
+    if (!errored && r.classifierVersion !== CLASSIFIER_VERSION) restamp.push(r.id);
     const key = `${r.classification} → ${after}`;
     matrix.set(key, (matrix.get(key) ?? 0) + 1);
     if (after !== r.classification) changes.push({ id: r.id, from: r.classification, to: after, row: r });
@@ -46,8 +51,9 @@ async function main() {
     const [from, to] = k.split(" → ");
     console.log(`  ${from === to ? "  " : "* "}${k.padEnd(52)} ${String(n).padStart(4)}`);
   }
-  console.log(`\nChanged rows: ${changes.length}${changes.length ? "" : " (nothing to do)"}`);
+  console.log(`\nReclassified rows: ${changes.length}${changes.length ? "" : " (none)"}`);
   for (const c of changes) console.log(`  …${c.row.ghlTransactionId.slice(-4)} ${c.from} → ${c.to}  status=${c.row.status} $${c.row.amount} ${c.row.provider} ${c.row.occurredAt.toISOString().slice(0, 10)}`);
+  console.log(`\nRows whose stored classifierVersion will be stamped ${CLASSIFIER_VERSION}: ${restamp.length}`);
   if (wouldIgnore.length) console.log(`\nWould now be ignored (test-mode; NOT changed): ${wouldIgnore.length}`);
   if (errors.length) console.log(`\nNormalize errors (rows left as-is): ${errors.length}\n  ${errors.join("\n  ")}`);
 
@@ -60,7 +66,13 @@ async function main() {
     const res = await db.billingLedgerEntry.updateMany({ where: { id: c.id, classification: c.from as never }, data: { classification: c.to as never, classifierVersion: CLASSIFIER_VERSION } });
     written += res.count;
   }
-  console.log(`\nUpdated ${written} rows (classification + classifierVersion=${CLASSIFIER_VERSION}).`);
+  console.log(`\nReclassified ${written} rows (classification + classifierVersion=${CLASSIFIER_VERSION}).`);
+  let stamped = 0;
+  for (let i = 0; i < restamp.length; i += 500) {
+    const res = await db.billingLedgerEntry.updateMany({ where: { id: { in: restamp.slice(i, i + 500) }, classifierVersion: { not: CLASSIFIER_VERSION } }, data: { classifierVersion: CLASSIFIER_VERSION } });
+    stamped += res.count;
+  }
+  console.log(`Stamped classifierVersion=${CLASSIFIER_VERSION} on ${stamped} further rows.`);
 }
 
 main().finally(() => db.$disconnect());
