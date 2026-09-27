@@ -3,15 +3,17 @@ import { BadgeRow, PageTitle, Section, Table } from "@/components/admin/ui";
 import { fmtUsd } from "@/lib/admin/format";
 import { requireOwnerOrRedirect } from "@/lib/admin/requireOwner";
 import { getBillingDb } from "@/lib/billing/db";
-import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getJobsHealth, getMemberOverview } from "@/lib/billing/reports/health";
+import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getInactiveUsage, getJobsHealth, getMemberOverview } from "@/lib/billing/reports/health";
 
 export const dynamic = "force-dynamic";
 
 export default async function OverviewPage() {
   await requireOwnerOrRedirect();
   const db = await getBillingDb();
-  const [jobs, quality, balances, dbSize, members] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getMemberOverview(db)]);
-  const badges = buildBadges({ jobs, quality, balances, db: dbSize });
+  const [jobs, quality, balances, dbSize, members, inactiveUsage] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getMemberOverview(db), getInactiveUsage(db)]);
+  const badges = buildBadges({ jobs, quality, balances, inactiveUsage, db: dbSize });
+  // Negative balances on trial / active / payment_failed (warning) and paused (info); most negative first.
+  const negatives = balances.alerts.filter((a) => a.level === "warning" || a.level === "info");
 
   return (
     <div>
@@ -24,10 +26,10 @@ export default async function OverviewPage() {
         <Table head={["Billing state", "Accounts"]} rows={members.billingStates.map((s) => [s.state, s.count])} empty="No member accounts." />
       </Section>
 
-      <Section title="Negative wallet balances" note={`Latest snapshot per location${balances.negative.length > 10 ? ` — most negative 10 of ${balances.negative.length}` : ""}. Full list on Health.`}>
+      <Section title="Negative wallet balances" note={`Trial, active, payment_failed and paused accounts only${negatives.length > 10 ? ` — most negative 10 of ${negatives.length}` : ""}. Full alert list on Health.`}>
         <Table
-          head={["Location", "Balance", "Snapshot day"]}
-          rows={balances.negative.slice(0, 10).map((r) => [<AccountLabel key={r.locationId} locationId={r.locationId} locationName={r.locationName} businessName={r.businessName} />, fmtUsd(r.balance as string), r.takenOn])}
+          head={["Location", "State", "Balance", "Snapshot day"]}
+          rows={negatives.slice(0, 10).map((r) => [<AccountLabel key={r.accountId} locationId={r.locationId} locationName={r.locationName} businessName={r.businessName} />, r.billingState ?? "—", fmtUsd(r.balance as string), r.takenOn])}
           empty="None."
         />
       </Section>

@@ -1,21 +1,23 @@
 import AccountLabel from "@/components/admin/AccountLabel";
 import { Banner, BadgeRow, PageTitle, Section, Table } from "@/components/admin/ui";
-import { fmtDenver, fmtMb, fmtUsd, last4 } from "@/lib/admin/format";
+import { fmtDenver, fmtDenverDate, fmtMb, fmtUsd, last4 } from "@/lib/admin/format";
 import { requireOwnerOrRedirect } from "@/lib/admin/requireOwner";
 import { getBillingDb } from "@/lib/billing/db";
-import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getJobsHealth, NEON_CRIT_PCT, NEON_WARN_PCT } from "@/lib/billing/reports/health";
+import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getInactiveUsage, getJobsHealth, NEON_CRIT_PCT, NEON_WARN_PCT, type BalanceLevel } from "@/lib/billing/reports/health";
 
 export const dynamic = "force-dynamic";
+
+const LEVEL_STYLE: Record<BalanceLevel, string> = { alert: "text-red-300", warning: "text-gold", info: "text-white/50" };
+const stateCell = (s: string | null) => (s === null ? <span className="text-red-300">not seeded</span> : s === "n/a" ? "—" : s);
 
 const yn = (b: boolean) => (b ? <span className="text-red-300">STALE</span> : <span className="text-emerald-300">fresh</span>);
 
 export default async function HealthPage() {
   await requireOwnerOrRedirect();
   const db = await getBillingDb();
-  const [jobs, quality, balances, dbSize] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db)]);
-  const badges = buildBadges({ jobs, quality, balances, db: dbSize });
-  const bal = (rows: typeof balances.negative) =>
-    rows.map((r) => [<AccountLabel key={r.locationId} locationId={r.locationId} locationName={r.locationName} businessName={r.businessName} />, r.status, r.balance === null ? "—" : fmtUsd(r.balance), r.takenOn]);
+  const [jobs, quality, balances, dbSize, inactiveUsage] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getInactiveUsage(db)]);
+  const badges = buildBadges({ jobs, quality, balances, inactiveUsage, db: dbSize });
+  const label = (r: { locationId: string; locationName: string | null; businessName: string | null }) => <AccountLabel locationId={r.locationId} locationName={r.locationName} businessName={r.businessName} />;
 
   return (
     <div>
@@ -69,13 +71,44 @@ export default async function HealthPage() {
         />
       </Section>
 
-      <Section title="Wallet balances" note={`Latest snapshot per location (${balances.total} locations, latest day ${balances.latestDay ?? "—"}).`}>
-        <div className="px-4 pt-3 text-xs uppercase tracking-wide text-white/40">Negative ({balances.negative.length})</div>
-        <Table head={["Location", "Status", "Balance", "Snapshot day"]} rows={bal(balances.negative)} empty="None." />
-        <div className="border-t border-border-default px-4 pt-3 text-xs uppercase tracking-wide text-white/40">Unavailable ({balances.unavailable.length})</div>
-        <Table head={["Location", "Status", "Balance", "Snapshot day"]} rows={bal(balances.unavailable)} empty="None." />
-        <div className="border-t border-border-default px-4 pt-3 text-xs uppercase tracking-wide text-white/40">Errors ({balances.errors.length})</div>
-        <Table head={["Location", "Status", "Balance", "Snapshot day"]} rows={bal(balances.errors)} empty="None." />
+      <Section
+        title="Balance alerts"
+        note={`Member accounts only, by billing state. ${balances.counts.alert} alert · ${balances.counts.warning} warning · ${balances.counts.info} info. Trial/active/payment_failed: unavailable or error is an ALERT (a wallet is expected), negative is a WARNING. Paused: negative is INFO. Inactive/churned are not alerted. Null billing state is always an ALERT.`}
+      >
+        <Table
+          head={["Level", "Location", "State", "Reason", "Snapshot", "Balance", "Day"]}
+          rows={balances.alerts.map((a) => [
+            <span key="l" className={`font-semibold uppercase ${LEVEL_STYLE[a.level]}`}>{a.level}</span>,
+            label(a),
+            stateCell(a.billingState),
+            a.reason,
+            a.status,
+            a.balance === null ? "—" : fmtUsd(a.balance),
+            a.takenOn,
+          ])}
+          empty="No balance alerts."
+        />
+      </Section>
+
+      <Section
+        title="Usage on non-active accounts"
+        note={`Paused / inactive / churned member accounts with wallet charges since ${inactiveUsage.windowStart} (last 7 days, America/Denver). ${inactiveUsage.rows.length ? "ALERT — these accounts should not be incurring usage." : ""}`}
+      >
+        <Table
+          head={["Location", "State", "7-day cost", "Charges", "Last usage"]}
+          rows={inactiveUsage.rows.map((r) => [label(r), r.billingState, <span key="c" className="text-red-300">{fmtUsd(r.cost)}</span>, r.charges, fmtDenverDate(r.lastUsageAt)])}
+          empty="None — no usage on paused, inactive or churned accounts."
+        />
+      </Section>
+
+      <Section title="All balances" note={`Latest snapshot per location, every state (${balances.total} locations, latest day ${balances.latestDay ?? "—"}). Reference only — alerts are above. HQ is not a member account.`}>
+        <details>
+          <summary className="cursor-pointer px-4 py-3 text-sm text-gold">Show all {balances.total} balances</summary>
+          <Table
+            head={["Location", "State", "Status", "Balance", "Day"]}
+            rows={balances.all.map((r) => [label(r), stateCell(r.billingState), r.status, r.balance === null ? "—" : fmtUsd(r.balance), r.takenOn])}
+          />
+        </details>
       </Section>
 
       <Section title="Database" note="Neon storage is project-wide — every branch counts toward the plan limit; this figure is this branch only.">

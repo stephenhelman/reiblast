@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { BillingState, PrismaClient } from "@prisma/client";
 import { getJobHealth, type JobHealth } from "../jobHealth";
 
 /** Read-only queries for the admin Health/Overview views. Every function takes the db client (getBillingDb() in the app). */
@@ -84,36 +84,143 @@ export async function getDataQuality(db: PrismaClient, now = new Date(), listLim
 
 // ── balances ────────────────────────────────────────────────────────────────
 
-export type BalanceRow = { locationId: string; takenOn: string; status: string; balance: string | null; locationName: string | null; businessName: string | null };
-export type BalancesHealth = { total: number; latestDay: string | null; negative: BalanceRow[]; unavailable: BalanceRow[]; errors: BalanceRow[]; hqLocationId: string | null };
+export type BalanceLevel = "alert" | "warning" | "info";
+export type BalanceClass = { level: BalanceLevel; reason: string } | null;
+type Snap = { status: string; balance: string | null } | null;
 
-/** Latest snapshot per location (member locations + HQ), split into negative / unavailable / error. */
+/**
+ * State-aware balance rules (member accounts only). `snap` is the latest snapshot, or null if none exists.
+ *   trial / active / payment_failed : unavailable|error → ALERT "expected a wallet"; negative → WARNING
+ *   paused                          : negative → INFO (expected); unavailable/error → not shown
+ *   inactive / churned              : not shown
+ *   billingState null               : ALERT "state not seeded", whatever the balance (even with no snapshot)
+ * (buildBalanceAlerts only applies these to member accounts that HAVE a locationId — accounts still onboarding are not shown.)
+ */
+export function classifyBalance(state: BillingState | null, snap: Snap): BalanceClass {
+  if (state === null) return { level: "alert", reason: "state not seeded" };
+  const negative = !!snap && snap.status === "ok" && snap.balance !== null && Number(snap.balance) < 0;
+  switch (state) {
+    case "trial":
+    case "active":
+    case "payment_failed":
+      if (snap && (snap.status === "unavailable" || snap.status === "error")) return { level: "alert", reason: `expected a wallet (${snap.status})` };
+      return negative ? { level: "warning", reason: "negative balance" } : null;
+    case "paused":
+      return negative ? { level: "info", reason: "negative while paused (expected)" } : null;
+    default:
+      return null; // inactive, churned
+  }
+}
+
+export type BalanceRow = { locationId: string; takenOn: string; status: string; balance: string | null; locationName: string | null; businessName: string | null; billingState: BillingState | null | "n/a" };
+/** One alert per MEMBER account that has a location. */
+export type BalanceAlert = BalanceRow & { accountId: string; level: BalanceLevel; reason: string };
+export type BalancesHealth = {
+  total: number;
+  latestDay: string | null;
+  hqLocationId: string | null;
+  /** Member accounts only, sorted alert → warning → info, then most negative first. */
+  alerts: BalanceAlert[];
+  counts: Record<BalanceLevel, number>;
+  /** Every latest snapshot in every state (incl. HQ, whose billingState is "n/a"), for reference. */
+  all: BalanceRow[];
+};
+
+const LEVEL_ORDER: Record<BalanceLevel, number> = { alert: 0, warning: 1, info: 2 };
+
+/**
+ * Pure: combine member accounts with their latest snapshots into alerts. Evaluated per MEMBER account, not per snapshot.
+ * Accounts without a locationId (still onboarding, no wallet yet) are never alerted — not even when billingState is null.
+ */
+export function buildBalanceAlerts(
+  members: { accountId: string; locationId: string | null; billingState: BillingState | null; locationName: string | null; businessName: string | null }[],
+  snapshots: Map<string, { takenOn: string; status: string; balance: string | null }>,
+): BalanceAlert[] {
+  const out: BalanceAlert[] = [];
+  for (const m of members) {
+    if (!m.locationId) continue;
+    const snap = snapshots.get(m.locationId) ?? null;
+    const c = classifyBalance(m.billingState, snap);
+    if (!c) continue;
+    out.push({ accountId: m.accountId, locationId: m.locationId, takenOn: snap?.takenOn ?? "—", status: snap?.status ?? "no snapshot", balance: snap?.balance ?? null, locationName: m.locationName, businessName: m.businessName, billingState: m.billingState, ...c });
+  }
+  return out.sort((a, b) => LEVEL_ORDER[a.level] - LEVEL_ORDER[b.level] || Number(a.balance ?? 0) - Number(b.balance ?? 0));
+}
+
 export async function getBalancesHealth(db: PrismaClient): Promise<BalancesHealth> {
   const rows = await db.$queryRaw<{ locationId: string; takenOn: Date; status: string; balance: { toString(): string } | null }[]>`
     SELECT DISTINCT ON ("locationId") "locationId", "takenOn", "status", "balance"
     FROM "WalletBalanceSnapshot" ORDER BY "locationId", "takenOn" DESC`;
-  // Names for display (member accounts only; HQ is labelled by the helper from GHL_HQ_LOCATION_ID).
-  const accounts = await db.ghlAccount.findMany({
-    where: { accountType: "member", locationId: { in: rows.map((r) => r.locationId) } },
-    select: { locationId: true, locationName: true, user: { select: { businessName: true } } },
+  const snaps = rows.map((r) => ({ locationId: r.locationId, takenOn: r.takenOn.toISOString().slice(0, 10), status: r.status, balance: r.balance === null ? null : r.balance.toString() }));
+  const snapBy = new Map(snaps.map((r) => [r.locationId, r]));
+
+  // Member accounts that have a location (accounts still onboarding have no wallet and are not alerted).
+  const memberRows = await db.ghlAccount.findMany({
+    where: { accountType: "member", locationId: { not: null } },
+    select: { id: true, locationId: true, billingState: true, locationName: true, user: { select: { businessName: true } } },
   });
-  const nameBy = new Map(accounts.map((a) => [a.locationId as string, a]));
-  const lite: BalanceRow[] = rows.map((r) => ({
-    locationId: r.locationId,
-    takenOn: r.takenOn.toISOString().slice(0, 10),
-    status: r.status,
-    balance: r.balance === null ? null : r.balance.toString(),
-    locationName: nameBy.get(r.locationId)?.locationName ?? null,
-    businessName: nameBy.get(r.locationId)?.user?.businessName ?? null,
-  }));
+  const members = memberRows.map((m) => ({ accountId: m.id, locationId: m.locationId, billingState: m.billingState, locationName: m.locationName, businessName: m.user?.businessName ?? null }));
+  const memberBy = new Map(members.filter((m) => m.locationId).map((m) => [m.locationId as string, m]));
+
+  const alerts = buildBalanceAlerts(members, snapBy);
+  const all: BalanceRow[] = snaps
+    .map((r) => {
+      const m = memberBy.get(r.locationId);
+      return { ...r, locationName: m?.locationName ?? null, businessName: m?.businessName ?? null, billingState: (m ? m.billingState : "n/a") as BalanceRow["billingState"] };
+    })
+    .sort((a, b) => Number(a.balance ?? Infinity) - Number(b.balance ?? Infinity));
   return {
-    total: lite.length,
-    latestDay: lite.reduce<string | null>((m, r) => (m === null || r.takenOn > m ? r.takenOn : m), null),
-    negative: lite.filter((r) => r.status === "ok" && r.balance !== null && Number(r.balance) < 0).sort((a, b) => Number(a.balance) - Number(b.balance)),
-    unavailable: lite.filter((r) => r.status === "unavailable"),
-    errors: lite.filter((r) => r.status === "error"),
+    total: snaps.length,
+    latestDay: snaps.reduce<string | null>((m, r) => (m === null || r.takenOn > m ? r.takenOn : m), null),
     hqLocationId: process.env.GHL_HQ_LOCATION_ID ?? null,
+    alerts,
+    counts: { alert: alerts.filter((a) => a.level === "alert").length, warning: alerts.filter((a) => a.level === "warning").length, info: alerts.filter((a) => a.level === "info").length },
+    all,
   };
+}
+
+// ── usage on non-active accounts ────────────────────────────────────────────
+
+export const INACTIVE_STATES: BillingState[] = ["paused", "inactive", "churned"];
+const REPORTING_TZ = "America/Denver";
+
+/** YYYY-MM-DD of `now` in Denver. */
+export function denverDate(now: Date): string {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: REPORTING_TZ, year: "numeric", month: "2-digit", day: "2-digit" }).format(now);
+}
+/** First Denver calendar day of the trailing `days`-day window that ends today (today included): days=7 → today and the 6 before. */
+export function denverWindowStart(now: Date, days = 7): string {
+  return new Date(Date.parse(`${denverDate(now)}T00:00:00Z`) - (days - 1) * 864e5).toISOString().slice(0, 10);
+}
+
+export type InactiveUsageRow = { locationId: string; locationName: string | null; businessName: string | null; billingState: BillingState; cost: string; lastUsageAt: Date; charges: number };
+
+/**
+ * Member accounts in paused/inactive/churned with any wallet CHARGE in the last 7 Denver days. Reads WalletTransaction
+ * (the row-level evidence behind UsageRollup — the two reconcile exactly) because Denver-day bucketing needs
+ * settlementTime; UsageRollup.day is a UTC day. Charges are negative amounts; cost is shown positive.
+ */
+export async function getInactiveUsage(db: PrismaClient, now = new Date()): Promise<{ windowStart: string; rows: InactiveUsageRow[] }> {
+  const windowStart = denverWindowStart(now, 7);
+  const accounts = await db.ghlAccount.findMany({
+    where: { accountType: "member", billingState: { in: INACTIVE_STATES }, locationId: { not: null } },
+    select: { locationId: true, billingState: true, locationName: true, user: { select: { businessName: true } } },
+  });
+  if (accounts.length === 0) return { windowStart, rows: [] };
+  const byLoc = new Map(accounts.map((a) => [a.locationId as string, a]));
+  const usage = await db.$queryRaw<{ scopeKey: string; cost: string; lastAt: Date; charges: bigint }[]>`
+    SELECT "scopeKey", (-SUM("amount"))::text AS cost, MAX("settlementTime") AS "lastAt", COUNT(*) AS charges
+    FROM "WalletTransaction"
+    WHERE "scopeKey" = ANY(${[...byLoc.keys()]}) AND "amount" < 0
+      AND ("settlementTime" AT TIME ZONE 'UTC' AT TIME ZONE 'America/Denver')::date >= ${windowStart}::date
+    GROUP BY "scopeKey"`;
+  const rows = usage
+    .map((u) => {
+      const a = byLoc.get(u.scopeKey) as NonNullable<ReturnType<typeof byLoc.get>>;
+      return { locationId: u.scopeKey, locationName: a.locationName, businessName: a.user?.businessName ?? null, billingState: a.billingState as BillingState, cost: u.cost, lastUsageAt: u.lastAt, charges: Number(u.charges) };
+    })
+    .sort((x, y) => Number(y.cost) - Number(x.cost));
+  return { windowStart, rows };
 }
 
 // ── database size ───────────────────────────────────────────────────────────
@@ -162,19 +269,23 @@ export type Badge = { key: string; label: string; value: string; tone: "ok" | "w
 export function buildBadges(x: {
   jobs: JobsHealth[];
   quality: { unclassifiedCount: number; unmatchedTotal: number; failedEventCount: number };
-  balances: BalancesHealth;
+  balances: Pick<BalancesHealth, "counts">;
+  inactiveUsage: { rows: unknown[] };
   db: { level: DbSizeLevel; pct: number | null };
 }): Badge[] {
   const stale = x.jobs.filter((j) => j.stale).length;
   const errored = x.jobs.filter((j) => j.lastError).length;
   const mismatch = x.jobs.find((j) => j.job === "wallet_usage")?.rollupMismatchCount ?? null;
+  const { alert, warning } = x.balances.counts;
+  const inactive = x.inactiveUsage.rows.length;
   return [
     { key: "jobs", label: "Jobs", value: stale || errored ? `${stale} stale · ${errored} erroring` : "all fresh", tone: stale || errored ? "bad" : "ok" },
     { key: "rollup", label: "Rollup check", value: mismatch === null ? "not recorded yet" : `${mismatch} mismatches`, tone: mismatch === null ? "warn" : mismatch > 0 ? "bad" : "ok" },
     { key: "unclassified", label: "Unclassified", value: String(x.quality.unclassifiedCount), tone: x.quality.unclassifiedCount > 0 ? "warn" : "ok" },
     { key: "unmatched", label: "Unmatched", value: String(x.quality.unmatchedTotal), tone: x.quality.unmatchedTotal > 0 ? "warn" : "ok" },
     { key: "events", label: "Failed events", value: String(x.quality.failedEventCount), tone: x.quality.failedEventCount > 0 ? "bad" : "ok" },
-    { key: "balances", label: "Negative balances", value: `${x.balances.negative.length}`, tone: x.balances.negative.length > 0 ? "bad" : "ok" },
+    { key: "balances", label: "Balance alerts", value: `${alert} alert · ${warning} warning`, tone: alert > 0 ? "bad" : warning > 0 ? "warn" : "ok" },
+    { key: "inactive-usage", label: "Usage on non-active", value: String(inactive), tone: inactive > 0 ? "bad" : "ok" },
     { key: "db", label: "Database", value: x.db.pct === null ? "limit not set" : `${x.db.pct.toFixed(0)}% of limit`, tone: x.db.level === "critical" ? "bad" : x.db.level === "warning" || x.db.level === "unset" ? "warn" : "ok" },
   ];
 }
