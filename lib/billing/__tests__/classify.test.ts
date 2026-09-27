@@ -7,7 +7,7 @@ const c = (o = {}, shape: "list" | "single" = "list") =>
   classify(normalizeTransaction(shape === "list" ? listTxn(o) : singleTxn(o))).classification;
 
 describe("classify", () => {
-  it("exports version 1", () => expect(CLASSIFIER_VERSION).toBe(1));
+  it("exports version 2", () => expect(CLASSIFIER_VERSION).toBe(2));
 
   it("rule 1: test-mode is ignored (even a would-be subscription)", () => {
     expect(c({ liveMode: false, subscriptionId: "sub00000000000000001" })).toBe("ignore");
@@ -64,10 +64,33 @@ describe("classify", () => {
     expect(c({ subType: "payment_link", status: "failed" })).toBe("unclassified");
   });
 
+  it("rule 5 (v2): a failed row with NO source subtype and no subscription is failed_signup (e.g. failed form/order signups)", () => {
+    expect(c({ sourceType: "form", entityType: "order", status: "failed", amount: 57 })).toBe("failed_signup");
+    expect(c({ sourceType: "form", entityType: "order", status: "failed", amount: 57 }, "single")).toBe("failed_signup");
+    expect(c({ status: "failed" })).toBe("failed_signup"); // fixture default: manual source, no subtype
+  });
+
+  it("rule 5 (v2) does not steal rows that earlier rules own, or rows that need a subtype/failed status to match", () => {
+    // failed saas_subscription with no subscriptionId is still a core subscription (rule 4 precedes rule 5)
+    expect(c({ subType: "saas_subscription", status: "failed" })).toBe("core_subscription");
+    expect(c({ subType: "subscription_view", status: "failed" })).toBe("core_subscription");
+    // a subscriptionId, an invoice entity or $0 also beat rule 5
+    expect(c({ status: "failed", subscriptionId: "sub00000000000000001" })).toBe("core_subscription");
+    expect(c({ status: "failed", entityType: "invoice" })).toBe("core_subscription");
+    expect(c({ status: "failed", amount: 0 })).toBe("trial_auth");
+    // wallet recharges (rule 2) even when failed
+    expect(c({ status: "failed", subType: "saas_one_time", description: AUTO_DESC })).toBe("wallet_auto_recharge");
+    // a non-payment_link failed row that HAS a subtype is still unclassified
+    expect(c({ status: "failed", subType: "payments_dashboard" })).toBe("unclassified");
+    // only failed rows: a succeeded no-subtype, no-subscription row stays unclassified
+    expect(c({ status: "succeeded" })).toBe("unclassified");
+    expect(c({ status: "pending" })).toBe("unclassified");
+  });
+
   it("rule 6: everything else is unclassified", () => {
     expect(c({ subType: "payments_dashboard" })).toBe("unclassified");
     expect(c({ subType: "payments_dashboard", status: "failed" })).toBe("unclassified");
-    expect(c({})).toBe("unclassified");
+    expect(c({})).toBe("unclassified"); // succeeded, no subtype, no subscription
   });
 
   it("refunds do not reclassify (never returns the refund class)", () => {

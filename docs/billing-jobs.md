@@ -107,3 +107,15 @@ existing unmatched rows; it only fills a null `ghlAccountId`.
 - `seed-billing-state.ts`, `backfill-ghl-accounts.ts` (skips users with an internal account) and
   `relink-auto-recharge.ts` ignore internal accounts. Overview/health counts of members, `billingState` and
   `legacyUnreconciled` are member-only. Any new report or script must do the same.
+
+## Classifier versions
+
+`CLASSIFIER_VERSION` (lib/billing/classify.ts) is stored on every ledger row. **v2**: rule 5 (`failed_signup`) matches a
+failed row with no subscriptionId whose source is a `payment_link` **or** has no source subtype at all (failed form/order
+signups). Rules 2–4 still run first, so wallet recharges, $0 rows and anything subscription-shaped (including a failed
+`saas_subscription` without a subscriptionId) are unaffected.
+
+`scripts/billing/reclassify-ledger.ts` (dry-run default, `--apply`, refuses the production host) re-runs the classifier over
+every row from its stored raw and updates `classification` + `classifierVersion` **only where the classification changes**.
+Unchanged rows keep the version they were written with, so the ledger legitimately holds mixed versions; a row tagged v1 whose
+classification v2 would repeat is simply not rewritten. Test-mode rows the classifier would ignore are reported, never changed.

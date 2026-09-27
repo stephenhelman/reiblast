@@ -1,7 +1,11 @@
 import type { BillingClass } from "@prisma/client";
 import type { NormalizedTransaction } from "./normalizeTransaction";
 
-export const CLASSIFIER_VERSION = 1;
+/**
+ * v2: rule 5 also catches failed rows with no subtype at all (e.g. failed form/order signups), not just payment_link sources.
+ * Rows classified by an earlier version keep their stored classifierVersion until scripts/billing/reclassify-ledger.ts changes them.
+ */
+export const CLASSIFIER_VERSION = 2;
 
 export type Classification = { classification: BillingClass | "ignore"; reason: string };
 
@@ -32,8 +36,13 @@ export function classify(t: NormalizedTransaction): Classification {
     };
   }
 
-  if (t.entitySourceType === "payment_link" && !t.subscriptionId && t.status === "failed") {
-    return { classification: "failed_signup", reason: "failed payment_link without subscription" };
+  // Rule 5 (v2): a failed payment with no subscription that came from a payment_link OR has no source subtype at all.
+  // Rules 2-4 have already claimed wallet recharges, $0 rows and anything subscription-shaped (incl. saas_subscription).
+  if (t.status === "failed" && !t.subscriptionId && (t.entitySourceType === "payment_link" || !t.entitySourceSubType)) {
+    return {
+      classification: "failed_signup",
+      reason: t.entitySourceType === "payment_link" ? "failed payment_link without subscription" : "failed payment with no source subtype and no subscription",
+    };
   }
 
   return { classification: "unclassified", reason: "no rule matched" };
