@@ -4,7 +4,7 @@ import { waitUntil } from "@vercel/functions";
 import { getBillingDb } from "@/lib/billing/db";
 import { claim, runJob, configuredBudgetMs, MAX_CONTINUATIONS } from "@/lib/billing/jobs/runner";
 import { isJobName, type JobCursor, type JobName } from "@/lib/billing/jobs/types";
-import { checkSecret, headerNames, bodyKeys, type Reason } from "@/lib/billing/reason";
+import { checkSecret, headerNames, bodyKeys, missingEnvVars, logInternalError, type Reason } from "@/lib/billing/reason";
 
 // GHL scheduled workflow → nightly data jobs (docs/billing-jobs.md). No Vercel Cron.
 // Responds 200 immediately and runs the job via waitUntil; a job that reaches its time budget stores a cursor in
@@ -32,7 +32,8 @@ async function record(
       // to the replay job or to Health's failed/pending event counts (NON_REPLAYABLE_SOURCES is the second line of defense).
       await db.ghlEvent.create({ data: { source: "job_trigger", externalId: job ?? null, payload: payload as Prisma.InputJsonObject, processedAt: new Date() } });
     } catch (err) {
-      console.error("[jobs] failed to record trigger attempt:", err instanceof Error ? err.message : err);
+      // The insert itself failed — log it, but still return the reason below; a logging failure must never mask it.
+      logInternalError("jobs", err);
     }
   }
   return NextResponse.json({ accepted: reason === "accepted", ...(job ? { job } : {}), reason });
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest) {
   try {
     const auth = checkSecret(req.headers.get("x-reiblast-jobs-secret"), "GHL_JOBS_SECRET");
     if (auth === "misconfigured") {
-      console.error("[jobs] GHL_JOBS_SECRET is not set — refusing all triggers");
+      console.error("[jobs] missing required env var(s):", missingEnvVars(["GHL_JOBS_SECRET"]).join(", "));
       return record(null, req, "server_misconfigured", undefined);
     }
     if (auth === "missing") {
@@ -101,7 +102,7 @@ export async function POST(req: NextRequest) {
     );
     return record(db, req, "accepted", job, { bodyKeys: keys, jobRunId: jobRun.id });
   } catch (err) {
-    console.error("[jobs] unexpected error:", err instanceof Error ? err.message : err);
-    return record(db, req, "server_misconfigured", undefined);
+    logInternalError("jobs", err);
+    return record(db, req, "internal_error", undefined);
   }
 }

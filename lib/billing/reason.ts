@@ -14,13 +14,25 @@ export type Reason =
   | "unknown_job"
   | "in_flight"
   | "continuation_cap"
-  | "server_misconfigured";
+  | "server_misconfigured" // a required env var is unset — deterministic, known cause
+  | "internal_error"; // anything else unexpected (a thrown exception) — cause is not known/deterministic
 
 /** Auth outcome, checked in this order: an unset env var is a server problem, not a caller one. */
 export function checkSecret(incoming: string | null, envName: string): "ok" | "missing" | "failed" | "misconfigured" {
   if (!process.env[envName]) return "misconfigured";
   if (!incoming) return "missing";
   return secretMatches(incoming, envName) ? "ok" : "failed";
+}
+
+/** Which of these env vars are unset — for a "server_misconfigured" log line. Never logs a value, only names. */
+export function missingEnvVars(names: string[]): string[] {
+  return names.filter((n) => !process.env[n]);
+}
+
+/** Log an unexpected exception server-side only: message and stack, never in the response. */
+export function logInternalError(label: string, err: unknown): void {
+  const e = err instanceof Error ? err : new Error(String(err));
+  console.error(`[${label}] internal error:`, e.message, e.stack ? `\n${e.stack}` : "");
 }
 
 /** Header names only — never values (a secret header's value must never reach a log or a GhlEvent row). */

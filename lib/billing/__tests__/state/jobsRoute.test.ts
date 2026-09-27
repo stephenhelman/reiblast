@@ -92,12 +92,32 @@ describe("jobs route: reason codes, always 200, every attempt recorded", () => {
     expect(dump).not.toContain("nope-secret-value");
     expect(dump).not.toContain(SECRET);
   });
-  it("an unexpected error still answers 200 with a reason, never a stack trace", async () => {
+  it("an unexpected error → internal_error (distinct from a missing env var), still 200, never a stack trace in the body", async () => {
     holder.boom = true;
     const res = await jobsRoute(req({ job: "replay" }));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.reason).toBe("server_misconfigured");
+    expect(body.reason).toBe("internal_error");
     expect(JSON.stringify(body)).not.toMatch(/at .*\.ts:\d+/); // no stack trace shape
+  });
+  it("a GhlEvent insert failure (the job_trigger audit row) still returns the reason it already decided on — a logging failure never masks it, and the job still runs", async () => {
+    holder.db.ghlEvent.create = async () => { throw new Error("insert exploded"); };
+    const res = await jobsRoute(req({ job: "replay" }));
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ accepted: true, job: "replay", reason: "accepted" });
+    expect(runJobMock).toHaveBeenCalled(); // the trigger itself was legitimately accepted; only the audit log write failed
+  });
+  it("server_misconfigured logs which env var is missing, never a value; an unrelated exception never claims to be a config problem", async () => {
+    const errSpy = vi.spyOn(console, "error");
+    delete process.env.GHL_JOBS_SECRET;
+    await jobsRoute(req({ job: "replay" }));
+    expect(errSpy.mock.calls.some((c) => c.join(" ").includes("GHL_JOBS_SECRET"))).toBe(true);
+    expect(errSpy.mock.calls.some((c) => c.join(" ").includes(SECRET))).toBe(false);
+
+    errSpy.mockClear();
+    process.env.GHL_JOBS_SECRET = SECRET;
+    holder.boom = true;
+    await jobsRoute(req({ job: "replay" }));
+    expect(errSpy.mock.calls.some((c) => c.join(" ").includes("internal error"))).toBe(true);
   });
 });

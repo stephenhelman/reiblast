@@ -75,9 +75,19 @@ describe("stage-changed route: auth, recording, always 200", () => {
     expect(db.events).toHaveLength(1);
     expect(db.events[0]).toMatchObject({ source: "stage_change", externalId: CONTACT, attempts: 1, lastError: "db exploded", processedAt: null });
   });
-  it("a database that is completely down still answers 200", async () => {
+  it("a database that is completely down still answers 200, reason internal_error (not server_misconfigured — no env var is missing)", async () => {
     holder.boom = true;
-    expect((await stage({ contactId: CONTACT, pipeline: "active_client", stage: "paused" })).status).toBe(200);
+    const res = await stage({ contactId: CONTACT, pipeline: "active_client", stage: "paused" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ received: false, reason: "internal_error" });
+  });
+  it("a GhlEvent insert failure still answers 200 with a reason (internal_error) — never masked, never processed with no record", async () => {
+    const db = setup();
+    db.ghlEvent.create = async () => { throw new Error("insert exploded"); };
+    const res = await stage({ contactId: CONTACT, pipeline: "active_client", stage: "paused" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ received: false, reason: "internal_error" });
+    expect(db.decisions).toHaveLength(0);
   });
 });
 

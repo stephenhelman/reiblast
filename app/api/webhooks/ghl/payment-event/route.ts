@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { Prisma } from "@prisma/client";
 import { getBillingDb } from "@/lib/billing/db";
-import { checkSecret, type Reason } from "@/lib/billing/reason";
+import { checkSecret, logInternalError, missingEnvVars, type Reason } from "@/lib/billing/reason";
 import { processPaymentEvent } from "@/lib/billing/processPaymentEvent";
 
 // GHL → server payment event (docs/ghl-server-contract.md rules 3, 5, 6):
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   try {
     const auth = checkSecret(req.headers.get("x-reiblast-billing-secret"), "GHL_BILLING_WEBHOOK_SECRET");
     if (auth === "misconfigured") {
-      console.error("[payment-event] GHL_BILLING_WEBHOOK_SECRET is not set — refusing");
+      console.error("[payment-event] missing required env var(s):", missingEnvVars(["GHL_BILLING_WEBHOOK_SECRET"]).join(", "));
       return reply("server_misconfigured");
     }
     if (auth === "missing") {
@@ -45,13 +45,18 @@ export async function POST(req: NextRequest) {
 
     const transactionId = extractTransactionId(body);
     const db = await getBillingDb();
-    const event = await db.ghlEvent.create({
-      data: { source: "payment", externalId: transactionId, payload: body as Prisma.InputJsonObject },
-    });
+    let event: { id: string };
+    try {
+      event = await db.ghlEvent.create({ data: { source: "payment", externalId: transactionId, payload: body as Prisma.InputJsonObject } });
+    } catch (err) {
+      // The insert itself failed (rule 5 broken) — still answer with a reason, never let this fall through unlogged.
+      logInternalError("payment-event", err);
+      return reply("internal_error");
+    }
     await processPaymentEvent(event.id, { db });
     return reply("accepted");
   } catch (err) {
-    console.error("[payment-event] unexpected error:", err instanceof Error ? err.message : err);
-    return reply("server_misconfigured");
+    logInternalError("payment-event", err);
+    return reply("internal_error");
   }
 }

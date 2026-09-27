@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { getBillingDb } from "../db";
-import { checkSecret, type Reason } from "../reason";
+import { checkSecret, logInternalError, missingEnvVars, type Reason } from "../reason";
 import type { ProcessResult } from "./stageChanged";
 
 /**
@@ -16,7 +16,7 @@ export async function handleEventRoute(req: NextRequest, cfg: { label: string; s
   try {
     const auth = checkSecret(req.headers.get("x-reiblast-events-secret"), "GHL_EVENTS_SECRET");
     if (auth === "misconfigured") {
-      console.error(`[${cfg.label}] GHL_EVENTS_SECRET is not set — refusing`);
+      console.error(`[${cfg.label}] missing required env var(s):`, missingEnvVars(["GHL_EVENTS_SECRET"]).join(", "));
       return reply("server_misconfigured");
     }
     if (auth === "missing") {
@@ -37,11 +37,18 @@ export async function handleEventRoute(req: NextRequest, cfg: { label: string; s
       return reply("bad_json");
     }
     const db = await getBillingDb();
-    const event = await db.ghlEvent.create({ data: { source: cfg.source, externalId: cfg.externalId(body), payload: body as Prisma.InputJsonObject } });
+    let event: { id: string };
+    try {
+      event = await db.ghlEvent.create({ data: { source: cfg.source, externalId: cfg.externalId(body), payload: body as Prisma.InputJsonObject } });
+    } catch (err) {
+      // The insert itself failed (rule 5 broken) — still answer with a reason, never let this fall through unlogged.
+      logInternalError(cfg.label, err);
+      return reply("internal_error");
+    }
     await cfg.process(event.id, db);
     return reply("accepted");
   } catch (err) {
-    console.error(`[${cfg.label}] unexpected error:`, err instanceof Error ? err.message : err);
-    return reply("server_misconfigured");
+    logInternalError(cfg.label, err);
+    return reply("internal_error");
   }
 }
