@@ -1,6 +1,6 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { apiStats, walletTransactionsPage } from "../ghlWallet";
-import { accToRows, addToAcc, daysInWindow, microsToDecimalString, planUsageWindows, previousUtcWindow, toWalletTransactionData, unfilteredScope, type Acc, type RollupRow, type UsageWindow, type WalletTxRow } from "../usageRollup";
+import { accToRows, addToAcc, daysInWindow, microsToDecimalString, planUsageWindows, previousUtcWindow, toWalletTransactionData, unfilteredScope, latestLocationName, type Acc, type RollupRow, type SeenName, type UsageWindow, type WalletTxRow } from "../usageRollup";
 import { listWalletLocations, type WalletLocation } from "./locations";
 import type { JobContext, JobCursor, JobFn, JobResult } from "./types";
 
@@ -14,9 +14,10 @@ type Cursor = {
   skip: number;
   locAcc: Acc;
   seenIds: string[];
+  locName?: SeenName | null; // most recent usable locationName seen for the CURRENT location (reset per location)
   uSkip: number;
   uAcc: Record<string, Acc>; // scopeKey → acc for the unfiltered pass
-  stats: { rowsSeen: number; scopesWritten: number; rollupRows: number; unfilteredRows: number; txInserted: number };
+  stats: { rowsSeen: number; scopesWritten: number; rollupRows: number; unfilteredRows: number; txInserted: number; namesUpdated?: number };
 };
 
 export type RollupMismatch = { scopeKey: string; day: string; category: string; rollupCount: number | null; rowsCount: number | null; rollupAmount: string | null; rowsAmount: string | null };
@@ -92,7 +93,7 @@ export async function runWalletUsageWindow(ctx: JobContext, opts: UsageOptions =
       seenIds: [],
       uSkip: 0,
       uAcc: {},
-      stats: { rowsSeen: 0, scopesWritten: 0, rollupRows: 0, unfilteredRows: 0, txInserted: 0 },
+      stats: { rowsSeen: 0, scopesWritten: 0, rollupRows: 0, unfilteredRows: 0, txInserted: 0, namesUpdated: 0 },
     };
   const seen = new Set(st.seenIds);
   const callsAtStart = apiStats.calls;
@@ -110,6 +111,16 @@ export async function runWalletUsageWindow(ctx: JobContext, opts: UsageOptions =
       skipDuplicates: true,
     });
     st.stats.txInserted += res.count;
+  };
+
+  /** No extra API calls: the name comes from rows already fetched for this location. Written only when it differs. Members only (HQ has no account). */
+  const recordLocationName = async (loc: WalletLocation) => {
+    if (!ctx.apply || !st.locName || !loc.ghlAccountId) return;
+    const res = await ctx.db.ghlAccount.updateMany({
+      where: { id: loc.ghlAccountId, accountType: "member", OR: [{ locationName: null }, { locationName: { not: st.locName.name } }] },
+      data: { locationName: st.locName.name, locationNameUpdatedAt: ctx.now },
+    });
+    st.stats.namesUpdated = (st.stats.namesUpdated ?? 0) + res.count;
   };
 
   const sink = async (scopeKey: string, ghlAccountId: string | null, acc: Acc) => {
@@ -130,13 +141,16 @@ export async function runWalletUsageWindow(ctx: JobContext, opts: UsageOptions =
           seen.add(r.id);
           addToAcc(st.locAcc, r);
         }
+        st.locName = latestLocationName(st.locName ?? null, rows);
         await storeRows(rows, () => [loc.locationId, loc.ghlAccountId]);
         st.stats.rowsSeen += rows.length;
         if (rows.length < PAGE) break;
         st.skip += PAGE;
       }
       await sink(loc.locationId, loc.ghlAccountId, st.locAcc);
+      await recordLocationName(loc);
       st.locIdx++;
+      st.locName = null;
       st.skip = 0;
       st.locAcc = {};
     }

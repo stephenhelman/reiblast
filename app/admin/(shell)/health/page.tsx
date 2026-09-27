@@ -1,3 +1,4 @@
+import AccountLabel from "@/components/admin/AccountLabel";
 import { Banner, BadgeRow, PageTitle, Section, Table } from "@/components/admin/ui";
 import { fmtDenver, fmtMb, fmtUsd, last4 } from "@/lib/admin/format";
 import { requireOwnerOrRedirect } from "@/lib/admin/requireOwner";
@@ -13,8 +14,8 @@ export default async function HealthPage() {
   const db = await getBillingDb();
   const [jobs, quality, balances, dbSize] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db)]);
   const badges = buildBadges({ jobs, quality, balances, db: dbSize });
-  const hq = balances.hqLocationId;
-  const bal = (rows: typeof balances.negative) => rows.map((r) => [`${last4(r.locationId)}${r.locationId === hq ? " (HQ)" : ""}`, r.status, r.balance === null ? "—" : fmtUsd(r.balance), r.takenOn]);
+  const bal = (rows: typeof balances.negative) =>
+    rows.map((r) => [<AccountLabel key={r.locationId} locationId={r.locationId} locationName={r.locationName} businessName={r.businessName} />, r.status, r.balance === null ? "—" : fmtUsd(r.balance), r.takenOn]);
 
   return (
     <div>

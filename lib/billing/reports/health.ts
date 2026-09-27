@@ -84,7 +84,7 @@ export async function getDataQuality(db: PrismaClient, now = new Date(), listLim
 
 // ── balances ────────────────────────────────────────────────────────────────
 
-export type BalanceRow = { locationId: string; takenOn: string; status: string; balance: string | null };
+export type BalanceRow = { locationId: string; takenOn: string; status: string; balance: string | null; locationName: string | null; businessName: string | null };
 export type BalancesHealth = { total: number; latestDay: string | null; negative: BalanceRow[]; unavailable: BalanceRow[]; errors: BalanceRow[]; hqLocationId: string | null };
 
 /** Latest snapshot per location (member locations + HQ), split into negative / unavailable / error. */
@@ -92,7 +92,20 @@ export async function getBalancesHealth(db: PrismaClient): Promise<BalancesHealt
   const rows = await db.$queryRaw<{ locationId: string; takenOn: Date; status: string; balance: { toString(): string } | null }[]>`
     SELECT DISTINCT ON ("locationId") "locationId", "takenOn", "status", "balance"
     FROM "WalletBalanceSnapshot" ORDER BY "locationId", "takenOn" DESC`;
-  const lite: BalanceRow[] = rows.map((r) => ({ locationId: r.locationId, takenOn: r.takenOn.toISOString().slice(0, 10), status: r.status, balance: r.balance === null ? null : r.balance.toString() }));
+  // Names for display (member accounts only; HQ is labelled by the helper from GHL_HQ_LOCATION_ID).
+  const accounts = await db.ghlAccount.findMany({
+    where: { accountType: "member", locationId: { in: rows.map((r) => r.locationId) } },
+    select: { locationId: true, locationName: true, user: { select: { businessName: true } } },
+  });
+  const nameBy = new Map(accounts.map((a) => [a.locationId as string, a]));
+  const lite: BalanceRow[] = rows.map((r) => ({
+    locationId: r.locationId,
+    takenOn: r.takenOn.toISOString().slice(0, 10),
+    status: r.status,
+    balance: r.balance === null ? null : r.balance.toString(),
+    locationName: nameBy.get(r.locationId)?.locationName ?? null,
+    businessName: nameBy.get(r.locationId)?.user?.businessName ?? null,
+  }));
   return {
     total: lite.length,
     latestDay: lite.reduce<string | null>((m, r) => (m === null || r.takenOn > m ? r.takenOn : m), null),

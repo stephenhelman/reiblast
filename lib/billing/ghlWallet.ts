@@ -17,7 +17,7 @@ function creds() {
   return { token, companyId };
 }
 
-async function call(method: "GET" | "POST", path: string, body?: unknown): Promise<{ status: number; json: any }> {
+async function call(method: "GET" | "POST", path: string, body?: unknown, version = "v3"): Promise<{ status: number; json: any }> {
   const { token, companyId } = creds();
   const okPost = method === "POST" && path === `/saas/companies/${companyId}/wallet-transactions`;
   if (method !== "GET" && !okPost) throw new Error(`blocked GHL call: ${method} ${path}`);
@@ -25,7 +25,7 @@ async function call(method: "GET" | "POST", path: string, body?: unknown): Promi
     apiStats.calls++;
     const res = await fetch(BASE + path, {
       method,
-      headers: { Authorization: `Bearer ${token}`, Version: "v3", Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
+      headers: { Authorization: `Bearer ${token}`, Version: version, Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
     if (res.status === 429) {
@@ -67,4 +67,11 @@ export async function walletBalance(locationId: string): Promise<BalanceResult> 
   if (r.status === 200 && typeof r.json?.data?.balance === "number") return { status: "ok", balance: r.json.data.balance, raw: r.json };
   if (r.status === 404 && r.json?.error === "WALLET_BALANCE_UNAVAILABLE") return { status: "unavailable", balance: null, raw: r.json };
   return { status: "error", balance: null, raw: { httpStatus: r.status, body: r.json } };
+}
+
+/** Read-only: the location's display name (GET /locations/{id}, agency key). null when unreadable or blank. */
+export async function getLocationName(locationId: string): Promise<string | null> {
+  const r = await call("GET", `/locations/${locationId}`, undefined, "2021-07-28");
+  const name = r.status === 200 ? r.json?.location?.name : null;
+  return typeof name === "string" && name.trim() !== "" ? name.trim() : null;
 }

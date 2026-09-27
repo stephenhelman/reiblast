@@ -35,6 +35,24 @@ export function accToRows(acc: Acc): RollupRow[] {
   });
 }
 
+/** A usable display name: trimmed, not blank and not the "-" GHL puts on agency-level rows. */
+export function usableLocationName(name: string | null | undefined): string | null {
+  const n = (name ?? "").trim();
+  return n === "" || n === "-" ? null : n;
+}
+
+export type SeenName = { name: string; time: string };
+
+/** Folds rows into the most recent (by settlementTime) usable locationName seen so far. Zoneless "YYYY-MM-DD HH:mm:ss.SSS" sorts lexicographically. */
+export function latestLocationName(prev: SeenName | null, rows: WalletTxRow[]): SeenName | null {
+  let best = prev;
+  for (const r of rows) {
+    const name = usableLocationName(r.locationName);
+    if (name && (!best || r.settlementTime > best.time)) best = { name, time: r.settlementTime };
+  }
+  return best;
+}
+
 /** Scope for a row that no per-location query returned: blank/"-" name → agency-level, otherwise a non-member location. */
 export function unfilteredScope(locationName: string | null | undefined): "_agency" | "_unattributed" {
   const n = (locationName ?? "").trim();

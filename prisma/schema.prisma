@@ -971,6 +971,9 @@ model GhlAccount {
   trialEndsAt          DateTime?
   legacyUnreconciled   Boolean              @default(false)
   accountType          GhlAccountType       @default(member)
+  // Display name seen in agency wallet rows for this location (wallet_usage keeps it fresh). Null = not yet known.
+  locationName          String?
+  locationNameUpdatedAt DateTime?
   onboardingStage      String?
   locationToken        String?
   locationTokenExpires DateTime?

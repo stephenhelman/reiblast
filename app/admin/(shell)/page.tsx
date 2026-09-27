@@ -1,4 +1,6 @@
+import AccountLabel from "@/components/admin/AccountLabel";
 import { BadgeRow, PageTitle, Section, Table } from "@/components/admin/ui";
+import { fmtUsd } from "@/lib/admin/format";
 import { requireOwnerOrRedirect } from "@/lib/admin/requireOwner";
 import { getBillingDb } from "@/lib/billing/db";
 import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getJobsHealth, getMemberOverview } from "@/lib/billing/reports/health";
@@ -20,6 +22,14 @@ export default async function OverviewPage() {
 
       <Section title="Members by billing state" note={`${members.memberTotal} member accounts. “Not yet seeded” = billingState is still null.`}>
         <Table head={["Billing state", "Accounts"]} rows={members.billingStates.map((s) => [s.state, s.count])} empty="No member accounts." />
+      </Section>
+
+      <Section title="Negative wallet balances" note={`Latest snapshot per location${balances.negative.length > 10 ? ` — most negative 10 of ${balances.negative.length}` : ""}. Full list on Health.`}>
+        <Table
+          head={["Location", "Balance", "Snapshot day"]}
+          rows={balances.negative.slice(0, 10).map((r) => [<AccountLabel key={r.locationId} locationId={r.locationId} locationName={r.locationName} businessName={r.businessName} />, fmtUsd(r.balance as string), r.takenOn])}
+          empty="None."
+        />
       </Section>
 
       <Section title="Legacy" note="Accounts flagged legacyUnreconciled (billing history not yet reconciled).">
