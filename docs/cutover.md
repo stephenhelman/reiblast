@@ -14,7 +14,7 @@ shadow mode (`DUNNING_MODE` unset/`shadow`): it records decisions and `skipped_s
 
 ## 2. GHL workflows
 
-**Build (new — details in `docs/ghl-workflows.md`), disabled until step 6:**
+**Build (new — details in `docs/ghl-workflows.md`), disabled until Phase B step 5:**
 1. Billing intent — Active Client (inbound webhook → If/Else stage → Update Opportunity → Update contact fields) → `GHL_INTENT_URL_ACTIVE_CLIENT`
 2. Billing intent — Onboarding → `GHL_INTENT_URL_ONBOARDING`
 3. Stage changed — Active Client → `/api/webhooks/ghl/stage-changed`
@@ -30,7 +30,7 @@ shadow mode (`DUNNING_MODE` unset/`shadow`): it records decisions and `skipped_s
 4. GHL's own "raw payment-failed → Failed Payment stage" workflow (the engine's `payment_failed` intent sets that stage now)
 5. Any workflow that sends the card-update message on entering Paused (replaced by workflow 5 above)
 
-The old **routes** stay deployed (returning as they do today) until the soak after cutover ends, then are removed in a separate change.
+The old **routes** stay deployed (returning as they do today) until 2 weeks after the last account goes live, then are removed in a separate change.
 The payment-event webhook (`/api/webhooks/ghl/payment-event`) and all nightly jobs are unchanged and stay enabled.
 
 ## 3. Sequence
