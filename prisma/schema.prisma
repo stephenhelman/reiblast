@@ -1151,3 +1151,34 @@ model DunningDecision {
   @@index([ghlAccountId, eventAt])
   @@index([createdAt])
 }
+
+// Outbox of GHL pipeline/field updates the billing engine wants made (lib/billing/intents). Always recorded first. In shadow mode
+// (or for an account not allowlisted for live) the status is "skipped_shadow" and nothing is sent.
+model GhlIntent {
+  id           String    @id @default(cuid())
+  ghlAccountId String
+  kind         String // stage | fields
+  pipeline     String // active_client | onboarding
+  payload      Json
+  dedupeKey    String    @unique
+  status       String // pending | sent | failed | skipped_shadow
+  attempts     Int       @default(0)
+  lastError    String?
+  sentAt       DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([status, createdAt])
+}
+
+// Last-seen state of each GHL subscription (the nightly sub_sweep job). A status change is what feeds the dunning engine.
+model GhlSubscriptionState {
+  subscriptionId String   @id
+  contactId      String
+  status         String
+  name           String?
+  trialEndsAt    DateTime?
+  lastSeenAt     DateTime
+  updatedAt      DateTime @updatedAt
+
+  @@index([contactId])
+}

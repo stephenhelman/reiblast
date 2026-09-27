@@ -3,7 +3,7 @@ import { Banner, BadgeRow, PageTitle, Section, Table } from "@/components/admin/
 import { fmtDenver, fmtDenverDate, fmtMb, fmtUsd, last4 } from "@/lib/admin/format";
 import { requireOwnerOrRedirect } from "@/lib/admin/requireOwner";
 import { getBillingDb } from "@/lib/billing/db";
-import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getDunningShadow, getInactiveUsage, getJobsHealth, NEON_CRIT_PCT, NEON_WARN_PCT, type BalanceLevel } from "@/lib/billing/reports/health";
+import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getDunningShadow, getInactiveUsage, getIntentsHealth, getJobsHealth, getRecentGhlEvents, getUnpaidSubscriptions, NEON_CRIT_PCT, NEON_WARN_PCT, type BalanceLevel } from "@/lib/billing/reports/health";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,7 @@ const yn = (b: boolean) => (b ? <span className="text-red-300">STALE</span> : <s
 export default async function HealthPage() {
   await requireOwnerOrRedirect();
   const db = await getBillingDb();
-  const [jobs, quality, balances, dbSize, inactiveUsage, dunning] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getInactiveUsage(db), getDunningShadow(db)]);
+  const [jobs, quality, balances, dbSize, inactiveUsage, dunning, intents, ghlEvents, unpaid] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getInactiveUsage(db), getDunningShadow(db), getIntentsHealth(db), getRecentGhlEvents(db), getUnpaidSubscriptions(db)]);
   const badges = buildBadges({ jobs, quality, balances, inactiveUsage, db: dbSize });
   const label = (r: { locationId: string; locationName: string | null; businessName: string | null }) => <AccountLabel locationId={r.locationId} locationName={r.locationName} businessName={r.businessName} />;
 
@@ -140,6 +140,51 @@ export default async function HealthPage() {
             : `Replay end-state differs from GhlAccount.billingState on ${dunning.replayDiff.differs} of ${dunning.replayDiff.projectedCount} accounts. Replay sees only ledger payments (not cancellations, manual moves or pre-June history), and its balances are estimates.`}
         </p>
         {dunning.replayDiff.breakdown.length > 0 && <Table head={["Replay end-state", "GhlAccount.billingState", "Accounts"]} rows={dunning.replayDiff.breakdown.map((b) => [b.projected, b.actual, b.n])} />}
+      </Section>
+
+      <Section
+        title="GHL intents (outbox)"
+        note={`Pipeline/field updates the engine wants made in GHL. In shadow mode (or for an account not allowlisted for live) they are recorded as "skipped_shadow" and NOTHING is sent. Pending ${intents.counts.pending} · sent ${intents.counts.sent} · failed ${intents.counts.failed} · skipped_shadow ${intents.counts.skipped_shadow}. Last 20:`}
+      >
+        <Table
+          head={["Created (Denver)", "Account", "Pipeline", "Kind", "Stage", "Status", "Attempts", "Error"]}
+          rows={intents.last.map((i) => [
+            fmtDenver(i.createdAt),
+            i.label ? <AccountLabel key={i.id} locationId={i.label.locationId} locationName={i.label.locationName} businessName={i.label.businessName} /> : last4(i.ghlAccountId),
+            i.pipeline,
+            i.kind,
+            i.stage ?? "—",
+            <span key="s" className={i.status === "failed" ? "text-red-300" : i.status === "pending" ? "text-gold" : "text-white/70"}>{i.status}</span>,
+            i.attempts,
+            i.lastError ?? "—",
+          ])}
+          empty="No intents recorded yet."
+        />
+      </Section>
+
+      <Section title="Stage-change and invoice events" note="GHL → server webhooks (last 20). An event with an error is retried by the replay job (up to 5 attempts).">
+        <Table
+          head={["Received (Denver)", "Source", "What", "Account", "Processed", "Attempts", "Note / error"]}
+          rows={ghlEvents.map((e) => [
+            fmtDenver(e.receivedAt),
+            e.source,
+            e.summary,
+            e.label ? <AccountLabel key={e.id} locationId={e.label.locationId} locationName={e.label.locationName} businessName={e.label.businessName} /> : "—",
+            e.processedAt ? fmtDenver(e.processedAt) : <span key="p" className="text-gold">pending</span>,
+            e.attempts,
+            e.lastError ? <span key="n" className={e.processedAt ? "text-white/50" : "text-red-300"}>{e.lastError}</span> : "—",
+          ])}
+          empty="No stage-change or invoice events received yet."
+        />
+      </Section>
+
+      <Section title="Unpaid subscriptions (informational)" note="Subscriptions GHL currently reports as unpaid, from the nightly sub_sweep state. No engine event is emitted for unpaid.">
+        <p className="px-4 pt-3 text-sm text-white/80">{unpaid.length} unpaid {unpaid.length === 1 ? "subscription" : "subscriptions"}</p>
+        <Table
+          head={["Account", "Subscription", "Plan", "Last seen (Denver)"]}
+          rows={unpaid.map((u) => [u.label ? <AccountLabel key={u.subscriptionId} locationId={u.label.locationId} locationName={u.label.locationName} businessName={u.label.businessName} /> : <span key={u.subscriptionId} className="text-white/50">no member account</span>, last4(u.subscriptionId), u.name ?? "—", fmtDenver(u.lastSeenAt)])}
+          empty="None — the sweep has not recorded any unpaid subscriptions."
+        />
       </Section>
 
       <Section title="Database" note="Neon storage is project-wide — every branch counts toward the plan limit; this figure is this branch only.">

@@ -26,7 +26,7 @@ function fakeDb(opts: { dunningExplodes?: boolean } = {}) {
     },
     ghlAccount: {
       findFirst: async ({ where }: any) => (where.contactId === "cccccccccccccccccc01" ? { id: "A1" } : null),
-      findUnique: async () => ({ accountType: "member", locationId: "LOC1", coreCoveredUntil: null, billingState: "active", warningCount: 0, pauseReason: null }),
+      findUnique: async () => ({ id: "A1", accountType: "member", contactId: "cccccccccccccccccc01", locationId: "LOC1", coreCoveredUntil: null, trialOffer: null, trialEndsAt: null, userId: "U1", billingState: "active", warningCount: 0, pauseReason: null }),
     },
     billingLedgerEntry: {
       findUnique: async ({ where, select }: any) => {
@@ -35,6 +35,7 @@ function fakeDb(opts: { dunningExplodes?: boolean } = {}) {
       },
       upsert: async ({ where, create, update }: any) => { ledger[where.ghlTransactionId] = { ...(ledger[where.ghlTransactionId] ?? create), ...(ledger[where.ghlTransactionId] ? update : {}), ghlTransactionId: where.ghlTransactionId }; },
     },
+    ghlIntent: { create: async ({ data }: any) => data },
     dunningDecision: {
       findUnique: async () => null,
       findFirst: async () => null,
@@ -83,7 +84,7 @@ describe("processPaymentEvent → shadow dunning hook", () => {
 
   it("an unsupported DUNNING_MODE is contained: the ledger write and event still complete", async () => {
     const prev = process.env.DUNNING_MODE;
-    process.env.DUNNING_MODE = "live";
+    process.env.DUNNING_MODE = "bogus";
     try {
       const db = fakeDb();
       expect(await processPaymentEvent("ev1", { db, retryPending: false })).toBe("processed");

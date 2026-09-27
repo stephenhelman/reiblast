@@ -28,10 +28,10 @@ describe("wallet recharge FAILURE", () => {
     expect(d.intents).toEqual([]);
     expect(d.sideEffects).toEqual([]);
   });
-  it("the 3rd strike pauses (non_payment) with a saas_pause side effect and a paused intent", () => {
+  it("the 3rd strike pauses (non_payment) with a paused intent — and NO saas_pause (that waits for pause_confirmed)", () => {
     const d = decide(snap({ state: "payment_failed", strikes: 2 }), wFail, ctx({ walletBalance: neg }));
     expect(d).toMatchObject({ nextState: "paused", pauseReason: "non_payment", warningCount: 3 });
-    expect(effects(d)).toEqual(["saas_pause"]);
+    expect(d.sideEffects).toEqual([]);
     expect(stages(d)).toEqual(["paused"]);
     expect(d.intents[0]).toMatchObject({ pipeline: "active_client", fields: { warningCount: 3, pauseReason: "non_payment" } });
     expect(d.reason).toMatch(/strike 3 of 3/);
@@ -168,10 +168,10 @@ describe("core subscription FAILURE", () => {
 
 describe("expired invoice", () => {
   const inv: DunningEvent = { kind: "invoice_expired", invoiceId: "inv_1" };
-  it("→ paused (expired_invoice) with saas_pause", () => {
+  it("→ paused (expired_invoice) with a paused intent and NO saas_pause (waits for pause_confirmed)", () => {
     const d = decide(snap(), inv, ctx());
     expect(d).toMatchObject({ nextState: "paused", pauseReason: "expired_invoice", coreFailureOpen: true, warningCount: 0 });
-    expect(effects(d)).toEqual(["saas_pause"]);
+    expect(d.sideEffects).toEqual([]);
     expect(stages(d)).toEqual(["paused"]);
   });
   it("from payment_failed and trial as well; strikes unchanged", () => {
@@ -250,10 +250,10 @@ describe("trial_auth", () => {
     expect(d).toMatchObject({ nextState: "trial", trialOffer: null, trialEndsAt: null });
     expect(d.reason).toMatch(/subscription unavailable/);
   });
-  it("trial → trial refreshes the fields without a new stage intent", () => {
+  it("trial → trial refreshes the fields with a fields-only intent (no stage move)", () => {
     const d = decide(snap({ state: "trial" }), ta, ctx({ subscription: sub("30 Day Trial") }));
     expect(d).toMatchObject({ nextState: "trial", trialOffer: "30 Day Trial", trialChanged: true });
-    expect(d.intents).toEqual([]);
+    expect(d.intents).toEqual([expect.objectContaining({ kind: "fields", stage: "trial", fields: expect.objectContaining({ trialOffer: "30 Day Trial" }) })]);
   });
   it("any other state: recorded as ignored, nothing changes", () => {
     for (const state of ["active", "payment_failed", "paused"] as BillingState[]) {
@@ -282,10 +282,10 @@ describe("inactive and churned: never struck, never auto-resumed", () => {
 
 describe("manual commands", () => {
   const cmd = (stage: BillingState): DunningEvent => ({ kind: "command", stage });
-  it("paused → paused (manual_killswitch) + saas_pause", () => {
+  it("paused → paused (manual_killswitch), no immediate side effect (the pause waits for pause_confirmed)", () => {
     const d = decide(snap(), cmd("paused"), ctx());
     expect(d).toMatchObject({ nextState: "paused", pauseReason: "manual_killswitch" });
-    expect(effects(d)).toEqual(["saas_pause"]);
+    expect(d.sideEffects).toEqual([]);
     expect(stages(d)).toEqual(["paused"]);
   });
   it("inactive → voluntary pause", () => {
@@ -309,10 +309,10 @@ describe("manual commands", () => {
     expect(effects(d)).toEqual(["saas_pause"]);
     expect(d.reason).toMatch(/billing stopped/);
   });
-  it("a command whose stage already matches is a CONFIRMATION: no intent, side effect re-asserted idempotently", () => {
+  it("a command whose stage already matches is a CONFIRMATION: no intent; inactive/churned/active re-assert their side effect idempotently, paused does not (pause_confirmed owns it)", () => {
     const paused = decide(snap({ state: "paused", pauseReason: "non_payment", strikes: 3 }), cmd("paused"), ctx());
-    expect(paused).toMatchObject({ nextState: "paused", pauseReason: "non_payment", noop: false });
-    expect(effects(paused)).toEqual(["saas_pause*"]);
+    expect(paused).toMatchObject({ nextState: "paused", pauseReason: "non_payment", noop: true });
+    expect(paused.sideEffects).toEqual([]);
     expect(paused.intents).toEqual([]);
     expect(paused.reason).toMatch(/confirmation/);
     expect(effects(decide(snap({ state: "inactive", pauseReason: "voluntary" }), cmd("inactive"), ctx()))).toEqual(["saas_pause*"]);
@@ -329,6 +329,106 @@ describe("manual commands", () => {
       expect(d.noop).toBe(true);
       expect(d.reason).toMatch(/not supported/);
     }
+  });
+});
+
+describe("pause_confirmed (the Paused workflow's 15-minute wait elapsed)", () => {
+  const pc: DunningEvent = { kind: "pause_confirmed" };
+  it("still paused → saas_pause (the ONLY place a pause executes), state unchanged", () => {
+    for (const pauseReason of ["non_payment", "expired_invoice", "manual_killswitch"] as PauseReason[]) {
+      const d = decide(snap({ state: "paused", pauseReason, strikes: 3 }), pc, ctx());
+      expect(d).toMatchObject({ nextState: "paused", pauseReason, warningCount: 3, noop: false });
+      expect(effects(d)).toEqual(["saas_pause"]);
+      expect(d.intents).toEqual([]);
+      expect(d.reason).toMatch(/still paused/);
+    }
+  });
+  it("cured before confirmation → recorded, no pause", () => {
+    for (const state of ["active", "trial", "payment_failed", "inactive", "churned", null] as (BillingState | null)[]) {
+      const d = decide(snap({ state }), pc, ctx());
+      expect(d.noop).toBe(true);
+      expect(d.sideEffects).toEqual([]);
+      expect(d.reason).toMatch(/cured before confirmation, no pause/);
+    }
+  });
+  it("the full path: 3rd strike (no effect) → confirmation after the wait (saas_pause) — or a cure in between (no pause at all)", () => {
+    const strike = decide(snap({ state: "payment_failed", strikes: 2 }), wFail, ctx({ walletBalance: neg }));
+    const paused = snap({ state: strike.nextState, strikes: strike.warningCount, pauseReason: strike.pauseReason });
+    expect(effects(decide(paused, pc, ctx()))).toEqual(["saas_pause"]);
+    const cured = decide(paused, wOk, ctx({ walletBalance: pos }));
+    expect(effects(cured)).toEqual(["saas_resume"]);
+    expect(decide(snap({ state: cured.nextState, strikes: cured.warningCount, pauseReason: cured.pauseReason }), pc, ctx()).reason).toMatch(/cured before confirmation/);
+  });
+});
+
+describe("subscription events (nightly sweep)", () => {
+  const cov = new Date("2026-11-21T07:00:00Z");
+  const canceled = (duringTrial: boolean): DunningEvent => ({ kind: "subscription_canceled", duringTrial });
+  it("canceled / expired → churned with an immediate saas_pause, from every live state (billing stopped)", () => {
+    for (const state of ["trial", "active", "payment_failed", "paused", "inactive", null] as (BillingState | null)[]) {
+      for (const e of [canceled(false), { kind: "subscription_expired" } as DunningEvent]) {
+        const d = decide(snap({ state, strikes: 1, pauseReason: state === "paused" ? "non_payment" : null }), e, ctx());
+        expect(d).toMatchObject({ nextState: "churned", pauseReason: null, coreFailureOpen: false });
+        expect(effects(d)).toEqual(["saas_pause"]);
+        expect(stages(d)).toEqual(["churned"]);
+      }
+    }
+  });
+  it("already churned: no change, no second pause", () => {
+    const d = decide(snap({ state: "churned" }), canceled(false), ctx());
+    expect(d.noop).toBe(true);
+    expect(d.reason).toBe("already churned");
+  });
+  it("covered (now < coreCoveredUntil): churn is DEFERRED and recorded, nothing else", () => {
+    for (const e of [canceled(false), { kind: "subscription_expired" } as DunningEvent]) {
+      const d = decide(snap(), e, ctx({ coveredUntil: cov }));
+      expect(d.noop).toBe(true);
+      expect(d.nextState).toBe("active");
+      expect(d.sideEffects).toEqual([]);
+      expect(d.reason).toMatch(/churn deferred: covered until 2026-11-21/);
+    }
+  });
+  it("…once coverage ends the same event churns", () => {
+    expect(decide(snap(), canceled(false), ctx({ now: new Date("2026-11-21T07:00:00Z"), coveredUntil: cov })).nextState).toBe("churned");
+  });
+  it("a cancel DURING the trial churns immediately, even while covered", () => {
+    const d = decide(snap({ state: "trial" }), canceled(true), ctx({ coveredUntil: cov }));
+    expect(d).toMatchObject({ nextState: "churned" });
+    expect(effects(d)).toEqual(["saas_pause"]);
+    expect(d.reason).toMatch(/trial canceled before it ended/);
+  });
+  it("an expired subscription does not get the trial exemption", () => {
+    expect(decide(snap({ state: "trial" }), { kind: "subscription_expired" }, ctx({ coveredUntil: cov })).noop).toBe(true);
+  });
+
+  const ended: DunningEvent = { kind: "trial_ended_unconverted" };
+  it("trial ended unconverted → payment_failed with the core failure open (no strike, no pause)", () => {
+    const d = decide(snap({ state: "trial" }), ended, ctx());
+    expect(d).toMatchObject({ nextState: "payment_failed", coreFailureOpen: true, warningCount: 0 });
+    expect(d.sideEffects).toEqual([]);
+    expect(stages(d)).toEqual(["payment_failed"]);
+  });
+  it("…but only from trial, and never while covered", () => {
+    for (const state of ["active", "payment_failed", "paused", "inactive", "churned", null] as (BillingState | null)[]) expect(decide(snap({ state }), ended, ctx()).noop).toBe(true);
+    const d = decide(snap({ state: "trial" }), ended, ctx({ coveredUntil: cov }));
+    expect(d.noop).toBe(true);
+    expect(d.reason).toMatch(/covered, ignored/);
+  });
+
+  const sub = { name: "7 Day Trial", trialEndsAt: new Date("2026-10-05T00:00:00Z") };
+  it("newly trialing → trial with offer and end date; a trial refresh is fields-only", () => {
+    const d = decide(snap({ state: null }), { kind: "subscription_trialing" }, ctx({ subscription: sub }));
+    expect(d).toMatchObject({ nextState: "trial", trialOffer: "7 Day Trial", trialChanged: true });
+    expect(stages(d)).toEqual(["trial"]);
+    expect(decide(snap({ state: "trial" }), { kind: "subscription_trialing" }, ctx({ subscription: sub })).intents[0]).toMatchObject({ kind: "fields" });
+  });
+  it("trialing on an account in any other state is ignored (recorded)", () => {
+    for (const state of ["active", "payment_failed", "paused"] as BillingState[]) {
+      const d = decide(snap({ state }), { kind: "subscription_trialing" }, ctx({ subscription: sub }));
+      expect(d).toMatchObject({ nextState: state, noop: true });
+      expect(d.reason).toMatch(/trialing ignored/);
+    }
+    expect(decide(snap({ state: "churned" }), { kind: "subscription_trialing" }, ctx({ subscription: sub })).reason).toBe("state excludes action (churned)");
   });
 });
 

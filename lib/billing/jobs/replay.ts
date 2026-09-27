@@ -1,7 +1,12 @@
-import { processPaymentEvent, replayableWhere } from "../processPaymentEvent";
+import { processGhlEvent } from "../events/process";
+import { sendPendingIntents } from "../intents/send";
+import { replayableWhere } from "../processPaymentEvent";
 import type { JobFn } from "./types";
 
-/** Replay GhlEvent rows that failed: unprocessed, attempts < 5, received more than 5 minutes ago. */
+/**
+ * Replay GhlEvent rows that failed (any source: payment, stage_change, invoice): unprocessed, attempts < 5, received more than 5 minutes
+ * ago. Also retries failed GHL intents (max 5 attempts) — a no-op unless DUNNING_MODE=live.
+ */
 export const runReplay: JobFn = async (ctx) => {
   const tried = new Set<string>(Array.isArray(ctx.cursor?.tried) ? (ctx.cursor?.tried as string[]) : []);
   const counts = { considered: 0, processed: 0, failed: 0, other: 0 };
@@ -16,14 +21,17 @@ export const runReplay: JobFn = async (ctx) => {
       where: { ...replayableWhere(ctx.now), ...(tried.size ? { id: { notIn: [...tried] } } : {}) },
       orderBy: { receivedAt: "asc" },
       take: 20,
-      select: { id: true },
+      select: { id: true, source: true },
     });
-    if (batch.length === 0) return { done: true, summary: counts };
+    if (batch.length === 0) {
+      const intents = await sendPendingIntents(ctx.db);
+      return { done: true, summary: { ...counts, intentsSent: intents.sent, intentsFailed: intents.failed } };
+    }
     for (const e of batch) {
       if (ctx.shouldYield()) return { done: false, cursor: { tried: [...tried] }, summary: counts };
       tried.add(e.id);
       counts.considered++;
-      const r = await processPaymentEvent(e.id, { db: ctx.db, retryPending: false });
+      const r = await processGhlEvent(e.id, e.source, ctx.db);
       if (r === "processed") counts.processed++;
       else if (r === "failed") counts.failed++;
       else counts.other++;

@@ -1,7 +1,7 @@
 # Nightly billing data jobs
 
-Four read-only data jobs, triggered by a GHL scheduled workflow (no Vercel Cron). They never change billing state,
-tags, or stages, and never write to GHL. See `docs/ghl-server-contract.md`.
+Five jobs, triggered by a GHL scheduled workflow (no Vercel Cron). The data jobs never change billing state, tags, or stages, and
+never write to GHL; `sub_sweep` feeds the dunning engine, which in shadow mode only records decisions. See `docs/ghl-server-contract.md`.
 
 | job | what it does |
 |---|---|
@@ -9,11 +9,12 @@ tags, or stages, and never write to GHL. See `docs/ghl-server-contract.md`.
 | `tx_sweep` | Rolling 35-day window of `GET /payments/transactions` through `ingestTransaction` (catches missed webhooks). |
 | `wallet_usage` | Previous 2 UTC days of agency wallet transactions → `WalletTransaction` (every raw row, insert-or-ignore on GHL id) and `UsageRollup` (per location incl. HQ, plus `_agency` / `_unattributed`; replaces per (scopeKey, day)). On **UTC day 3 only** it also refreshes the whole previous calendar month as ≤7-day windows. Each finished window runs the rollup-vs-rows check (below). |
 | `balances` | Wallet balance per location (incl. HQ) → `WalletBalanceSnapshot`, one row per location per UTC day. |
+| `sub_sweep` | Nightly subscription sweep: lists GHL subscriptions → `GhlSubscriptionState`, and feeds status changes the ledger never shows to the dunning engine (see below). |
 
 ## Trigger
 
 `POST /api/webhooks/ghl/jobs` with header `x-reiblast-jobs-secret: <GHL_JOBS_SECRET>` and body
-`{ "job": "replay" | "tx_sweep" | "wallet_usage" | "balances" }`. Always answers 200 `{ accepted, job }`; the work runs in
+`{ "job": "replay" | "tx_sweep" | "wallet_usage" | "balances" | "sub_sweep" }`. Always answers 200 `{ accepted, job }`; the work runs in
 the background (`waitUntil`). Create one GHL scheduled workflow per job.
 
 ## Plan limit assumed
@@ -40,10 +41,13 @@ since. Continuations refresh `lastStartAt`, so a long chain stays guarded. Ignor
 | `GHL_AGENCY_API_KEY`, `GHL_COMPANY_ID` | agency wallet endpoints |
 | `GHL_HQ_API_KEY`, `GHL_HQ_LOCATION_ID` | transaction list/fetch; HQ is also included in the per-location wallet passes |
 | `PIPELINE_DATABASE_URL` | preview only: routes billing DB access to the pipeline branch |
+| `GHL_EVENTS_SECRET` | secret for the GHL → server stage-changed / invoice-event webhooks (header `x-reiblast-events-secret`) |
+| `GHL_INTENT_URL_ACTIVE_CLIENT`, `GHL_INTENT_URL_ONBOARDING` | inbound-webhook workflow URLs intents are POSTed to (live mode only) |
+| `DUNNING_MODE`, `DUNNING_LIVE_ACCOUNTS` | engine mode (default `shadow`) and the accounts live mode may act on (default none) |
 
 ## CLI (dry-run by default, `--apply` to write, refuses the production host)
 
-`scripts/billing/run-replay.ts`, `run-tx-sweep.ts`, `run-wallet-usage.ts`, `run-balances.ts`,
+`scripts/billing/run-replay.ts`, `run-tx-sweep.ts`, `run-wallet-usage.ts`, `run-balances.ts`, `run-sub-sweep.ts`,
 `job-health.ts` (staleness: no success in 26 h), and `backfill-usage.ts` (monthly windows per location, bucketed by
 UTC day; `--from`, `--to`).
 
@@ -134,3 +138,24 @@ pipeline stage is not moved; keep the stage consistent by hand.**
 (see `docs/payments-webhook-system.md`). The dashboard shows "Covered until" and the note next to the estimated next charge
 (latest succeeded core payment + 1 month); if the override is later than that estimate the member list marks
 "override applies".
+
+## `sub_sweep` (nightly subscription sweep)
+
+A subscription that is canceled, expires, or whose trial ends without converting produces **no ledger event**, so the dunning engine
+never sees it. `sub_sweep` reads `GET /payments/subscriptions` (HQ key, keyed by `subscriptionId` — the id ledger rows carry),
+upserts `GhlSubscriptionState`, and feeds the engine:
+
+- **First run** (state table empty) **seeds without emitting** and reports what it would have emitted. A dry-run (no `--apply`) writes
+  nothing at all, ever.
+- **Status changes:** `canceled` / `expired` → churned (`subscription_canceled` / `subscription_expired`); a cancel **during the trial**
+  churns immediately; newly `trialing` → trial (offer and end date). `paused`, `unpaid` and `incomplete_expired` never emit.
+- **Coverage:** a non-trial churn while `now < coreCoveredUntil` is recorded as *deferred* (trigger `sub:<id>:canceled:deferred:<date>`);
+  each run re-checks and churns once coverage has ended (trigger `sub:<id>:canceled`).
+- **Other live subscription:** a canceled/expired subscription never churns an account whose contact still holds another live one
+  (trialing / active / unpaid) — common after a processor migration (old subscription canceled, new one live).
+- **Trial expiry:** a trial ended more than 2 days ago (subscription not canceled/expired) with **no succeeded `core_subscription` since
+  the trial began** → `payment_failed` with the core failure open (coverage protects it). Once per subscription.
+- **Invoice backstop:** lists invoices and emits `invoice_expired` for unpaid, past-due (or void) core recovery invoices, because GHL has
+  no native "expired" invoice status.
+- Resumable like the other jobs (the cursor carries what it read). Events run through the same write path as everything else, so in
+  shadow mode they are decisions plus `skipped_shadow` intents only.

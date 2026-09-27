@@ -93,7 +93,7 @@ GHL — processor fees, chargebacks and payouts not included. Reporting timezone
 | `/costs` | Wallet costs by month / scope / category in four groups. Cells drill down to `/costs/rows` (raw rows, **one month at a time**) |
 | `/margin` | Agency gross cash margin by month, per-member margin (sortable), "Unmatched" line, optional fee estimate, "Partner split — formula pending" |
 | `/members`, `/members/[id]` | Member list (state filter, sortable) and drill-down (ledger, usage by category, wallet transactions, balance history, revenue-vs-usage chart) |
-| `/health` | Job/data-quality/balance/database health, and **Dunning (shadow)**: the last 50 engine decisions and how many accounts' shadow-projected state differs from `GhlAccount.billingState` (`docs/dunning-engine.md`) |
+| `/health` | Job/data-quality/balance/database health, and **Dunning (shadow)**: the last 50 engine decisions and how many accounts' shadow-projected state differs from `GhlAccount.billingState` (`docs/dunning-engine.md`); the **GHL intents outbox** (counts + last 20), recent **stage-change / invoice events**, `sub_sweep` job health, and an informational list of **unpaid subscriptions** |
 
 ### Rules (one definition each; page, drill-down and CSV share the same function)
 

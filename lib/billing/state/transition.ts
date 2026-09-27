@@ -14,6 +14,10 @@ import { STRIKE_LIMIT, TRIAL_OFFER_RE, type BillingState, type Context, type Dec
  *  - Core failure → payment_failed, NO strike — unless covered (now < coreCoveredUntil). Expired invoice → paused/expired_invoice
  *    (same coverage protection). Core success → active from trial / payment_failed / paused(expired_invoice|non_payment).
  *  - trial_auth success → trial, only from null/trial. inactive & churned: payments change nothing ("state excludes action").
+ *  - saas_pause is NEVER emitted by the strike or the expiry itself: a pause executes only on `pause_confirmed` (after GHL's 15-minute
+ *    wait, if the account is still paused) — or immediately for the deliberate inactive/churned commands and sweep-driven churn.
+ *  - Subscription events (nightly sweep): canceled/expired → churned (deferred while covered, except a cancel during the trial);
+ *    trial ended unconverted → payment_failed (core failure open); newly trialing → trial.
  *  - Commands (manual stage moves) apply from any state; a command whose stage already matches is a confirmation that
  *    re-asserts its side effect idempotently.
  */
@@ -66,6 +70,9 @@ export function needsSubscription(s: Snapshot, e: DunningEvent): boolean {
 
 export function decide(s: Snapshot, e: DunningEvent, ctx: Context): Decision {
   if (e.kind === "command") return decideCommand(s, e.stage);
+  if (e.kind === "pause_confirmed") return decidePauseConfirmed(s);
+  if (e.kind === "subscription_canceled" || e.kind === "subscription_expired") return decideSubscriptionEnd(s, e, ctx);
+  if (e.kind === "trial_ended_unconverted") return decideTrialEnded(s, ctx);
   const st = s.state;
 
   // inactive (voluntary) and churned: never struck, never auto-resumed — payments are recorded and change nothing.
@@ -81,7 +88,7 @@ export function decide(s: Snapshot, e: DunningEvent, ctx: Context): Decision {
       const strikes = s.strikes + 1;
       let d: Decision = { ...cleanBase(s), warningCount: strikes };
       if (strikes >= STRIKE_LIMIT) {
-        d = { ...d, pauseReason: "non_payment", sideEffects: [{ type: "saas_pause" }], reason: `strike ${strikes} of ${STRIKE_LIMIT} (balance ${b.value}${est} < 0) → paused (non_payment)` };
+        d = { ...d, pauseReason: "non_payment", reason: `strike ${strikes} of ${STRIKE_LIMIT} (balance ${b.value}${est} < 0) → paused (non_payment); location is paused when the pause is confirmed` };
         return finish(s, moveTo(s, d, "paused"));
       }
       d = { ...d, reason: `strike ${strikes} of ${STRIKE_LIMIT} (balance ${b.value}${est} < 0) → payment_failed` };
@@ -138,27 +145,61 @@ export function decide(s: Snapshot, e: DunningEvent, ctx: Context): Decision {
       return finish(s, { ...base, reason: "core subscription paid; already active" });
     }
 
-    case "trial_auth_succeeded": {
-      if (st !== null && st !== "trial") return noop(s, `trial_auth ignored (state ${st})`);
-      const name = ctx.subscription?.name ?? null;
-      const trialOffer = name && TRIAL_OFFER_RE.test(name) ? name : null;
-      const d: Decision = {
-        ...cleanBase(s),
-        trialOffer,
-        trialEndsAt: ctx.subscription?.trialEndsAt ?? null,
-        trialChanged: true,
-        reason: `trial_auth succeeded → trial${trialOffer ? ` (${trialOffer})` : ctx.subscription ? " (subscription name is not a “N Day Trial”, offer left blank)" : " (subscription unavailable, offer unknown)"}`,
-      };
-      return finish(s, moveTo(s, d, "trial"));
-    }
+    case "trial_auth_succeeded":
+      return trialDecision(s, ctx, "trial_auth succeeded");
+    case "subscription_trialing":
+      return trialDecision(s, ctx, "subscription trialing");
 
     case "invoice_expired": {
       if (covered(ctx)) return noop(s, "covered, ignored (expired invoice while now < coreCoveredUntil)");
       if (st === "paused") return finish(s, { ...cleanBase(s), coreFailureOpen: true, reason: `expired invoice recorded; already paused (${s.pauseReason ?? "no reason recorded"})` });
-      const d: Decision = { ...cleanBase(s), coreFailureOpen: true, pauseReason: "expired_invoice", sideEffects: [{ type: "saas_pause" }], reason: "invoice expired → paused (expired_invoice)" };
+      const d: Decision = { ...cleanBase(s), coreFailureOpen: true, pauseReason: "expired_invoice", reason: "invoice expired → paused (expired_invoice); location is paused when the pause is confirmed" };
       return finish(s, moveTo(s, d, "paused"));
     }
   }
+}
+
+/** null/trial → trial with offer/end from the subscription (shared by trial_auth and a newly-trialing subscription). */
+function trialDecision(s: Snapshot, ctx: Context, why: string): Decision {
+  const st = s.state;
+  if (st === "inactive" || st === "churned") return noop(s, `state excludes action (${st})`);
+  if (st !== null && st !== "trial") return noop(s, `${why === "trial_auth succeeded" ? "trial_auth" : "trialing"} ignored (state ${st})`);
+  const name = ctx.subscription?.name ?? null;
+  const trialOffer = name && TRIAL_OFFER_RE.test(name) ? name : null;
+  const d: Decision = {
+    ...cleanBase(s),
+    trialOffer,
+    trialEndsAt: ctx.subscription?.trialEndsAt ?? null,
+    trialChanged: true,
+    reason: `${why} → trial${trialOffer ? ` (${trialOffer})` : ctx.subscription ? " (subscription name is not a “N Day Trial”, offer left blank)" : " (subscription unavailable, offer unknown)"}`,
+  };
+  const moved = moveTo(s, d, "trial");
+  // trial → trial: no stage move, but the offer / end date may have changed — a fields-only intent keeps the contact fields current.
+  return finish(s, st === "trial" ? { ...moved, intents: [{ ...intent("trial", d), kind: "fields" }] } : moved);
+}
+
+/** The Paused workflow's 15-minute wait elapsed: pause the location only if the account is STILL paused. */
+function decidePauseConfirmed(s: Snapshot): Decision {
+  if (s.state === "paused") return finish(s, { ...cleanBase(s), sideEffects: [{ type: "saas_pause" }], reason: `pause confirmed: still paused (${s.pauseReason ?? "no reason recorded"}) after the wait → saas_pause` });
+  return noop(s, `cured before confirmation, no pause (state ${s.state ?? "unseeded"})`);
+}
+
+/** canceled / expired subscription → churned. Deferred while covered — except a cancel DURING the trial, which churns immediately. */
+function decideSubscriptionEnd(s: Snapshot, e: Extract<DunningEvent, { kind: "subscription_canceled" | "subscription_expired" }>, ctx: Context): Decision {
+  if (s.state === "churned") return noop(s, "already churned");
+  const duringTrial = e.kind === "subscription_canceled" && e.duringTrial;
+  if (!duringTrial && covered(ctx)) return noop(s, `churn deferred: covered until ${(ctx.coveredUntil as Date).toISOString().slice(0, 10)} (${e.kind === "subscription_canceled" ? "subscription canceled" : "subscription expired"})`);
+  const what = duringTrial ? "trial canceled before it ended" : e.kind === "subscription_canceled" ? "subscription canceled" : "subscription expired";
+  const d: Decision = { ...cleanBase(s), pauseReason: null, coreFailureOpen: false, sideEffects: [{ type: "saas_pause" }], reason: `${what} → churned, pause location, billing stopped` };
+  return finish(s, moveTo(s, d, "churned"));
+}
+
+/** A trial ended (+2 days) with no paid core subscription: a core failure (payment_failed), unless covered. Only from trial. */
+function decideTrialEnded(s: Snapshot, ctx: Context): Decision {
+  if (s.state !== "trial") return noop(s, `trial ended: account is not in trial (state ${s.state ?? "unseeded"})`);
+  if (covered(ctx)) return noop(s, "covered, ignored (trial ended unconverted while now < coreCoveredUntil)");
+  const d: Decision = { ...cleanBase(s), coreFailureOpen: true, reason: "trial ended without a paid core subscription → payment_failed (core failure open)" };
+  return finish(s, moveTo(s, d, "payment_failed"));
 }
 
 function decideCommand(s: Snapshot, stage: BillingState): Decision {
@@ -166,7 +207,9 @@ function decideCommand(s: Snapshot, stage: BillingState): Decision {
   switch (stage) {
     case "paused": {
       const pauseReason = same ? (s.pauseReason ?? "manual_killswitch") : "manual_killswitch";
-      const d: Decision = { ...cleanBase(s), pauseReason, sideEffects: [{ type: "saas_pause", ...(same ? { idempotent: true } : {}) }], reason: same ? "command paused: already paused — confirmation, re-asserting saas_pause" : "command paused → paused (manual_killswitch), pause location" };
+      // No side effect here: the pause executes on pause_confirmed (the Paused workflow's 15-minute wait). An echo of a pause the engine
+      // itself sent is a plain confirmation of state.
+      const d: Decision = { ...cleanBase(s), pauseReason, reason: same ? "command paused: already paused — confirmation, no change" : "command paused → paused (manual_killswitch); location is paused when the pause is confirmed" };
       return finish(s, moveTo(s, d, "paused"));
     }
     case "inactive": {

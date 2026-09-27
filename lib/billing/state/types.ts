@@ -18,10 +18,17 @@ export type DunningEvent =
   | { kind: "core_failed" }
   | { kind: "core_succeeded" }
   | { kind: "trial_auth_succeeded" }
-  /** Arrives in 7b (invoice webhook); the transition is modelled now. */
+  /** An unpaid core recovery invoice went past due / was voided (invoice webhook, and the nightly sweep as a backstop). */
   | { kind: "invoice_expired"; invoiceId?: string }
-  /** Arrives in 7b (stage-change webhook): a manual pipeline move, or its confirmation. */
-  | { kind: "command"; stage: BillingState };
+  /** Stage-change webhook: a manual pipeline move, or the echo of a move the engine sent. */
+  | { kind: "command"; stage: BillingState }
+  /** The Paused workflow's 15-minute wait elapsed ("paused_confirm"). Only THIS executes saas_pause for a pause. */
+  | { kind: "pause_confirmed" }
+  /** Nightly subscription sweep (no ledger event exists for these). */
+  | { kind: "subscription_canceled"; duringTrial: boolean }
+  | { kind: "subscription_expired" }
+  | { kind: "trial_ended_unconverted" }
+  | { kind: "subscription_trialing" };
 
 /** A wallet balance the rule can trust: read live, read from a snapshot, or estimated (replay). Money is a decimal string. */
 export type BalanceReading = { status: "ok"; value: string; estimated: boolean } | { status: "unknown"; why: string };
@@ -39,7 +46,13 @@ export type Context = {
 export type SideEffect = { type: "saas_pause" | "saas_resume"; /** true = re-asserting an already-true state (a confirmation) */ idempotent?: boolean };
 
 /** A GHL pipeline move. `stage` equals a BillingState value (docs/ghl-server-contract.md). */
-export type Intent = { pipeline: "active_client"; stage: BillingState; fields: Record<string, unknown> };
+export type Intent = {
+  pipeline: "active_client";
+  stage: BillingState;
+  fields: Record<string, unknown>;
+  /** "stage" (default) moves the opportunity; "fields" only refreshes contact fields (stage = the current stage). */
+  kind?: "stage" | "fields";
+};
 
 export type Decision = {
   nextState: BillingState | null;

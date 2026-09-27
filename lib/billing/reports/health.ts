@@ -321,6 +321,46 @@ export async function getDunningShadow(db: PrismaClient) {
   };
 }
 
+// ── intents outbox, GHL events, unpaid subscriptions ───────────────────────
+
+type LabelRow = { locationId: string | null; locationName: string | null; businessName: string | null };
+const labelMap = async (db: PrismaClient, where: { ids?: string[]; contactIds?: string[] }): Promise<Map<string, LabelRow>> => {
+  const rows = await db.ghlAccount.findMany({
+    where: { accountType: "member", ...(where.ids ? { id: { in: where.ids } } : {}), ...(where.contactIds ? { contactId: { in: where.contactIds } } : {}) },
+    select: { id: true, contactId: true, locationId: true, locationName: true, user: { select: { businessName: true } } },
+  });
+  return new Map(rows.map((r) => [where.ids ? r.id : r.contactId, { locationId: r.locationId, locationName: r.locationName, businessName: r.user?.businessName ?? null }]));
+};
+
+export async function getIntentsHealth(db: PrismaClient) {
+  const [counts, last] = await Promise.all([
+    db.ghlIntent.groupBy({ by: ["status"], _count: { _all: true } }),
+    db.ghlIntent.findMany({ orderBy: { createdAt: "desc" }, take: 20, select: { id: true, createdAt: true, ghlAccountId: true, kind: true, pipeline: true, status: true, attempts: true, lastError: true, sentAt: true, payload: true } }),
+  ]);
+  const labels = await labelMap(db, { ids: [...new Set(last.map((l) => l.ghlAccountId))] });
+  const by = Object.fromEntries(counts.map((c) => [c.status, c._count._all])) as Record<string, number>;
+  return {
+    counts: { pending: by.pending ?? 0, sent: by.sent ?? 0, failed: by.failed ?? 0, skipped_shadow: by.skipped_shadow ?? 0 },
+    last: last.map((l) => ({ ...l, stage: (l.payload as { stage?: string } | null)?.stage ?? null, label: labels.get(l.ghlAccountId) ?? null })),
+  };
+}
+
+export async function getRecentGhlEvents(db: PrismaClient) {
+  const events = await db.ghlEvent.findMany({ where: { source: { in: ["stage_change", "invoice"] } }, orderBy: { receivedAt: "desc" }, take: 20, select: { id: true, source: true, externalId: true, payload: true, receivedAt: true, processedAt: true, attempts: true, lastError: true } });
+  const labels = await labelMap(db, { contactIds: [...new Set(events.filter((e) => e.source === "stage_change" && e.externalId).map((e) => e.externalId as string))] });
+  return events.map((e) => {
+    const p = (e.payload ?? {}) as { pipeline?: string; stage?: string };
+    return { ...e, summary: e.source === "stage_change" ? `${p.pipeline ?? "?"} → ${p.stage ?? "?"}` : `invoice …${(e.externalId ?? "").slice(-4)}`, label: e.source === "stage_change" && e.externalId ? (labels.get(e.externalId) ?? null) : null };
+  });
+}
+
+/** Informational: subscriptions GHL reports as `unpaid`. No engine event is emitted for them. */
+export async function getUnpaidSubscriptions(db: PrismaClient) {
+  const rows = await db.ghlSubscriptionState.findMany({ where: { status: "unpaid" }, orderBy: { lastSeenAt: "desc" }, select: { subscriptionId: true, contactId: true, name: true, lastSeenAt: true } });
+  const labels = await labelMap(db, { contactIds: [...new Set(rows.map((r) => r.contactId))] });
+  return rows.map((r) => ({ ...r, label: labels.get(r.contactId) ?? null }));
+}
+
 // ── summary badges ──────────────────────────────────────────────────────────
 
 export type Badge = { key: string; label: string; value: string; tone: "ok" | "warn" | "bad" };

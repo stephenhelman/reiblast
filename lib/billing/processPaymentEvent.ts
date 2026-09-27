@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { fetchTransactionById } from "./ghlTransactions";
 import { ingestTransaction, type IngestResult } from "./ingestTransaction";
+import { sendPendingIntents } from "./intents/send";
 import { shadowDunningForLedger } from "./state/apply";
 
 export const MAX_EVENT_ATTEMPTS = 5;
@@ -60,6 +61,8 @@ export async function processPaymentEvent(eventId: string, opts: ProcessOptions)
   // Shadow dunning (7a): records what the billing state engine WOULD do for this ledger row. Never throws, never changes the
   // outcome above; it runs only after the ledger write and the event are already committed.
   if (ingested && ingested.action === "written") await shadowDunningForLedger(db, ingested.ghlTransactionId);
+  // Opportunistic retry of failed/pending GHL intents (max 5 attempts each). Hard no-op unless DUNNING_MODE=live; never throws.
+  await sendPendingIntents(db).catch((e) => console.error("[intents] retry failed:", e instanceof Error ? e.message : e));
 
   if (opts.retryPending !== false) await retryPendingEvents(db, event.id);
   return "processed";
@@ -68,7 +71,7 @@ export async function processPaymentEvent(eventId: string, opts: ProcessOptions)
 /** Retry up to RETRY_AFTER_SUCCESS pending failed events under the replay limits. */
 export async function retryPendingEvents(db: PrismaClient, excludeId?: string): Promise<number> {
   const pending = await db.ghlEvent.findMany({
-    where: { ...replayableWhere(), ...(excludeId ? { id: { not: excludeId } } : {}) },
+    where: { ...replayableWhere(), source: "payment", ...(excludeId ? { id: { not: excludeId } } : {}) }, // other sources are retried by the replay job's dispatcher
     orderBy: { receivedAt: "asc" },
     take: RETRY_AFTER_SUCCESS,
     select: { id: true },

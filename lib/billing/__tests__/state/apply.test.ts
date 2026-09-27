@@ -36,12 +36,12 @@ describe("shadow write path", () => {
     expect(db.decisions).toHaveLength(1);
   });
 
-  it("three counted strikes walk the projection: payment_failed → payment_failed → paused (non_payment) + a recorded saas_pause (never executed)", async () => {
+  it("three counted strikes walk the projection: payment_failed → payment_failed → paused (non_payment); the pause itself waits for pause_confirmed", async () => {
     const db = makeFake([member()]);
     for (const [i, h] of [3, 2, 1].entries()) await applyDunning(db, failed(`s${i}`, hoursAgo(h)), { mode: "shadow", deps: deps() });
     expect(db.decisions.map((d: any) => [d.fromState, d.toState, d.toStrikes])).toEqual([["active", "payment_failed", 1], ["payment_failed", "payment_failed", 2], ["payment_failed", "paused", 3]]);
     expect(db.decisions[2].pauseReason).toBe("non_payment");
-    expect(db.decisions[2].sideEffects).toEqual([{ type: "saas_pause" }]);
+    expect(db.decisions[2].sideEffects).toEqual([]); // no saas_pause at the strike
     expect(db.decisions[2].intents).toEqual([expect.objectContaining({ pipeline: "active_client", stage: "paused" })]);
   });
 
@@ -167,15 +167,20 @@ describe("skips", () => {
 });
 
 describe("modes", () => {
-  it("DUNNING_MODE defaults to shadow; any other value throws", () => {
+  it("DUNNING_MODE defaults to shadow; only shadow|live are valid, anything else throws", () => {
     expect(dunningMode({})).toBe("shadow");
     expect(dunningMode({ DUNNING_MODE: "shadow" })).toBe("shadow");
-    for (const v of ["live", "replay", "off", ""]) if (v !== "") expect(() => dunningMode({ DUNNING_MODE: v })).toThrow(/not supported/);
+    expect(dunningMode({ DUNNING_MODE: "live" })).toBe("live");
+    for (const v of ["replay", "off", "LIVE", "true"]) expect(() => dunningMode({ DUNNING_MODE: v })).toThrow(/not supported/);
   });
-  it("the live branch is a stub that throws and writes nothing", async () => {
-    const db = makeFake([member()]);
-    await expect(applyDunning(db, failed("l"), { mode: "live", deps: deps() })).rejects.toThrow(/not implemented/);
-    expect(db.decisions).toHaveLength(0);
+  it("live mode with NO allowlist behaves exactly as shadow: a shadow decision, a skipped_shadow intent, no state written, no effects", async () => {
+    const db = makeFake([member({ billingState: "payment_failed", warningCount: 2 })]);
+    let pauses = 0;
+    const r = await applyDunning(db, failed("l"), { mode: "live", deps: deps({ pause: async () => void pauses++, env: {} }) });
+    expect(r).toMatchObject({ status: "recorded", mode: "shadow" });
+    expect(db.decisions[0]).toMatchObject({ mode: "shadow", toState: "paused" });
+    expect(db.intents.map((i: any) => i.status)).toEqual(["skipped_shadow"]);
+    expect(pauses).toBe(0);
   });
 });
 
@@ -191,7 +196,7 @@ describe("the ingest hook never throws", () => {
   });
   it("an unsupported DUNNING_MODE is contained too (no throw out of the hook)", async () => {
     const prev = process.env.DUNNING_MODE;
-    process.env.DUNNING_MODE = "live";
+    process.env.DUNNING_MODE = "bogus";
     try {
       const db = makeFake([member()], [ledgerRow({})]);
       await expect(shadowDunningForLedger(db, "tx1", { deps: deps() })).resolves.toBeNull();
