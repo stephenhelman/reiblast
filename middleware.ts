@@ -2,6 +2,9 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { verifyToolsSession } from "@/lib/toolsSession";
 import { TOOLS_SESSION_COOKIE } from "@/lib/constants";
+import { ADMIN_BASE_HEADER, ADMIN_COOKIE } from "@/lib/admin/config";
+import { isPublicAdminPath, resolveAdminRoute } from "@/lib/admin/hostRouting";
+import { verifyAdminSession } from "@/lib/admin/session";
 import {
   REGION_UNAVAILABLE_PATH,
   getCountry,
@@ -9,9 +12,47 @@ import {
   isGatedPath,
 } from "@/lib/geo";
 
+/**
+ * REIblast admin (owner-only). `base` is "" on the admin host (public path == admin-relative path, rewritten under
+ * /admin) and "/admin" when served by path on a preview host. Only a cheap signature check happens here (edge runtime);
+ * requireOwner() does the authoritative per-request re-check in the page/action/API handler.
+ */
+async function handleAdmin(request: NextRequest, mode: "admin-host" | "preview-path"): Promise<NextResponse> {
+  const base = mode === "preview-path" ? "/admin" : "";
+  const rel = mode === "preview-path" ? request.nextUrl.pathname.slice("/admin".length) || "/" : request.nextUrl.pathname;
+
+  if (!isPublicAdminPath(rel)) {
+    const token = request.cookies.get(ADMIN_COOKIE)?.value;
+    const session = token ? await verifyAdminSession(token) : null;
+    if (!session) {
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = `${base}/login`;
+      loginUrl.search = "";
+      return NextResponse.redirect(loginUrl);
+    }
+  }
+
+  const headers = new Headers(request.headers);
+  headers.set(ADMIN_BASE_HEADER, base);
+  const res =
+    mode === "preview-path"
+      ? NextResponse.next({ request: { headers } })
+      : NextResponse.rewrite(Object.assign(request.nextUrl.clone(), { pathname: `/admin${rel === "/" ? "" : rel}` }), { request: { headers } });
+  res.headers.set("X-Robots-Tag", "noindex, nofollow");
+  return res;
+}
+
 export async function middleware(request: NextRequest) {
   const hostname = request.headers.get("host") || "";
   const { pathname } = request.nextUrl;
+
+  const adminRoute = resolveAdminRoute({
+    host: hostname,
+    pathname,
+    env: { VERCEL_ENV: process.env.VERCEL_ENV, ADMIN_PATH_ACCESS: process.env.ADMIN_PATH_ACCESS },
+  });
+  if (adminRoute.kind === "blocked") return new NextResponse("Not Found", { status: 404 }); // /admin on any non-admin host
+  if (adminRoute.kind === "admin-host" || adminRoute.kind === "preview-path") return handleAdmin(request, adminRoute.kind);
 
   const isToolsHost =
     hostname.startsWith("tools.") ||

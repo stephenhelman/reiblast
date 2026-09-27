@@ -5,7 +5,7 @@ import type { JobFn } from "./types";
 
 type Cursor = { takenOn: string; locations: WalletLocation[]; idx: number; counts: Record<string, number> };
 
-/** Daily wallet-balance snapshot per location (every GhlAccount.locationId + HQ). One row per (locationId, UTC day). */
+/** Daily wallet-balance snapshot per location (every member GhlAccount.locationId + HQ once). One row per (locationId, UTC day). */
 export const runBalances: JobFn = async (ctx) => {
   const c = ctx.cursor as Cursor | null;
   const st: Cursor = c ?? { takenOn: ctx.now.toISOString().slice(0, 10), locations: await listWalletLocations(ctx.db), idx: 0, counts: {} };

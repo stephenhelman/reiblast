@@ -20,8 +20,9 @@ export async function ingestTransaction(txn: unknown, db?: Db, opts: { now?: Dat
   const c = classify(t);
   if (c.classification === "ignore") return { action: "ignored", reason: c.reason };
 
+  // Only MEMBER accounts match: internal accounts (owner/HQ) are never a member's payer.
   let account = t.contactId
-    ? await client.ghlAccount.findUnique({ where: { contactId: t.contactId }, select: { id: true } })
+    ? await client.ghlAccount.findFirst({ where: { contactId: t.contactId, accountType: "member" }, select: { id: true } })
     : null;
   let matchMethod: MatchMethod | null = account ? "contactId" : null;
 
@@ -29,7 +30,7 @@ export async function ingestTransaction(txn: unknown, db?: Db, opts: { now?: Dat
   if (!account && c.classification === "wallet_auto_recharge") {
     const locationId = locationIdFromDescription(t.description);
     if (locationId) {
-      account = await client.ghlAccount.findUnique({ where: { locationId }, select: { id: true } });
+      account = await client.ghlAccount.findFirst({ where: { locationId, accountType: "member" }, select: { id: true } });
       if (account) matchMethod = "descriptionLocation";
     }
   }

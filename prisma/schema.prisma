@@ -951,6 +951,13 @@ enum BillingClass {
   unclassified
 }
 
+// member = a paying REIblast member; internal = our own account (e.g. the HQ owner used for the admin entry flow).
+// Member logic (jobs, seeds, reports) must filter accountType = member.
+enum GhlAccountType {
+  member
+  internal
+}
+
 model GhlAccount {
   id                   String               @id @default(cuid())
   userId               String               @unique
@@ -963,6 +970,7 @@ model GhlAccount {
   trialOffer           String?
   trialEndsAt          DateTime?
   legacyUnreconciled   Boolean              @default(false)
+  accountType          GhlAccountType       @default(member)
   onboardingStage      String?
   locationToken        String?
   locationTokenExpires DateTime?
@@ -1071,4 +1079,37 @@ model JobRun {
   cursor      Json?
   lastError   String?
   lastSummary Json?
+}
+
+// ── REIblast admin auth (owner-only; entirely separate from the REItools admin) ──
+
+// One SMS one-time-code challenge. codeHash is an HMAC — never the code.
+model AdminAuthChallenge {
+  id         String    @id @default(cuid())
+  method     String // "sms"
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([createdAt])
+}
+
+model AdminBackupCode {
+  id        String    @id @default(cuid())
+  codeHash  String    @unique
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+// Append-only. action: login_sms | login_totp | login_backup | login_failed | sms_sent | export | logout
+model AdminAuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  detail    Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }

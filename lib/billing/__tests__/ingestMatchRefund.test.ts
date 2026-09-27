@@ -8,11 +8,14 @@ type Row = Record<string, any>;
 
 /** In-memory stand-in for the three Prisma delegates ingestTransaction touches. */
 function fakeDb(accounts: { id: string; contactId: string; locationId: string | null }[]) {
+  // ingestTransaction matches MEMBER accounts only; these fixtures are all members.
   const ledger = new Map<string, Row>();
   const db: any = {
     ghlAccount: {
-      findUnique: async ({ where }: { where: { contactId?: string; locationId?: string } }) =>
-        accounts.find((a) => (where.contactId ? a.contactId === where.contactId : a.locationId === where.locationId)) ?? null,
+      findFirst: async ({ where }: { where: { contactId?: string; locationId?: string; accountType?: string } }) => {
+        expect(where.accountType).toBe("member");
+        return accounts.find((a) => (where.contactId ? a.contactId === where.contactId : a.locationId === where.locationId)) ?? null;
+      },
     },
     billingLedgerEntry: {
       findUnique: async ({ where }: { where: { ghlTransactionId: string } }) => ledger.get(where.ghlTransactionId) ?? null,

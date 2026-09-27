@@ -73,7 +73,7 @@ async function main() {
   const byContact = new Map<string, Sub[]>();
   for (const s of subs) if (s.contactId) byContact.set(s.contactId, [...(byContact.get(s.contactId) ?? []), s]);
 
-  const dbAccounts = await prisma.ghlAccount.findMany();
+  const dbAccounts = await prisma.ghlAccount.findMany({ where: { accountType: "member" } });
   const accounts = new Map<string, Acct>();
   let simulated = false;
   if (dbAccounts.length > 0) {

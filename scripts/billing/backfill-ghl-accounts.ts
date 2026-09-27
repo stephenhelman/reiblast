@@ -77,6 +77,9 @@ async function main() {
     (await prisma.ghlAccount.findMany({ select: { userId: true } })).map((a) => a.userId),
   );
 
+  // Internal accounts (owner/HQ) are never touched by member backfills.
+  const internalUserIds = new Set((await prisma.ghlAccount.findMany({ where: { accountType: "internal" }, select: { userId: true } })).map((a) => a.userId));
+
   let created = 0;
   let updated = 0;
   const skipped = 0;
@@ -84,6 +87,7 @@ async function main() {
   const unseeded: string[] = [];
 
   for (const u of users) {
+    if (internalUserIds.has(u.id)) continue;
     let seed: { billingState: BillingState; pauseReason?: PauseReason } | null = null;
     if (u.status === "suspended") {
       seed = { billingState: BillingState.paused, pauseReason: PauseReason.non_payment };

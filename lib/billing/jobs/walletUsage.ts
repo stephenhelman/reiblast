@@ -73,7 +73,7 @@ export async function replaceScope(db: PrismaClient, scopeKey: string, ghlAccoun
 }
 
 /**
- * Wallet usage rollup over a UTC window. Per-location pass (every GhlAccount.locationId + HQ), then an unfiltered
+ * Wallet usage rollup over a UTC window. Per-location pass (every member GhlAccount.locationId + HQ once), then an unfiltered
  * pass whose rows no location query returned go to _agency (blank name "-") or _unattributed (named, non-member).
  * Replaces per (scopeKey, day). Resumable via the cursor.
  */

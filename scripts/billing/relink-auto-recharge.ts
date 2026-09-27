@@ -19,7 +19,7 @@ async function main() {
   let matched = 0;
   for (const r of rows) {
     const locationId = locationIdFromDescription(normalizeTransaction(r.raw).description);
-    const account = locationId ? await db.ghlAccount.findUnique({ where: { locationId }, select: { id: true } }) : null;
+    const account = locationId ? await db.ghlAccount.findFirst({ where: { locationId, accountType: "member" }, select: { id: true } }) : null;
     console.log(`  …${r.ghlTransactionId.slice(-4)} ${r.occurredAt.toISOString().slice(0, 10)} ${r.status} ${r.amount} url-location=${locationId ? `…${locationId.slice(-4)}` : "none"} → ${account ? "MATCH" : "no GhlAccount"}`);
     if (!account) continue;
     matched++;

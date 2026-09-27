@@ -94,3 +94,16 @@ it falls back to the `/location/<id>/` URL in the description and matches `GhlAc
 (`contactId` | `descriptionLocation` | none) is returned per row and counted in the `tx_sweep` summary (`match:*`) and in
 the historical-load report. `scripts/billing/relink-auto-recharge.ts` (dry-run by default) applies the same fallback to
 existing unmatched rows; it only fills a null `ghlAccountId`.
+
+## Internal accounts (`GhlAccount.accountType`)
+
+`accountType` is `member` (default) or `internal`. The owner account used by the admin entry flow is `internal`, with
+`locationId` = the HQ location. **All member logic filters `accountType = member`**:
+
+- `listWalletLocations` (used by `wallet_usage` and `balances`) lists member accounts only and adds HQ from
+  `GHL_HQ_LOCATION_ID`, so HQ is queried **exactly once**, as scopeKey = HQ location id with `ghlAccountId` null.
+- `ingestTransaction` matches payments to member accounts only (by contactId, and by the auto-recharge description
+  location). A payment from an internal contact stays unmatched rather than becoming a member's revenue.
+- `seed-billing-state.ts`, `backfill-ghl-accounts.ts` (skips users with an internal account) and
+  `relink-auto-recharge.ts` ignore internal accounts. Overview/health counts of members, `billingState` and
+  `legacyUnreconciled` are member-only. Any new report or script must do the same.
