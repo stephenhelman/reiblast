@@ -1,3 +1,4 @@
+import { shadowDunningForLedger } from "../state/apply";
 import { classify, CLASSIFIER_VERSION } from "../classify";
 import { listTransactionsPage } from "../ghlTransactions";
 import { ingestTransaction } from "../ingestTransaction";
@@ -38,6 +39,7 @@ export const runTxSweep: JobFn = async (ctx) => {
       try {
         if (ctx.apply) {
           const r = await ingestTransaction(rec, ctx.db);
+          if (r.action === "written") await shadowDunningForLedger(ctx.db, r.ghlTransactionId); // shadow only; never throws (docs/dunning-engine.md)
           bump(r.action === "ignored" ? "ignored" : `written:${r.classification}`);
           if (r.action === "written") {
             bump(`match:${r.matchMethod ?? "none"}`);

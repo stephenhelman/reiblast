@@ -978,6 +978,7 @@ model GhlAccount {
   // covered even if no core payment is on record; dunning must not treat a missing/failed core payment as delinquency.
   coreCoveredUntil DateTime?
   coreCoverageNote String?
+  dunningDecisions DunningDecision[]
   onboardingStage      String?
   locationToken        String?
   locationTokenExpires DateTime?
@@ -1118,5 +1119,35 @@ model AdminAuditLog {
   ip        String?
   createdAt DateTime @default(now())
 
+  @@index([createdAt])
+}
+
+// Shadow-mode record of what the billing state engine WOULD do (lib/billing/state). One row per (trigger, account, mode);
+// the unique key makes reprocessing idempotent. Shadow/replay rows never change GhlAccount — the shadow-projected state of an
+// account is the to* values of its latest shadow|replay decision by eventAt (docs/dunning-engine.md).
+model DunningDecision {
+  id               String        @id @default(cuid())
+  ghlAccountId     String
+  ghlAccount       GhlAccount    @relation(fields: [ghlAccountId], references: [id])
+  trigger          String // ledger:<ghlTransactionId> | command:<stage> | invoice:<id>
+  eventKind        String
+  eventAt          DateTime // when the triggering event happened (ledger occurredAt); projections order by this
+  fromState        BillingState?
+  toState          BillingState?
+  fromStrikes      Int
+  toStrikes        Int
+  pauseReason      PauseReason?
+  coreFailureOpen  Boolean       @default(false) // an unpaid core-subscription failure is open after this decision
+  sideEffects      Json
+  intents          Json
+  reason           String
+  mode             String // shadow | replay | live
+  walletBalance    Decimal?      @db.Decimal(12, 6)
+  balanceEstimated Boolean       @default(false) // walletBalance was reconstructed (replay), not read
+  createdAt        DateTime      @default(now())
+
+  @@unique([trigger, ghlAccountId, mode])
+  @@index([ghlAccountId, createdAt])
+  @@index([ghlAccountId, eventAt])
   @@index([createdAt])
 }

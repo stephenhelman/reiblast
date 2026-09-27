@@ -1,6 +1,7 @@
 import type { PrismaClient } from "@prisma/client";
 import { fetchTransactionById } from "./ghlTransactions";
-import { ingestTransaction } from "./ingestTransaction";
+import { ingestTransaction, type IngestResult } from "./ingestTransaction";
+import { shadowDunningForLedger } from "./state/apply";
 
 export const MAX_EVENT_ATTEMPTS = 5;
 export const MIN_EVENT_AGE_MS = 5 * 60 * 1000;
@@ -36,11 +37,12 @@ export async function processPaymentEvent(eventId: string, opts: ProcessOptions)
   if (!event) return "not_found";
   if (event.processedAt) return "already_processed";
 
+  let ingested: IngestResult | null = null;
   try {
     if (!event.externalId) throw new PermanentEventError("no transactionId in body");
     if (!/^[A-Za-z0-9]{10,64}$/.test(event.externalId)) throw new PermanentEventError("invalid transaction id");
     const full = await fetchTransactionById(event.externalId);
-    await ingestTransaction(full, db);
+    ingested = await ingestTransaction(full, db);
     await db.ghlEvent.update({ where: { id: event.id }, data: { processedAt: new Date(), lastError: null } });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -54,6 +56,10 @@ export async function processPaymentEvent(eventId: string, opts: ProcessOptions)
     });
     return "failed";
   }
+
+  // Shadow dunning (7a): records what the billing state engine WOULD do for this ledger row. Never throws, never changes the
+  // outcome above; it runs only after the ledger write and the event are already committed.
+  if (ingested && ingested.action === "written") await shadowDunningForLedger(db, ingested.ghlTransactionId);
 
   if (opts.retryPending !== false) await retryPendingEvents(db, event.id);
   return "processed";

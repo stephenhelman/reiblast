@@ -3,7 +3,7 @@ import { Banner, BadgeRow, PageTitle, Section, Table } from "@/components/admin/
 import { fmtDenver, fmtDenverDate, fmtMb, fmtUsd, last4 } from "@/lib/admin/format";
 import { requireOwnerOrRedirect } from "@/lib/admin/requireOwner";
 import { getBillingDb } from "@/lib/billing/db";
-import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getInactiveUsage, getJobsHealth, NEON_CRIT_PCT, NEON_WARN_PCT, type BalanceLevel } from "@/lib/billing/reports/health";
+import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getDunningShadow, getInactiveUsage, getJobsHealth, NEON_CRIT_PCT, NEON_WARN_PCT, type BalanceLevel } from "@/lib/billing/reports/health";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,7 @@ const yn = (b: boolean) => (b ? <span className="text-red-300">STALE</span> : <s
 export default async function HealthPage() {
   await requireOwnerOrRedirect();
   const db = await getBillingDb();
-  const [jobs, quality, balances, dbSize, inactiveUsage] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getInactiveUsage(db)]);
+  const [jobs, quality, balances, dbSize, inactiveUsage, dunning] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getInactiveUsage(db), getDunningShadow(db)]);
   const badges = buildBadges({ jobs, quality, balances, inactiveUsage, db: dbSize });
   const label = (r: { locationId: string; locationName: string | null; businessName: string | null }) => <AccountLabel locationId={r.locationId} locationName={r.locationName} businessName={r.businessName} />;
 
@@ -109,6 +109,37 @@ export default async function HealthPage() {
             rows={balances.all.map((r) => [label(r), stateCell(r.billingState), r.status, r.balance === null ? "—" : fmtUsd(r.balance), r.takenOn])}
           />
         </details>
+      </Section>
+
+      <Section
+        title="Dunning (shadow)"
+        note={`What the billing state engine WOULD do — it records decisions only; nothing here pauses, resumes or moves a stage. Decisions recorded: ${Object.entries(dunning.byMode).map(([m, n]) => `${m} ${n}`).join(" · ") || "none yet"}. The shadow projection (latest SHADOW decision per account) differs from GhlAccount.billingState on ${dunning.diff.differs} of ${dunning.diff.projectedCount} accounts (${dunning.diff.differsSeeded} seeded, ${dunning.diff.differsUnseeded} not yet seeded). “est.” marks a balance reconstructed by replay.`}
+      >
+        {dunning.shadowErrors.count > 0 && <p className="px-4 pt-3 text-sm text-red-300">Shadow errors recorded: {dunning.shadowErrors.count} — last: {dunning.shadowErrors.last}</p>}
+        {dunning.diff.breakdown.length > 0 && (
+          <Table head={["Shadow-projected", "GhlAccount.billingState", "Accounts"]} rows={dunning.diff.breakdown.map((b) => [b.projected, b.actual, b.n])} />
+        )}
+        <div className="border-t border-border-default px-4 pt-3 text-xs uppercase tracking-wide text-white/40">Last 50 shadow decisions</div>
+        <Table
+          head={["When (Denver)", "Account", "Event", "State", "Strikes", "Reason", "Mode"]}
+          rows={dunning.recent.map((r) => [
+            fmtDenver(r.eventAt),
+            <AccountLabel key={r.id} locationId={r.ghlAccount.locationId} locationName={r.ghlAccount.locationName} businessName={r.ghlAccount.user?.businessName} />,
+            r.eventKind.replace(/_/g, " "),
+            `${r.fromState ?? "—"} → ${r.toState ?? "—"}${r.pauseReason ? ` (${r.pauseReason})` : ""}`,
+            `${r.fromStrikes} → ${r.toStrikes}`,
+            <span key="w" className="text-white/70">{r.reason}{r.walletBalance !== null && <span className="ml-2 text-xs text-white/40">bal {fmtUsd(r.walletBalance)}{r.balanceEstimated ? " est." : ""}</span>}</span>,
+            r.mode,
+          ])}
+          empty="No shadow decisions recorded yet."
+        />
+        <div className="border-t border-border-default px-4 pt-3 text-xs uppercase tracking-wide text-white/40">Replay analysis (history replayed through the engine — kept separate, never feeds the shadow projection)</div>
+        <p className="px-4 pt-2 text-sm text-white/60">
+          {dunning.replayDiff.projectedCount === 0
+            ? "No replay has been applied."
+            : `Replay end-state differs from GhlAccount.billingState on ${dunning.replayDiff.differs} of ${dunning.replayDiff.projectedCount} accounts. Replay sees only ledger payments (not cancellations, manual moves or pre-June history), and its balances are estimates.`}
+        </p>
+        {dunning.replayDiff.breakdown.length > 0 && <Table head={["Replay end-state", "GhlAccount.billingState", "Accounts"]} rows={dunning.replayDiff.breakdown.map((b) => [b.projected, b.actual, b.n])} />}
       </Section>
 
       <Section title="Database" note="Neon storage is project-wide — every branch counts toward the plan limit; this figure is this branch only.">

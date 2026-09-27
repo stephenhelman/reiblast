@@ -262,6 +262,65 @@ export async function getMemberOverview(db: PrismaClient) {
   };
 }
 
+// ── dunning (shadow) ────────────────────────────────────────────────────────
+
+export type ProjectionPair = { projected: string | null; actual: string | null; n: number };
+
+/** Pure. How many accounts the shadow projection disagrees with GhlAccount.billingState on (null actual = not yet seeded, reported separately). */
+export function summarizeProjectionDiff(pairs: ProjectionPair[]) {
+  const projectedCount = pairs.reduce((n, p) => n + p.n, 0);
+  const differing = pairs.filter((p) => p.projected !== p.actual);
+  const unseeded = differing.filter((p) => p.actual === null).reduce((n, p) => n + p.n, 0);
+  const differs = differing.reduce((n, p) => n + p.n, 0);
+  return {
+    projectedCount,
+    differs,
+    /** of which the account has no billingState yet (null) — a difference that is expected before seeding */
+    differsUnseeded: unseeded,
+    differsSeeded: differs - unseeded,
+    breakdown: [...differing].sort((a, b) => b.n - a.n).map((p) => ({ projected: p.projected ?? "null", actual: p.actual ?? "not seeded", n: p.n })),
+  };
+}
+
+/** Latest decision per account for ONE mode (by eventAt) vs GhlAccount.billingState, member accounts only. */
+async function projectionPairs(db: PrismaClient, mode: "shadow" | "replay"): Promise<ProjectionPair[]> {
+  const rows = await db.$queryRaw<{ projected: string | null; actual: string | null; n: bigint }[]>`
+    SELECT d."toState"::text AS projected, a."billingState"::text AS actual, COUNT(*) AS n
+    FROM (SELECT DISTINCT ON ("ghlAccountId") "ghlAccountId", "toState" FROM "DunningDecision" WHERE "mode" = ${mode} ORDER BY "ghlAccountId", "eventAt" DESC, "createdAt" DESC) d
+    JOIN "GhlAccount" a ON a."id" = d."ghlAccountId" AND a."accountType" = 'member'
+    GROUP BY 1, 2`;
+  return rows.map((p) => ({ projected: p.projected, actual: p.actual, n: Number(p.n) }));
+}
+
+export async function getDunningShadow(db: PrismaClient) {
+  const [recent, byMode, shadowPairs, replayPairs, err] = await Promise.all([
+    db.dunningDecision.findMany({
+      where: { mode: "shadow" },
+      orderBy: { createdAt: "desc" },
+      take: 50,
+      select: {
+        id: true, createdAt: true, eventAt: true, mode: true, eventKind: true, fromState: true, toState: true, fromStrikes: true, toStrikes: true, pauseReason: true, reason: true, balanceEstimated: true, walletBalance: true,
+        ghlAccount: { select: { id: true, locationId: true, locationName: true, user: { select: { businessName: true } } } },
+      },
+    }),
+    db.dunningDecision.groupBy({ by: ["mode"], _count: { _all: true } }),
+    projectionPairs(db, "shadow"),
+    projectionPairs(db, "replay"),
+    db.jobRun.findUnique({ where: { job: "dunning_shadow" }, select: { lastError: true, lastSummary: true } }),
+  ]);
+  const errors = Number((err?.lastSummary as { errors?: number } | null)?.errors ?? 0);
+  return {
+    /** The last 50 SHADOW decisions (live-event decisions). Replay rows are analysis and are not listed here. */
+    recent: recent.map((r) => ({ ...r, walletBalance: r.walletBalance === null ? null : r.walletBalance.toFixed(6) })),
+    byMode: Object.fromEntries(byMode.map((m) => [m.mode, m._count._all])) as Record<string, number>,
+    /** Shadow projection (latest SHADOW decision per account) vs GhlAccount.billingState. */
+    diff: summarizeProjectionDiff(shadowPairs),
+    /** Replay analysis (latest REPLAY decision per account) vs GhlAccount.billingState — never feeds the shadow projection. */
+    replayDiff: summarizeProjectionDiff(replayPairs),
+    shadowErrors: { count: errors, last: err?.lastError ?? null },
+  };
+}
+
 // ── summary badges ──────────────────────────────────────────────────────────
 
 export type Badge = { key: string; label: string; value: string; tone: "ok" | "warn" | "bad" };

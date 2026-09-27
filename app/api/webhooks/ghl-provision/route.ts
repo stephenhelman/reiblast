@@ -10,6 +10,7 @@ import {
 } from "@/lib/ghl";
 import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 import { MEMBER_TAGS, ONBOARDING_STAGES } from "@/lib/constants";
+import { setGhlAccountLocation } from "@/lib/billing/state/dualWrite";
 
 export async function POST(req: NextRequest) {
   if (!verifyWebhook(req)) {
@@ -80,6 +81,8 @@ export async function POST(req: NextRequest) {
         onboardingStage: ONBOARDING_STAGES.ACTIVE,
       },
     });
+
+    await setGhlAccountLocation(prisma, { userId: user.id, locationId, contactId }); // additive dual-write; never throws (swallows + logs)
 
     console.log(
       "[Provision] Populating sub-account custom values:",

@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { createHQContact, addTag, moveToStage } from "@/lib/ghl";
 import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 import { MEMBER_TAGS, ONBOARDING_STAGES } from "@/lib/constants";
+import { ensureGhlAccount } from "@/lib/billing/state/dualWrite";
 
 export async function POST(req: NextRequest) {
   if (!verifyWebhook(req)) {
@@ -53,6 +54,7 @@ export async function POST(req: NextRequest) {
       data: { ghlContactId: contactId, otpCode: otp, otpExpiry },
     });
     console.log(`[GHL webhook] OTP stored for ${email}`);
+    await ensureGhlAccount(prisma, { userId: user.id, contactId }); // additive dual-write; never throws (swallows + logs)
 
     await addTag(contactId, MEMBER_TAGS.PAYMENT_RECEIVED);
     await addTag(contactId, MEMBER_TAGS.CORE);
