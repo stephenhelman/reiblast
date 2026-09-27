@@ -354,6 +354,16 @@ export async function getRecentGhlEvents(db: PrismaClient) {
   });
 }
 
+/** Last 30 attempts to trigger a nightly job (source "job_trigger"), whatever the outcome — see docs/billing-jobs.md. */
+export async function getRecentJobTriggers(db: PrismaClient) {
+  const rows = await db.ghlEvent.findMany({ where: { source: "job_trigger" }, orderBy: { receivedAt: "desc" }, take: 30, select: { id: true, externalId: true, payload: true, receivedAt: true } });
+  return rows.map((r) => {
+    const p = (r.payload ?? {}) as { reason?: string; bodyKeys?: string[]; jobRunId?: string };
+    const fromSelf = Array.isArray(p.bodyKeys) && p.bodyKeys.includes("cursor");
+    return { id: r.id, receivedAt: r.receivedAt, job: r.externalId, reason: p.reason ?? "unknown", jobRunId: p.jobRunId ?? null, source: fromSelf ? "self-continuation" : "GHL" as const };
+  });
+}
+
 /** Informational: subscriptions GHL reports as `unpaid`. No engine event is emitted for them. */
 export async function getUnpaidSubscriptions(db: PrismaClient) {
   const rows = await db.ghlSubscriptionState.findMany({ where: { status: "unpaid" }, orderBy: { lastSeenAt: "desc" }, select: { subscriptionId: true, contactId: true, name: true, lastSeenAt: true } });

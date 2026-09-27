@@ -31,28 +31,41 @@ beforeEach(() => {
 const setup = (over = {}, opts: { writable?: boolean } = { writable: true }) => (holder.db = makeFake([member({ contactId: CONTACT, ...over })], [], opts));
 
 describe("stage-changed route: auth, recording, always 200", () => {
-  it("a missing or wrong secret → 200, and NOTHING is recorded or decided", async () => {
+  it("a missing or wrong secret → 200, reason says which, and NOTHING is recorded or decided", async () => {
     const db = setup();
-    const bad: Record<string, string>[] = [{}, { "x-reiblast-events-secret": "nope" }, { "x-reiblast-events-secret": "" }];
-    for (const headers of bad) {
+    const cases: [Record<string, string>, string][] = [
+      [{}, "auth_missing"],
+      [{ "x-reiblast-events-secret": "nope" }, "auth_failed"],
+      [{ "x-reiblast-events-secret": "" }, "auth_missing"],
+    ];
+    for (const [headers, reason] of cases) {
       const res = await stage({ contactId: CONTACT, pipeline: "active_client", stage: "paused" }, headers);
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ received: true });
+      expect(await res.json()).toEqual({ received: false, reason });
     }
     expect(db.events).toHaveLength(0);
     expect(db.decisions).toHaveLength(0);
   });
-  it("with GHL_EVENTS_SECRET unset nothing is ever accepted", async () => {
+  it("with GHL_EVENTS_SECRET unset nothing is ever accepted, reason server_misconfigured", async () => {
     delete process.env.GHL_EVENTS_SECRET;
     const db = setup();
-    expect((await stage({ contactId: CONTACT, pipeline: "active_client", stage: "paused" })).status).toBe(200);
+    const res = await stage({ contactId: CONTACT, pipeline: "active_client", stage: "paused" });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ received: false, reason: "server_misconfigured" });
     expect(db.events).toHaveLength(0);
   });
-  it("invalid JSON / non-object bodies → 200, nothing recorded", async () => {
+  it("invalid JSON / non-object bodies → 200, reason bad_json, nothing recorded", async () => {
     const db = setup();
-    expect((await stage(null, undefined, "{not json")).status).toBe(200);
-    expect((await stage(null, undefined, "[1,2]")).status).toBe(200);
+    for (const res of [await stage(null, undefined, "{not json"), await stage(null, undefined, "[1,2]")]) {
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({ received: false, reason: "bad_json" });
+    }
     expect(db.events).toHaveLength(0);
+  });
+  it("a successful record+process → reason accepted", async () => {
+    setup({ billingState: "active" });
+    const res = await stage({ contactId: CONTACT, pipeline: "active_client", stage: "paused" });
+    expect(await res.json()).toEqual({ received: true, reason: "accepted" });
   });
   it("records the GhlEvent FIRST: if processing blows up the event still exists with attempts and the error", async () => {
     const db = setup();

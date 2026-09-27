@@ -3,7 +3,7 @@ import { Banner, BadgeRow, PageTitle, Section, Table } from "@/components/admin/
 import { fmtDenver, fmtDenverDate, fmtMb, fmtUsd, last4 } from "@/lib/admin/format";
 import { requireOwnerOrRedirect } from "@/lib/admin/requireOwner";
 import { getBillingDb } from "@/lib/billing/db";
-import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getDunningShadow, getInactiveUsage, getIntentsHealth, getJobsHealth, getRecentGhlEvents, getUnpaidSubscriptions, NEON_CRIT_PCT, NEON_WARN_PCT, type BalanceLevel } from "@/lib/billing/reports/health";
+import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getDunningShadow, getInactiveUsage, getIntentsHealth, getJobsHealth, getRecentGhlEvents, getRecentJobTriggers, getUnpaidSubscriptions, NEON_CRIT_PCT, NEON_WARN_PCT, type BalanceLevel } from "@/lib/billing/reports/health";
 
 export const dynamic = "force-dynamic";
 
@@ -15,7 +15,7 @@ const yn = (b: boolean) => (b ? <span className="text-red-300">STALE</span> : <s
 export default async function HealthPage() {
   await requireOwnerOrRedirect();
   const db = await getBillingDb();
-  const [jobs, quality, balances, dbSize, inactiveUsage, dunning, intents, ghlEvents, unpaid] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getInactiveUsage(db), getDunningShadow(db), getIntentsHealth(db), getRecentGhlEvents(db), getUnpaidSubscriptions(db)]);
+  const [jobs, quality, balances, dbSize, inactiveUsage, dunning, intents, ghlEvents, unpaid, jobTriggers] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getInactiveUsage(db), getDunningShadow(db), getIntentsHealth(db), getRecentGhlEvents(db), getUnpaidSubscriptions(db), getRecentJobTriggers(db)]);
   const badges = buildBadges({ jobs, quality, balances, inactiveUsage, db: dbSize });
   const label = (r: { locationId: string; locationName: string | null; businessName: string | null }) => <AccountLabel locationId={r.locationId} locationName={r.locationName} businessName={r.businessName} />;
 
@@ -184,6 +184,20 @@ export default async function HealthPage() {
           head={["Account", "Subscription", "Plan", "Last seen (Denver)"]}
           rows={unpaid.map((u) => [u.label ? <AccountLabel key={u.subscriptionId} locationId={u.label.locationId} locationName={u.label.locationName} businessName={u.label.businessName} /> : <span key={u.subscriptionId} className="text-white/50">no member account</span>, last4(u.subscriptionId), u.name ?? "—", fmtDenver(u.lastSeenAt)])}
           empty="None — the sweep has not recorded any unpaid subscriptions."
+        />
+      </Section>
+
+      <Section title="Recent job triggers" note="Last 30 attempts to trigger a nightly job, whatever the outcome (docs/billing-jobs.md). The route always answers 200; `reason` is why. Every trigger is recorded even when nothing runs.">
+        <Table
+          head={["Received (Denver)", "Job", "Reason", "From", "JobRun"]}
+          rows={jobTriggers.map((t) => [
+            fmtDenver(t.receivedAt),
+            t.job ?? "—",
+            <span key="r" className={t.reason === "accepted" ? "text-white/70" : t.reason === "in_flight" || t.reason === "continuation_cap" ? "text-gold" : "text-red-300"}>{t.reason}</span>,
+            t.source,
+            t.jobRunId ?? "—",
+          ])}
+          empty="No job triggers recorded yet."
         />
       </Section>
 

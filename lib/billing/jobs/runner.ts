@@ -24,6 +24,8 @@ export type RunOptions = {
   budgetMs?: number;
   /** POST to our own route when the budget runs out (route runs only). */
   selfContinue?: boolean;
+  /** The caller already ran `claim()` (or this is a continuation) and confirmed it succeeded — skip claiming again. */
+  preClaimed?: boolean;
 };
 
 export type RunOutcome =
@@ -35,8 +37,9 @@ export type RunOutcome =
 
 const CONT_KEY = "_continuation";
 
-/** Atomic claim: succeeds only if no run started in the last GUARD_MINUTES without finishing (success or error). */
-async function claim(db: PrismaClient, job: JobName): Promise<boolean> {
+/** Atomic claim: succeeds only if no run started in the last GUARD_MINUTES without finishing (success or error). Exported so
+ *  the jobs route can claim synchronously, before responding, and report "in_flight" when it can't. */
+export async function claim(db: PrismaClient, job: JobName): Promise<boolean> {
   const n = await db.$executeRaw`
     UPDATE "JobRun" SET "lastStartAt" = NOW(), "lastError" = NULL
     WHERE "job" = ${job}
@@ -79,7 +82,7 @@ export async function runJob(job: JobName, opts: RunOptions): Promise<RunOutcome
 
   if (apply) {
     await db.jobRun.upsert({ where: { job }, create: { job }, update: {} });
-    if (!incoming) {
+    if (!incoming && !opts.preClaimed) {
       if (!(await claim(db, job))) {
         console.warn(`[jobs] ${job}: trigger ignored — a run started within ${GUARD_MINUTES} minutes is still in flight`);
         const prev = await db.jobRun.findUnique({ where: { job }, select: { lastSummary: true } });
