@@ -119,6 +119,14 @@ Note `Payment Failed` and `Paused` exist in **both** pipelines as distinct stage
    itself can't be traced to an actual dry-run log, get that log before trusting the comparison at all. Only after
    that comparison checks out, run both against production for real (`--apply`).
 5. Set required env vars before/with the deploy:
+   - **`BILLING_DB_TARGET=prod`, set in the Production environment ONLY — this is now LOAD-BEARING, not optional.**
+     `getBillingDb()`'s runtime production guard (`lib/billing/db.ts`, `scripts/billing/_cli.ts`) is committed as of
+     `billing: explicit production mode for scripts and getBillingDb`, so every billing route — including
+     stage-changed, invoice-event, and the payment-event webhook — now calls `getBillingDb()`, which **refuses to
+     resolve the production database at all unless `BILLING_DB_TARGET=prod` is set**. Without it, these routes fail
+     closed in production (not silently misbehave — they throw/refuse), which is exactly the point of the guard, but
+     it means this var is no longer a nice-to-have: forgetting it breaks production outright rather than leaving an
+     old insecure default running.
    - **`ONBOARDING_INTENTS=live` from the start** — do NOT deploy with it `off`/shadow-first. The code no longer
      moves form-submitted/provisioned cards directly (superseded by intents in an earlier round), so shadow-first
      would mean no card is created for those transitions during the shadow window. Validate the "Onboarding intent"
@@ -134,12 +142,6 @@ Note `Payment Failed` and `Paused` exist in **both** pipelines as distinct stage
    - `GHL_ONBOARDING_PIPELINE_ID` (existing var, reused by item 6's no-Clients-card fallback) — **before deploy,
      explicitly confirm this value points at the CURRENT/new onboarding pipeline, not a legacy/old pipeline id left
      over from an earlier GHL setup.** A stale value here would silently misfile the item-6 fallback moves.
-   - `BILLING_DB_TARGET=prod`, **set in the Production environment ONLY** — but only if `getBillingDb()`'s runtime
-     production guard (`lib/billing/db.ts`) is confirmed **committed** at deploy time. As of this writing that guard
-     (along with its `scripts/billing/_cli.ts` counterpart) is sitting uncommitted in the working tree — see the
-     separate investigation note for this round. Do not set `BILLING_DB_TARGET=prod` anywhere until that code is
-     actually merged; setting it against a build that doesn't have the guard does nothing useful and risks confusion
-     about what's actually gating production access.
 6. Merge order: migrations must be deployed (step 3) **before** the application code that reads/writes
    `GhlAccount.onboardingProgress`/`onboardingProgressAt` is deployed — a nullable-column add is backward compatible
    for old code, but new code deployed before the column exists will error on every onboarding stage-changed event.

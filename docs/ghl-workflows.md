@@ -55,8 +55,9 @@ silently does nothing:
 **separate vocabulary from the legacy onboarding stage names** in `lib/constants.ts` (`ONBOARDING_STAGES`), which drive the older
 provisioning-email flow and are not sent through this outbox.
 
-Today the only sender is `scripts/billing/place-cards.ts` (card placement, `a2p_approved` for completed members —
-docs/cutover.md Phase B step 6); server-driven onboarding moves from the engine itself are not otherwise built.
+Today the senders are the onboarding webhook routes (`new_client`, `onboarding_form_submitted`, `sub_account_provisioned` —
+see `docs/oct1-release.md`); a one-off card-placement script for existing opportunities (`a2p_approved` for completed
+members, docs/cutover.md Phase B step 6) is not yet built.
 
 **Loop safety:** moving an opportunity fires the *Pipeline Stage Changed* workflows in section B, which report the move back. The server
 sees the account is already in that state and records a confirmation — no new intent, no loop.

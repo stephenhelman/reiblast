@@ -71,6 +71,49 @@ export async function enqueueIntents(db: Db, i: EnqueueInput): Promise<string[]>
   return created;
 }
 
+export type PlacementBody = { contactId: string; pipeline: "active_client" | "onboarding"; stage: string; fields: IntentBody["fields"] };
+export type PlacementInput = {
+  account: { id: string; contactId: string };
+  pipeline: "active_client" | "onboarding";
+  /** For active_client this is a BillingState value; for onboarding it's an ONBOARDING_STAGE_KEYS value. Not typed to
+   *  either here, since this function serves both. */
+  stage: string;
+  fields: IntentBody["fields"];
+  dedupeKey: string;
+  mode: "shadow" | "live";
+  sendable: boolean;
+};
+
+/**
+ * Caller-supplied dedupeKey + stage, same outbox and the same status rules as enqueueIntents (skipped_shadow unless
+ * live + allowlisted) — the onboarding pipeline has its own stage keys (lib/billing/onboardingStages.ts), not a
+ * BillingState. Used by lib/billing/onboardingIntents.ts (the onboarding webhook routes' new_client /
+ * onboarding_form_submitted / sub_account_provisioned intents). A one-off card-placement script for EXISTING
+ * opportunities (docs/cutover.md Phase B step 6) would also use this, but isn't built yet.
+ */
+export async function enqueuePlacementIntent(db: Db, p: PlacementInput): Promise<{ id: string; created: boolean }> {
+  const body: PlacementBody = { contactId: p.account.contactId, pipeline: p.pipeline, stage: p.stage, fields: p.fields };
+  try {
+    const row = await db.ghlIntent.create({
+      data: {
+        ghlAccountId: p.account.id,
+        kind: "stage",
+        pipeline: p.pipeline,
+        payload: body as unknown as Prisma.InputJsonObject,
+        dedupeKey: p.dedupeKey,
+        status: p.mode === "live" && p.sendable ? "pending" : "skipped_shadow",
+        lastError: p.mode === "live" && !p.sendable ? "account not allowlisted for live (DUNNING_LIVE_ACCOUNTS)" : null,
+      },
+      select: { id: true },
+    });
+    return { id: row.id, created: true };
+  } catch (e) {
+    if (!(e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002")) throw e; // already recorded: idempotent
+    const existing = await db.ghlIntent.findUnique({ where: { dedupeKey: p.dedupeKey }, select: { id: true } });
+    return { id: existing!.id, created: false };
+  }
+}
+
 export type SendDeps = { post?: (url: string, body: unknown) => Promise<{ ok: boolean; status: number }>; env?: Record<string, string | undefined> };
 
 async function defaultPost(url: string, body: unknown): Promise<{ ok: boolean; status: number }> {

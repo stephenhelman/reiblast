@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildIntentBody, enqueueIntents, intentUrl, MAX_INTENT_ATTEMPTS, sendIntent, sendPendingIntents } from "../../intents/send";
+import { buildIntentBody, enqueueIntents, enqueuePlacementIntent, intentUrl, MAX_INTENT_ATTEMPTS, sendIntent, sendPendingIntents } from "../../intents/send";
 import type { Decision } from "../../state/types";
 import { makeFake } from "./_fake";
 
@@ -115,5 +115,27 @@ describe("sending", () => {
     }
     expect(posts).toBe(0);
     expect(db.intents[0].status).toBe("pending");
+  });
+});
+
+describe("enqueuePlacementIntent (used by lib/billing/onboardingIntents.ts)", () => {
+  const fields = { pause_reason: null, trial_offer: null, trial_end_date: null };
+  it("records a stage-key intent under a caller-supplied dedupeKey, same status rules as enqueueIntents", async () => {
+    const db = makeFake([]);
+    const shadow = await enqueuePlacementIntent(db, { account: acct, pipeline: "active_client", stage: "active", fields, dedupeKey: "place:A1:active", mode: "shadow", sendable: false });
+    expect(shadow.created).toBe(true);
+    expect(db.intents[0]).toMatchObject({ dedupeKey: "place:A1:active", status: "skipped_shadow", pipeline: "active_client" });
+    expect(db.intents[0].payload).toMatchObject({ stage: "active" });
+
+    const live = await enqueuePlacementIntent(db, { account: acct, pipeline: "onboarding", stage: "a2p_approved", fields, dedupeKey: "place-onb:A1:a2p_approved", mode: "live", sendable: true });
+    expect(db.intents[1]).toMatchObject({ dedupeKey: "place-onb:A1:a2p_approved", status: "pending", pipeline: "onboarding" });
+    expect(live.created).toBe(true);
+  });
+  it("is idempotent on dedupeKey — a repeat returns the SAME id and creates nothing new", async () => {
+    const db = makeFake([]);
+    const first = await enqueuePlacementIntent(db, { account: acct, pipeline: "active_client", stage: "paused", fields, dedupeKey: "place:A1:paused", mode: "shadow", sendable: false });
+    const second = await enqueuePlacementIntent(db, { account: acct, pipeline: "active_client", stage: "paused", fields, dedupeKey: "place:A1:paused", mode: "shadow", sendable: false });
+    expect(second).toEqual({ id: first.id, created: false });
+    expect(db.intents).toHaveLength(1);
   });
 });
