@@ -1,8 +1,9 @@
 /**
- * Seed GhlAccount.billingState from the pull #1 subscriptions JSON + August wallet activity.
+ * Seed GhlAccount.billingState from the pull #1 subscriptions JSON + trailing-30-Denver-day wallet activity.
  *
- *   PRISMA_TARGET=dev npx tsx scripts/billing/seed-billing-state.ts <subscriptions.json> --wallet-dir=<dir>          # dry-run
- *   PRISMA_TARGET=dev npx tsx scripts/billing/seed-billing-state.ts <subscriptions.json> --wallet-dir=<dir> --apply  # write
+ *   PRISMA_TARGET=dev npx tsx scripts/billing/seed-billing-state.ts <subscriptions.json>                              # dry-run
+ *   PRISMA_TARGET=dev npx tsx scripts/billing/seed-billing-state.ts <subscriptions.json> --apply                      # write
+ *   optional: --wallet-dir=<dir>  fallback for a location with NO WalletTransaction rows at all (see below)
  *   optional: --emit-json=<path>  writes the final per-account state (for reporting)
  *
  * Uses the most recent subscription per contact (by createdAt). DB state wins:
@@ -12,32 +13,30 @@
  *   active           → active
  *   unpaid           → payment_failed
  *   paused | expired | canceled | incomplete_expired, with a locationId:
- *       ≥1 August wallet row → paused / non_payment / legacyUnreconciled
- *       no August wallet row → churned / legacyUnreconciled
+ *       ≥1 WalletTransaction row in the trailing 30 Denver days → paused / non_payment / legacyUnreconciled
+ *       none in that window (but the location has WalletTransaction history at all) → churned / legacyUnreconciled
+ *       NO WalletTransaction rows for the location at all → --wallet-dir fallback (one <locationId>.json per location,
+ *         { rows: [...] }, from the old August wallet pull) if given, else left null (listed)
  *     without a locationId → left null (listed)
- *
- * <wallet-dir> holds one <locationId>.json per location ({ rows: [...] }) from the wallet pull.
  */
 import fs from "node:fs";
 import path from "node:path";
-import { PrismaClient, BillingState, PauseReason } from "@prisma/client";
+import { BillingState, PauseReason } from "@prisma/client";
+import { classifyLegacySubscription, trailingActivityWindowStart } from "../../lib/billing/seedBillingState";
+import { connect } from "./_cli";
 
-const PROD_HOST = "ep-restless-silence";
-const apply = process.argv.includes("--apply");
 const positional = process.argv.slice(2).filter((a) => !a.startsWith("--"));
 const opt = (n: string) => process.argv.find((a) => a.startsWith(`--${n}=`))?.slice(n.length + 3);
 const file = positional[0];
 const walletDir = opt("wallet-dir");
 const emitJson = opt("emit-json");
-if (!file || !walletDir) throw new Error("usage: seed-billing-state.ts <subscriptions.json> --wallet-dir=<dir> [--apply] [--emit-json=<path>]");
+if (!file) throw new Error("usage: seed-billing-state.ts <subscriptions.json> [--wallet-dir=<dir>] [--apply] [--emit-json=<path>]");
 
-const url = process.env.DATABASE_URL ?? "";
-if (!url) throw new Error("DATABASE_URL is not set.");
-if (url.includes(PROD_HOST)) throw new Error("Refusing to run against the production host.");
-console.log(`Host: ${new URL(url).host}`);
-console.log(`Mode: ${apply ? "APPLY (writing)" : "dry-run"}\n`);
-
-const prisma = new PrismaClient({ datasources: { db: { url } } });
+const { db: prisma, apply } = await connect();
+const windowStart = trailingActivityWindowStart(new Date());
+console.log(`Trailing-activity window: WalletTransaction.settlementTime >= ${windowStart.toISOString()} (30 Denver days)`);
+if (walletDir) console.log(`--wallet-dir=${walletDir} — fallback only, for a location with no WalletTransaction rows at all\n`);
+else console.log();
 const last4 = (s: string) => `…${s.slice(-4)}`;
 const TRIAL_RE = /\d+\s*Day Trial/i;
 
@@ -60,9 +59,11 @@ type Acct = {
   trialEndsAt: Date | null;
 };
 
-// null = unknown (no wallet file for that location)
-function hadAugustActivity(locationId: string): boolean | null {
-  const f = path.join(walletDir as string, `${locationId}.json`);
+/** --wallet-dir fallback (old August pull), used ONLY for a location with no WalletTransaction rows at all.
+ *  null = unknown (no wallet-dir file for that location either). */
+function walletDirActivity(locationId: string): boolean | null {
+  if (!walletDir) return null;
+  const f = path.join(walletDir, `${locationId}.json`);
   if (!fs.existsSync(f)) return null;
   return (JSON.parse(fs.readFileSync(f, "utf8")).rows?.length ?? 0) > 0;
 }
@@ -98,12 +99,24 @@ async function main() {
     console.log("NOTE: GhlAccount is empty — simulating accounts from User + backfill status rules.\n");
   }
 
+  // Two DB passes over the trailing window's locations, scoped to locations we actually have: which locations have ANY
+  // WalletTransaction row (ever), and which have one in the trailing 30 Denver days. Both are grouped once, not per-account.
+  const locationIds = [...new Set([...accounts.values()].map((a) => a.locationId).filter((l): l is string => !!l))];
+  const [anyRows, recentRows] = await Promise.all([
+    prisma.walletTransaction.groupBy({ by: ["scopeKey"], where: { scopeKey: { in: locationIds } } }),
+    prisma.walletTransaction.groupBy({ by: ["scopeKey"], where: { scopeKey: { in: locationIds }, settlementTime: { gte: windowStart } } }),
+  ]);
+  const hasAnyData = new Set(anyRows.map((r) => r.scopeKey));
+  const hasRecentActivity = new Set(recentRows.map((r) => r.scopeKey));
+  /** true/false from WalletTransaction when the location has any history; else the --wallet-dir fallback; else null (unknown). */
+  const activityFor = (locationId: string): boolean | null => (hasAnyData.has(locationId) ? hasRecentActivity.has(locationId) : walletDirActivity(locationId));
+
   const matched: Record<string, number> = {};
   const unmatched: Record<string, number> = {};
   const multi: string[] = [];
   const skipped: string[] = [];
   const noLocation: string[] = [];
-  const noWalletFile: string[] = [];
+  const noActivityData: string[] = [];
   const offers: Record<string, number> = {};
   const nonTrialNames: Record<string, number> = {};
   const outcomes: Record<string, number> = {};
@@ -142,16 +155,13 @@ async function main() {
         noLocation.push(`${last4(cid)} (latest sub ${used.status})`);
         outcome = "left null (no locationId)";
       } else {
-        const act = hadAugustActivity(acct.locationId);
-        if (act === null) {
-          noWalletFile.push(`${last4(acct.locationId)} (latest sub ${used.status})`);
-          outcome = "left null (no wallet data)";
-        } else if (act) {
-          data = { billingState: BillingState.paused, pauseReason: PauseReason.non_payment, legacyUnreconciled: true };
-          outcome = "paused/non_payment (Aug activity)";
+        const outcomeData = classifyLegacySubscription(activityFor(acct.locationId));
+        if (!outcomeData) {
+          noActivityData.push(`${last4(acct.locationId)} (latest sub ${used.status})`);
+          outcome = "left null (no wallet data — no WalletTransaction history and no --wallet-dir file)";
         } else {
-          data = { billingState: BillingState.churned, legacyUnreconciled: true };
-          outcome = "churned (no Aug activity)";
+          data = { billingState: outcomeData.billingState, pauseReason: outcomeData.pauseReason, legacyUnreconciled: outcomeData.legacyUnreconciled };
+          outcome = outcomeData.label;
         }
       }
     }
@@ -178,8 +188,8 @@ async function main() {
   for (const s of skipped) console.log(`  ${s}`);
   console.log(`\nLeft null, no locationId: ${noLocation.length}`);
   for (const s of noLocation) console.log(`  ${s}`);
-  console.log(`Left null, no wallet file for location: ${noWalletFile.length}`);
-  for (const s of noWalletFile) console.log(`  ${s}`);
+  console.log(`Left null, no wallet activity data for location: ${noActivityData.length}`);
+  for (const s of noActivityData) console.log(`  ${s}`);
   console.log("\ntrialOffer values set:", offers);
   console.log("Trialing subs NOT matching a trial pattern (trialOffer null):", nonTrialNames);
   console.log("Outcomes:", outcomes);

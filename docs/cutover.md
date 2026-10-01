@@ -66,7 +66,7 @@ and explain every difference before applying):
 | # | Step | Comparison baseline (pipeline branch) |
 |---|---|---|
 | 1 | `backfill-ghl-accounts` | GhlAccount rows per member / location |
-| 2 | `seed-billing-state` — **with the trailing-30-day activity check, not August** (the script currently keys off August wallet activity: change before use, this is a code task) | state distribution (paused / churned / active / trial …) |
+| 2 | `seed-billing-state` — trailing-30-Denver-day `WalletTransaction` activity check (`--wallet-dir` is now an optional fallback only) | state distribution (paused / churned / active / trial …) |
 | 3 | `scripts/admin/provision-owner` (the internal HQ account, `accountType = internal`) | 1 internal account |
 | 4 | load the historical ledger — `load-ledger-from-pull` or `tx_sweep` over the full history | ledger row count and classification breakdown |
 | 5 | `backfill-usage` (wallet usage) | usage rows / totals per month |
