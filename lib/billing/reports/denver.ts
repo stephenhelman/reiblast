@@ -38,6 +38,15 @@ export function denverMonthStart(month: string): Date {
   return new Date(t);
 }
 
+/** The UTC instant of Denver local midnight starting the given day ("YYYY-MM-DD"). Same DST handling as denverMonthStart. */
+export function denverDayStart(day: string): Date {
+  const [y, m, d] = day.split("-").map(Number);
+  const guess = Date.UTC(y, m - 1, d);
+  let t = guess - offsetMs(guess);
+  t = guess - offsetMs(t);
+  return new Date(t);
+}
+
 export const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 export const isMonth = (s: unknown): s is string => typeof s === "string" && MONTH_RE.test(s);
 
