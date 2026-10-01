@@ -12,7 +12,7 @@ import { BadgeRow, PageTitle, Section, Table } from "@/components/admin/ui";
 import { fmtUsd } from "@/lib/admin/format";
 import { requireOwnerOrRedirect } from "@/lib/admin/requireOwner";
 import { getBillingDb } from "@/lib/billing/db";
-import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getInactiveUsage, getJobsHealth, getMemberOverview } from "@/lib/billing/reports/health";
+import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getInactiveUsage, getJobsHealth, getMemberOverview, getSideEffectHealth } from "@/lib/billing/reports/health";
 
 export const dynamic = "force-dynamic";
 
@@ -29,8 +29,8 @@ export default async function OverviewPage() {
   const margin2 = buildAgencyMargin(rev2, summarizeCosts(cells2).byMonth, parseFeePct(process.env.ADMIN_PROCESSOR_FEE_PCT)).rows;
   const cur = margin2.find((m) => m.month === thisMonth)!;
   const prev = margin2.find((m) => m.month === lastMonth)!;
-  const [jobs, quality, balances, dbSize, members, inactiveUsage] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getMemberOverview(db), getInactiveUsage(db)]);
-  const badges = buildBadges({ jobs, quality, balances, inactiveUsage, db: dbSize });
+  const [jobs, quality, balances, dbSize, members, inactiveUsage, sideEffects] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getMemberOverview(db), getInactiveUsage(db), getSideEffectHealth(db)]);
+  const badges = buildBadges({ jobs, quality, balances, inactiveUsage, db: dbSize, sideEffects });
   // Negative balances on trial / active / payment_failed (warning) and paused (info); most negative first.
   const negatives = balances.alerts.filter((a) => a.level === "warning" || a.level === "info");
 

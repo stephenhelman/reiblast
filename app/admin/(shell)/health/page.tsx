@@ -3,7 +3,7 @@ import { Banner, BadgeRow, PageTitle, Section, Table } from "@/components/admin/
 import { fmtDenver, fmtDenverDate, fmtMb, fmtUsd, last4 } from "@/lib/admin/format";
 import { requireOwnerOrRedirect } from "@/lib/admin/requireOwner";
 import { getBillingDb } from "@/lib/billing/db";
-import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getDunningShadow, getInactiveUsage, getIntentsHealth, getJobsHealth, getRecentGhlEvents, getRecentJobTriggers, getUnpaidSubscriptions, NEON_CRIT_PCT, NEON_WARN_PCT, type BalanceLevel } from "@/lib/billing/reports/health";
+import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getDunningShadow, getInactiveUsage, getIntentsHealth, getJobsHealth, getRecentGhlEvents, getRecentJobTriggers, getSideEffectHealth, getUnpaidSubscriptions, NEON_CRIT_PCT, NEON_WARN_PCT, type BalanceLevel } from "@/lib/billing/reports/health";
 
 export const dynamic = "force-dynamic";
 
@@ -15,8 +15,8 @@ const yn = (b: boolean) => (b ? <span className="text-red-300">STALE</span> : <s
 export default async function HealthPage() {
   await requireOwnerOrRedirect();
   const db = await getBillingDb();
-  const [jobs, quality, balances, dbSize, inactiveUsage, dunning, intents, ghlEvents, unpaid, jobTriggers] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getInactiveUsage(db), getDunningShadow(db), getIntentsHealth(db), getRecentGhlEvents(db), getUnpaidSubscriptions(db), getRecentJobTriggers(db)]);
-  const badges = buildBadges({ jobs, quality, balances, inactiveUsage, db: dbSize });
+  const [jobs, quality, balances, dbSize, inactiveUsage, dunning, intents, ghlEvents, unpaid, jobTriggers, sideEffects] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getInactiveUsage(db), getDunningShadow(db), getIntentsHealth(db), getRecentGhlEvents(db), getUnpaidSubscriptions(db), getRecentJobTriggers(db), getSideEffectHealth(db)]);
+  const badges = buildBadges({ jobs, quality, balances, inactiveUsage, db: dbSize, sideEffects });
   const label = (r: { locationId: string; locationName: string | null; businessName: string | null }) => <AccountLabel locationId={r.locationId} locationName={r.locationName} businessName={r.businessName} />;
 
   return (
@@ -168,6 +168,25 @@ export default async function HealthPage() {
             i.lastError ?? "—",
           ])}
           empty="No intents recorded yet."
+        />
+      </Section>
+
+      <Section
+        title="Side effect retries"
+        note={`Live-mode saas_pause/saas_resume calls that failed at least once (backoff 5m·30m·2h·6h·24h, up to 5 attempts total, retried by the replay job and opportunistically after each processed payment event). Alert ${sideEffects.counts.alert} · warning ${sideEffects.counts.warning} · retrying ${sideEffects.counts.retrying}.`}
+      >
+        <Table
+          head={["Decided (Denver)", "Account", "Type", "Attempts", "Status", "Next retry (Denver)", "Last error"]}
+          rows={sideEffects.rows.map((r) => [
+            fmtDenver(r.createdAt),
+            r.label ? <AccountLabel key={r.decisionId} locationId={r.label.locationId} locationName={r.label.locationName} businessName={r.label.businessName} /> : last4(r.ghlAccountId),
+            r.type,
+            r.attempts,
+            <span key="s" className={r.severity === "alert" ? "text-red-300" : r.severity === "warning" ? "text-gold" : "text-white/70"}>{r.severity === "retrying" ? "retrying" : `exhausted (${r.severity})`}</span>,
+            r.nextRetryAt ? fmtDenver(new Date(r.nextRetryAt)) : "—",
+            r.lastError,
+          ])}
+          empty="No side effect failures recorded."
         />
       </Section>
 
