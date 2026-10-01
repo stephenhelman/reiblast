@@ -980,6 +980,10 @@ model GhlAccount {
   coreCoverageNote String?
   dunningDecisions DunningDecision[]
   onboardingStage      String?
+  // Forward-only onboarding progress (lib/billing/stages.ts ONBOARDING_PROGRESS_STAGES). Distinct from onboardingStage
+  // (current-stage display field, set to whatever GHL sends including side stages); this only ever advances.
+  onboardingProgress   String?
+  onboardingProgressAt DateTime?
   locationToken        String?
   locationTokenExpires DateTime?
   ledgerEntries        BillingLedgerEntry[]

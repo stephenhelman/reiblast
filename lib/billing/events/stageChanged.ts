@@ -1,8 +1,17 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { applyDunning, dunningMode, type ApplyDeps } from "../state/apply";
 import type { BillingState, DunningEvent } from "../state/types";
+import { isForwardProgress, isKnownOnboardingStage } from "../stages";
 
-/** GHL "stage changed" webhook → GhlEvent (source "stage_change") → engine command / onboarding display data. */
+/**
+ * GHL "stage changed" webhook → GhlEvent (source "stage_change") → engine command / onboarding progress tracking.
+ *
+ * Payload contract this code expects from GHL's default "pipeline stage changed" workflow (documented here since
+ * downstream GHL config must match it exactly — see docs/oct1-release.md):
+ *   { "contactId": "<GHL contact id, 8-64 alphanumeric chars>", "pipeline": "active_client" | "onboarding", "stage": "<exact opportunity stage name>" }
+ * "stage" is the opportunity's new stage NAME (not an id) — for the onboarding pipeline it must be one of
+ * lib/billing/stages.ts ONBOARDING_STAGE_NAMES; for active_client, one of BILLING_STAGES below (or "paused_confirm").
+ */
 export const BILLING_STAGES: BillingState[] = ["trial", "active", "payment_failed", "paused", "inactive", "churned"];
 export const PAUSE_CONFIRM_STAGE = "paused_confirm";
 /** A repeat of the same (contact, pipeline, stage) within this window is a duplicate delivery. */
@@ -45,7 +54,7 @@ export async function processStageChanged(eventId: string, opts: { db: PrismaCli
     }
     const { contactId, pipeline, stage } = parsed.value;
 
-    const account = await db.ghlAccount.findFirst({ where: { contactId, accountType: "member" }, select: { id: true, onboardingStage: true } });
+    const account = await db.ghlAccount.findFirst({ where: { contactId, accountType: "member" }, select: { id: true, onboardingStage: true, onboardingProgress: true } });
     if (!account) {
       await done("ignored: no member account for this contact");
       return "processed";
@@ -66,8 +75,24 @@ export async function processStageChanged(eventId: string, opts: { db: PrismaCli
     }
 
     if (pipeline === "onboarding") {
-      // Display-only data owned by GHL: the only DB write this route makes.
-      if (account.onboardingStage !== stage) await db.ghlAccount.update({ where: { id: account.id }, data: { onboardingStage: stage } });
+      // onboardingStage is always updated: a current-stage display field GHL owns (includes side stages), exactly as
+      // before this change — unrecognized values are not withheld from it.
+      const data: Prisma.GhlAccountUpdateInput = {};
+      if (account.onboardingStage !== stage) data.onboardingStage = stage;
+      // onboardingProgress only ever moves forward, and side stages (Payment Failed/Paused/Blocker Detected) never touch it.
+      if (isForwardProgress(account.onboardingProgress, stage)) {
+        data.onboardingProgress = stage;
+        data.onboardingProgressAt = event.receivedAt;
+      }
+      if (Object.keys(data).length > 0) await db.ghlAccount.update({ where: { id: account.id }, data });
+
+      // Unrecognized stage name: never guess-map it into progress. Record it separately for investigation.
+      if (!isKnownOnboardingStage(stage)) {
+        await db.ghlEvent.create({ data: { source: "stage_change_unmapped", externalId: contactId, payload: event.payload as Prisma.InputJsonValue } });
+        await done(`ignored for progress: unrecognized onboarding stage "${stage}" (recorded for investigation; onboardingStage display field still updated)`);
+        return "processed";
+      }
+
       await done(null);
       return "processed";
     }

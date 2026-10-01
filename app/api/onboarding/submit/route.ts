@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { moveToStage, updateHQContact } from '@/lib/ghl'
+import { updateHQContact } from '@/lib/ghl'
 import { ONBOARDING_STAGES, SUPPORT_EMAIL } from '@/lib/constants'
 import { guardRegion } from '@/lib/geo'
+import { enqueueOnboardingIntent } from '@/lib/billing/onboardingIntents'
 
 const REQUIRED_FIELDS = [
   'email', 'legalBusinessName', 'ein', 'businessType',
@@ -67,7 +68,6 @@ export async function POST(req: NextRequest) {
     })
 
     const contactId = user.ghlContactId!
-    const contactName = user.name || email
 
     try {
       await updateHQContact(contactId, {
@@ -92,10 +92,15 @@ export async function POST(req: NextRequest) {
     }
 
     try {
-      await moveToStage(contactId, ONBOARDING_STAGES.ONBOARDING_FORM_SUBMITTED, contactName)
-      console.log('[onboarding/submit] Stage moved successfully for', contactId)
+      const acct = await prisma.ghlAccount.findUnique({ where: { userId: user.id }, select: { id: true, contactId: true } })
+      if (acct) {
+        await enqueueOnboardingIntent(prisma, { account: { id: acct.id, contactId: acct.contactId }, stageKey: 'onboarding_form_submitted' })
+        console.log('[onboarding/submit] onboarding_form_submitted intent enqueued for', contactId)
+      } else {
+        console.error('[onboarding/submit] No GhlAccount row to enqueue intent for user', user.id)
+      }
     } catch (stageErr) {
-      console.error('[onboarding/submit] moveToStage failed:', stageErr)
+      console.error('[onboarding/submit] enqueueOnboardingIntent failed:', stageErr)
     }
 
     return NextResponse.json({ success: true })
