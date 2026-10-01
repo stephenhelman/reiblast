@@ -1,11 +1,13 @@
 import { processGhlEvent } from "../events/process";
 import { sendPendingIntents } from "../intents/send";
 import { replayableWhere } from "../processPaymentEvent";
+import { retrySideEffects } from "../state/effects";
 import type { JobFn } from "./types";
 
 /**
  * Replay GhlEvent rows that failed (any source: payment, stage_change, invoice): unprocessed, attempts < 5, received more than 5 minutes
- * ago. Also retries failed GHL intents (max 5 attempts) — a no-op unless DUNNING_MODE=live.
+ * ago. Also retries failed GHL intents (max 5 attempts) and failed live-mode side effects (saas_pause/saas_resume, with
+ * backoff, max 5 attempts) — both no-ops unless DUNNING_MODE=live / a decision is actually in mode "live".
  */
 export const runReplay: JobFn = async (ctx) => {
   const tried = new Set<string>(Array.isArray(ctx.cursor?.tried) ? (ctx.cursor?.tried as string[]) : []);
@@ -25,7 +27,8 @@ export const runReplay: JobFn = async (ctx) => {
     });
     if (batch.length === 0) {
       const intents = await sendPendingIntents(ctx.db);
-      return { done: true, summary: { ...counts, intentsSent: intents.sent, intentsFailed: intents.failed } };
+      const effects = await retrySideEffects(ctx.db, { now: () => ctx.now });
+      return { done: true, summary: { ...counts, intentsSent: intents.sent, intentsFailed: intents.failed, effectsRetried: effects } };
     }
     for (const e of batch) {
       if (ctx.shouldYield()) return { done: false, cursor: { tried: [...tried] }, summary: counts };
