@@ -133,8 +133,9 @@ describe("POST /api/webhooks/ghl — status-reset fix + new_client dedupe", () =
     expect(created.status).toBe("pending_onboarding");
   });
 
-  it("new_client intent is enqueued once for a new member, deduped on repeat delivery for the same account", async () => {
+  it("new_client intent is enqueued once for a new member, deduped on repeat delivery for the same account, and moveToStage is never called", async () => {
     const { POST } = await import("@/app/api/webhooks/ghl/route");
+    const { moveToStage } = await import("@/lib/ghl");
     const db = fakePrisma.current;
 
     const body = { email: "dup@example.test", full_name: "Dup Person" };
@@ -144,6 +145,21 @@ describe("POST /api/webhooks/ghl — status-reset fix + new_client dedupe", () =
 
     const newClientIntents = db.intents.filter((i: any) => i.payload?.stage === "new_client");
     expect(newClientIntents).toHaveLength(1);
+    // The new_client intent (above) is now the sole mechanism for this transition — no direct GHL stage move.
+    expect(moveToStage).not.toHaveBeenCalled();
+    expect(ghlCalls.moveToStageCalls).toEqual([]);
+  });
+
+  it("never calls moveToStage, for a new member or an existing one", async () => {
+    const { POST } = await import("@/app/api/webhooks/ghl/route");
+    const { moveToStage } = await import("@/lib/ghl");
+    const db = fakePrisma.current;
+    db.users.push({ id: "u1", email: "existing2@example.test", status: "active", plan: "core" });
+
+    await POST(postJson({ email: "existing2@example.test", full_name: "Existing Two" }));
+    await POST(postJson({ email: "brand-new2@example.test", full_name: "Brand New Two" }));
+
+    expect(moveToStage).not.toHaveBeenCalled();
   });
 
   it("an existing member hit does NOT enqueue a new_client intent", async () => {

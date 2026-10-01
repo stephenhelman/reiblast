@@ -329,21 +329,17 @@ Every remaining reader of `GHL_ONBOARDING_PIPELINE_ID` or any `GHL_STAGE_*` var 
    `ONBOARDING_STAGE_IDS` keys are currently **dead** — nothing in the codebase calls `moveToStage` with any stage
    other than `PAYMENT_RECEIVED` anymore (the submit/provision routes were switched to the intents outbox earlier
    this release).
-   **VERDICT: WOULD BREAK.** If `GHL_ONBOARDING_PIPELINE_ID` repoints to the NEW pipeline while `GHL_STAGE_PAYMENT_RECEIVED`
-   still holds an OLD-pipeline stage id, `moveToStage`'s search runs against the new pipeline (likely finding no
-   existing opportunity there for a contact whose card is actually in the old pipeline), falls through to its CREATE
-   path, and creates a new opportunity in the NEW pipeline while asking GHL to set its stage to an id that belongs to
-   a DIFFERENT pipeline — GHL will very likely reject that (stage/pipeline mismatch) or, worse, silently misfile it.
-   **Proposed minimal fix (not made by this agent — code-level, judged "at all involved" rather than trivial, so
-   left for the user to decide)**: introduce a new env var, e.g. `GHL_LEGACY_ONBOARDING_PIPELINE_ID`, pinned to the
-   OLD pipeline id (`xBkcR6CZjBhSc6M9GlCy`), and change `moveToStage()` in `lib/ghl.ts` to read that instead of
-   `GHL_ONBOARDING_PIPELINE_ID` for its pipeline id (both the search and the create call). This keeps the one
-   remaining legacy call (`PAYMENT_RECEIVED`) correctly paired with the old pipeline/stage-id set regardless of what
-   `GHL_ONBOARDING_PIPELINE_ID` is repointed to for the rest of the codebase. Alternative, if the SaaS payment
-   webhook's direct stage move is considered safe to retire instead (it's somewhat redundant with the "New Client"
-   onboarding-intent concept this release introduces): remove the `moveToStage` call from
-   `app/api/webhooks/ghl/route.ts` entirely and let the new `new_client` intent (already enqueued by that same route)
-   be the only signal GHL receives for this transition. Either fix needs a human decision, not a silent code change.
+   **VERDICT: WAS "WOULD BREAK" — NOW RESOLVED: call removed.** The `moveToStage(contactId,
+   ONBOARDING_STAGES.PAYMENT_RECEIVED, name)` call in `app/api/webhooks/ghl/route.ts` has been deleted entirely
+   (the "retire the call" option, not the `GHL_LEGACY_ONBOARDING_PIPELINE_ID` option). The `new_client` intent that
+   route already enqueues (sent when `ONBOARDING_INTENTS=live`) is now the sole mechanism that creates/moves the New
+   Client card for this route — confirmed by a route test asserting `moveToStage` is never called
+   (`lib/billing/__tests__/onboardingWebhookRoutes.test.ts`). A re-grep across `app/`, `lib/`, `scripts/` turns up
+   **zero remaining callers of `moveToStage()` anywhere** (only a stale code comment and an unrelated docblock
+   mention it by name) — `ONBOARDING_STAGE_IDS` (`lib/constants.ts`) and `moveToStage()` itself (`lib/ghl.ts`) are
+   left in place as deferred dead-code cleanup, per this round's scope, but since nothing calls `moveToStage()`
+   anymore, the `GHL_ONBOARDING_PIPELINE_ID` / old-pipeline-`GHL_STAGE_*` pairing inside its body can never actually
+   execute — the mismatch risk is eliminated in practice, not just worked around.
 
 2. **`app/api/webhooks/ghl/payment-failed/route.ts`'s no-Clients-card fallback** (`moveOpportunityToStage(contactId,
    process.env.GHL_ONBOARDING_PIPELINE_ID, process.env.GHL_ONBOARDING_STAGE_PAUSED, name)`) — **NO BREAK**. This

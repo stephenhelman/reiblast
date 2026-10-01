@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { createHQContact, addTag, moveToStage } from "@/lib/ghl";
+import { createHQContact, addTag } from "@/lib/ghl";
 import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
-import { MEMBER_TAGS, ONBOARDING_STAGES } from "@/lib/constants";
+import { MEMBER_TAGS } from "@/lib/constants";
 import { ensureGhlAccount } from "@/lib/billing/state/dualWrite";
 import { enqueueOnboardingIntent } from "@/lib/billing/onboardingIntents";
 
@@ -62,7 +62,8 @@ export async function POST(req: NextRequest) {
 
     await addTag(contactId, MEMBER_TAGS.PAYMENT_RECEIVED);
     await addTag(contactId, MEMBER_TAGS.CORE);
-    await moveToStage(contactId, ONBOARDING_STAGES.PAYMENT_RECEIVED, name);
+    // No direct moveToStage() here anymore: the new_client intent below (sent when ONBOARDING_INTENTS=live) is now
+    // the sole mechanism that creates/moves the New Client card for this route — see docs/oct1-release.md.
 
     if (isNewMember) {
       const acct = await prisma.ghlAccount.findUnique({ where: { userId: user.id }, select: { id: true, contactId: true } });
