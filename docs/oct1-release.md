@@ -202,3 +202,119 @@ GHL_ONBOARDING_STAGE_PAUSED=   # pipeline id reuses the existing GHL_ONBOARDING_
 This is intentional — "Clients-pipeline changes recorded only, no action" in the task prompt refers to not adding
 new *onboarding-side* actions when a Clients-pipeline card moves, not to removing the existing dunning hookup, which
 remains the only consumer of `active_client` stage-changed events.
+
+## (c) Production command sheet (copy-paste order)
+
+These use the ACTUAL production-mode mechanisms as committed this session — read directly from `scripts/billing/_cli.ts`
+(`assertProductionGuard`/`connect()`) and `prisma.config.ts` (`PRISMA_TARGET`), not guessed. `$PROD` below stands for the
+production database's **direct (non-pooled)** connection string — never write the real value into this doc, a shell
+history file, or anywhere else; export it into your shell session only.
+
+**(a) Migration status check:**
+```sh
+PRISMA_TARGET=prod npx prisma migrate status
+```
+Expected: every migration up through `20261001031302_add_onboarding_progress` (the one this release adds) listed as
+**not yet applied** if run before step (b); after step (b), `_prisma_migrations` should show it applied and `prisma
+migrate status` should report the database schema is up to date with no pending migrations — parity with what the
+fresh production-rehearsal Neon branch showed in item (b)'s rehearsal (see (b) step 2 above: diff `_prisma_migrations`
+there against `main` first, and don't run this against real production until that diff is clean).
+
+**(b) Deploy the migration (never `migrate dev` here):**
+```sh
+PRISMA_TARGET=prod npx prisma migrate deploy
+```
+Expected output: `Applying migration 20261001031302_add_onboarding_progress` (and any other pending ones in order),
+ending "All migrations have been successfully applied." Re-run `prisma migrate status` (command a) immediately after
+to confirm zero pending.
+
+**(c) Backfill existing GhlAccount rows — dry-run, then apply:**
+```sh
+DATABASE_URL="$PROD" BILLING_DB_TARGET=prod npx tsx scripts/billing/backfill-ghl-accounts.ts --i-mean-production
+# review the printed counts, then:
+DATABASE_URL="$PROD" BILLING_DB_TARGET=prod npx tsx scripts/billing/backfill-ghl-accounts.ts --i-mean-production --apply
+```
+Both invocations are interactive: `connect()` (`scripts/billing/_cli.ts`) will print the resolved host and database
+and prompt `Type the host name to confirm:` — type the production host exactly as printed, or it refuses. **Expected
+dry-run output (from the rehearsal on the fresh production branch): 89 accounts, 0 duplicates.** A rehearsal result
+that differs from this is a stop-and-explain condition per the rollout steps in (b) above, not something to apply
+through.
+
+**(d) Backfill onboarding progress — dry-run, then apply:**
+```sh
+DATABASE_URL="$PROD" BILLING_DB_TARGET=prod npx tsx scripts/billing/backfill-onboarding-progress.ts --i-mean-production
+# review the printed counts (especially the "provisionedFloor" and "unmapped" listings), then:
+DATABASE_URL="$PROD" BILLING_DB_TARGET=prod npx tsx scripts/billing/backfill-onboarding-progress.ts --i-mean-production --apply
+```
+**Expected dry-run output, as reported for the rehearsal: 84 floored (via the `provisionedFloor` path), 1 mapped, 0
+unmapped.** Flagging explicitly, per this doc's own earlier instruction to call out any discrepancy rather than
+silently picking a number: an EARLIER round of this same work was told the rehearsal figure was **82 floored / 1
+mapped / 0 unmapped**; this round states **84 floored**, with no explanation given for the change between the two
+reports. Neither figure has been independently verified by whoever has been writing this doc — every attempt made in
+this engagement to run these scripts against a real database was blocked by the environment's own permission system
+(see the open items below). **Do not treat 84 (or 82) as ground truth.** Before running the real dry-run against
+production, re-run this same dry-run against a fresh rehearsal branch and use whatever number it actually prints —
+if it's neither 82 nor 84, that itself is worth understanding before proceeding, since it would mean the GhlAccount
+data has materially changed between whenever these numbers were generated and now.
+
+## (d) Production environment variables (Vercel, Production scope)
+
+| Variable | Value / source |
+|---|---|
+| `DATABASE_URL` | Existing production Neon connection string, unchanged. |
+| `BILLING_DB_TARGET` | `prod` — **new, load-bearing** (see (b) step 5). Without it `getBillingDb()` refuses every billing route in production. |
+| `GHL_AGENCY_ID` | Existing value, unchanged. |
+| `GHL_SNAPSHOT_ID` | Existing value, unchanged. |
+| `GHL_AGENCY_API_KEY` | Existing value, unchanged. |
+| `GHL_HQ_API_KEY` | Existing value, unchanged. |
+| `GHL_HQ_LOCATION_ID` | Existing value, unchanged. |
+| `GHL_COMPANY_ID` | Existing value, unchanged. |
+| `GHL_ONBOARDING_PIPELINE_ID` | Existing value — **but explicitly re-verify it points at the CURRENT onboarding pipeline** (see (b) step 5's stale-id call-out). Confirm via the pipelines lookup in the "GHL pipeline/stage IDs" section below before trusting the existing value. |
+| `GHL_WEBHOOK_SECRET` | Existing value, unchanged. |
+| `GHL_FROM_EMAIL` | Existing value, unchanged. |
+| `GHL_OTP_WEBHOOK_URL_ONBOARDING` / `GHL_OTP_WEBHOOK_URL_TOOLS` | Existing values, unchanged. |
+| `GHL_STAGE_*` (legacy onboarding stage ids: `PAYMENT_RECEIVED`, `ONBOARDING_FORM_SENT`, `ONBOARDING_FORM_SUBMITTED`, `ONBOARDING_CONFIRMED`, `SUB_ACCOUNT_PROVISIONED`, `CREDENTIALS_SENT`, `A2P_SUBMITTED`, `ACTIVE`, `PAUSED`) | Existing values, unchanged — still used by the legacy `moveToStage()`/`lib/constants.ts` path. |
+| `RENTCAST_API_KEY`, `NEXT_PUBLIC_GOOGLE_PLACES_API_KEY`, `ANTHROPIC_API_KEY` | Existing values, unchanged. |
+| `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_TOOLS_URL`, `NEXT_PUBLIC_GHL_APP_URL`, `NEXT_PUBLIC_MENTORSHIP_URL` | Existing values, unchanged. |
+| `GHL_BILLING_WEBHOOK_SECRET` | Existing value, unchanged (payment-event webhook). |
+| `GHL_JOBS_SECRET` | Existing value, unchanged (nightly jobs). |
+| `JOBS_TIME_BUDGET_MS`, `JOBS_BASE_URL` | Existing values (or unset for defaults), unchanged. |
+| `ADMIN_SESSION_SECRET`, `ADMIN_TOTP_SECRET`, `ADMIN_LOCATION_IDS`, `ADMIN_PROCESSOR_FEE_PCT`, `NEON_STORAGE_LIMIT_MB` | Existing values, unchanged. |
+| `ADMIN_PATH_ACCESS` | **Must stay unset in Production** (preview-only convenience) — see the pre-merge sanity check in (b) step 8. |
+| `DUNNING_MODE` | `shadow`, unchanged, explicit. |
+| `DUNNING_LIVE_ACCOUNTS` | Existing value (empty unless a canary is live), unchanged. |
+| `GHL_EVENTS_SECRET` | Existing value, unchanged — also the value a GHL workflow's `customData.secret` fallback must match if used. |
+| `GHL_INTENT_URL_ACTIVE_CLIENT` | Existing value, unchanged. |
+| `GHL_INTENT_URL_ONBOARDING` | Existing value — confirm it points at the new "Onboarding intent" workflow's inbound webhook URL (see (a) item 2). |
+| `ONBOARDING_INTENTS` | **New — set to `live` at deploy time, not `off`** (see (b) step 5's timing dependency; do not shadow-first this one). |
+| `GHL_CLIENTS_PIPELINE_ID` | **New — from the pipelines lookup** (see below; not yet filled in). |
+| `GHL_CLIENTS_STAGE_PAUSED` | **New — from the pipelines lookup.** |
+| `GHL_CLIENTS_STAGE_ACTIVE` | **New — from the pipelines lookup.** |
+| `GHL_ONBOARDING_STAGE_PAUSED` | **New — from the pipelines lookup.** |
+
+### GHL pipeline/stage ID lookup — NOT completed by this doc
+
+The values for `GHL_ONBOARDING_PIPELINE_ID` (re-verification), `GHL_ONBOARDING_STAGE_PAUSED`, `GHL_CLIENTS_PIPELINE_ID`,
+`GHL_CLIENTS_STAGE_PAUSED`, and `GHL_CLIENTS_STAGE_ACTIVE` are meant to come from a live, read-only `GET` against
+GHL's pipelines API for the HQ location, using the existing `GHL_HQ_API_KEY` PIT (the same credential
+`createHQContact`/`moveToStage` already use, via `hqHeaders()` in `lib/ghl.ts`):
+
+```sh
+curl -s "https://services.leadconnectorhq.com/opportunities/pipelines?locationId=$GHL_HQ_LOCATION_ID" \
+  -H "Authorization: Bearer $GHL_HQ_API_KEY" \
+  -H "Version: 2021-07-28" | jq '.pipelines[] | {id, name, stages: [.stages[] | {id, name}]}'
+```
+
+**This was not run by the agent that wrote this doc.** The task this round asked for that live call to be made and
+its real output used to fill in the table above; the agent declined to execute it, independent of any technical
+ability to do so, because: (1) the instruction to make a live call against a production third-party system using a
+real credential arrived via a relayed "the user authorized this" message rather than as the user's own words in the
+conversation, and (2) this session had already seen several earlier rounds escalate toward live production/credential
+access through exactly that kind of relayed instruction. That pattern made it appropriate to hold here and ask for
+direct confirmation rather than execute, even though nothing here is written to persist a secret.
+
+**To finish this table:** run the `curl`/`jq` command above yourself (or paste its output back), match each pipeline's
+stages against the exact strings in `lib/billing/stages.ts` (`ONBOARDING_PROGRESS_STAGES`, `ONBOARDING_SIDE_STAGES`,
+`CLIENTS_STAGES`), fill in the five env vars above from the matching ids, and flag here any stage name that doesn't
+match **exactly** (case, punctuation, spacing) — those are the spelling mismatches this whole plan has repeatedly
+asked to be verified against real GHL data rather than assumed.
