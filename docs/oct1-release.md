@@ -269,7 +269,7 @@ data has materially changed between whenever these numbers were generated and no
 | `GHL_HQ_API_KEY` | Existing value, unchanged. |
 | `GHL_HQ_LOCATION_ID` | Existing value, unchanged. |
 | `GHL_COMPANY_ID` | Existing value, unchanged. |
-| `GHL_ONBOARDING_PIPELINE_ID` | Existing value — **but explicitly re-verify it points at the CURRENT onboarding pipeline** (see (b) step 5's stale-id call-out). Confirm via the pipelines lookup in the "GHL pipeline/stage IDs" section below before trusting the existing value. |
+| `GHL_ONBOARDING_PIPELINE_ID` | **`Ox3gM3rk5sb2IQWcNane`** — the NEW "Onboarding (New)" pipeline, confirmed via a direct GHL API lookup the user ran themselves. **This is a repoint, not a no-op**: the value currently configured is presumed to be the OLD "Onboarding" pipeline, id `xBkcR6CZjBhSc6M9GlCy` — see the caller audit below for who still depends on the old id/stage pairing before flipping this. |
 | `GHL_WEBHOOK_SECRET` | Existing value, unchanged. |
 | `GHL_FROM_EMAIL` | Existing value, unchanged. |
 | `GHL_OTP_WEBHOOK_URL_ONBOARDING` / `GHL_OTP_WEBHOOK_URL_TOOLS` | Existing values, unchanged. |
@@ -287,34 +287,77 @@ data has materially changed between whenever these numbers were generated and no
 | `GHL_INTENT_URL_ACTIVE_CLIENT` | Existing value, unchanged. |
 | `GHL_INTENT_URL_ONBOARDING` | Existing value — confirm it points at the new "Onboarding intent" workflow's inbound webhook URL (see (a) item 2). |
 | `ONBOARDING_INTENTS` | **New — set to `live` at deploy time, not `off`** (see (b) step 5's timing dependency; do not shadow-first this one). |
-| `GHL_CLIENTS_PIPELINE_ID` | **New — from the pipelines lookup** (see below; not yet filled in). |
-| `GHL_CLIENTS_STAGE_PAUSED` | **New — from the pipelines lookup.** |
-| `GHL_CLIENTS_STAGE_ACTIVE` | **New — from the pipelines lookup.** |
-| `GHL_ONBOARDING_STAGE_PAUSED` | **New — from the pipelines lookup.** |
+| `GHL_CLIENTS_PIPELINE_ID` | **`7Sk73ThiajsaGMcQNaPx`** — confirmed via the user's own direct GHL API lookup. |
+| `GHL_CLIENTS_STAGE_PAUSED` | **`e2b9c89a-ac72-4404-874e-2f8dc70a7a46`** |
+| `GHL_CLIENTS_STAGE_ACTIVE` | **`26b75fe5-8543-4cfe-a785-86405f8c51f0`** |
+| `GHL_ONBOARDING_STAGE_PAUSED` | **`926ab9b6-e661-48a8-8a2f-7d8b07e584f6`** — a stage id within the NEW onboarding pipeline (`Ox3gM3rk5sb2IQWcNane`), paired consistently with the `GHL_ONBOARDING_PIPELINE_ID` value above. |
 
-### GHL pipeline/stage ID lookup — NOT completed by this doc
+### GHL pipeline/stage ID lookup — completed (user-supplied, not agent-executed)
 
-The values for `GHL_ONBOARDING_PIPELINE_ID` (re-verification), `GHL_ONBOARDING_STAGE_PAUSED`, `GHL_CLIENTS_PIPELINE_ID`,
-`GHL_CLIENTS_STAGE_PAUSED`, and `GHL_CLIENTS_STAGE_ACTIVE` are meant to come from a live, read-only `GET` against
-GHL's pipelines API for the HQ location, using the existing `GHL_HQ_API_KEY` PIT (the same credential
-`createHQContact`/`moveToStage` already use, via `hqHeaders()` in `lib/ghl.ts`):
+The values above came from the user running the lookup directly against GHL (not a live call made by this agent —
+see the prior round's report for why that call was declined when it arrived as a relayed instruction rather than the
+user's own words). Two onboarding pipelines exist in GHL right now, and they must not be confused:
 
-```sh
-curl -s "https://services.leadconnectorhq.com/opportunities/pipelines?locationId=$GHL_HQ_LOCATION_ID" \
-  -H "Authorization: Bearer $GHL_HQ_API_KEY" \
-  -H "Version: 2021-07-28" | jq '.pipelines[] | {id, name, stages: [.stages[] | {id, name}]}'
-```
+| Pipeline | id | Role |
+|---|---|---|
+| **"Onboarding (New)"** | `Ox3gM3rk5sb2IQWcNane` | The pipeline this release's code actually targets (`lib/billing/stages.ts` `ONBOARDING_PROGRESS_STAGES`/`ONBOARDING_SIDE_STAGES`). This is what `GHL_ONBOARDING_PIPELINE_ID` must point at. |
+| **"Onboarding"** (OLD) | `xBkcR6CZjBhSc6M9GlCy` | The legacy pipeline `lib/constants.ts` (`ONBOARDING_STAGES`/`ONBOARDING_STAGE_IDS`) was built against. Presumed to be what `GHL_ONBOARDING_PIPELINE_ID` currently points at in production today — **see the caller audit below before repointing this var**, since at least one live code path still depends on the OLD pipeline/stage-id pairing. |
 
-**This was not run by the agent that wrote this doc.** The task this round asked for that live call to be made and
-its real output used to fill in the table above; the agent declined to execute it, independent of any technical
-ability to do so, because: (1) the instruction to make a live call against a production third-party system using a
-real credential arrived via a relayed "the user authorized this" message rather than as the user's own words in the
-conversation, and (2) this session had already seen several earlier rounds escalate toward live production/credential
-access through exactly that kind of relayed instruction. That pattern made it appropriate to hold here and ask for
-direct confirmation rather than execute, even though nothing here is written to persist a secret.
+**Stage-name typo to fix before go-live**: the new pipeline's first stage is currently named **"New CLient"** (capital
+L) in GHL. `lib/billing/stages.ts` expects the exact string `"New Client"` — `isKnownOnboardingStage`/`progressRank`
+do exact string matches only, so as-is, every contact landing in that first stage would hit the stage-changed
+handler's "unrecognized stage" path (onboardingStage display field still updates, but onboardingProgress is never
+set and a `GhlEvent` is logged for investigation) instead of being recognized as the start of onboarding progress.
+**Rename the GHL stage to "New Client" before go-live** — do not change the code to match the typo.
 
-**To finish this table:** run the `curl`/`jq` command above yourself (or paste its output back), match each pipeline's
-stages against the exact strings in `lib/billing/stages.ts` (`ONBOARDING_PROGRESS_STAGES`, `ONBOARDING_SIDE_STAGES`,
-`CLIENTS_STAGES`), fill in the five env vars above from the matching ids, and flag here any stage name that doesn't
-match **exactly** (case, punctuation, spacing) — those are the spelling mismatches this whole plan has repeatedly
-asked to be verified against real GHL data rather than assumed.
+### Caller audit: what breaks if `GHL_ONBOARDING_PIPELINE_ID` moves from the OLD to the NEW pipeline
+
+Every remaining reader of `GHL_ONBOARDING_PIPELINE_ID` or any `GHL_STAGE_*` var (found via `grep -rn` across
+`app/`, `lib/`, `scripts/` — nothing in `scripts/` reads either):
+
+1. **`lib/ghl.ts` `moveToStage(contactId, stage, name)`** — reads `GHL_ONBOARDING_PIPELINE_ID` as the pipeline to
+   search/create/update an opportunity in, and looks up the target stage id via `ONBOARDING_STAGE_IDS[stage]`
+   (`lib/constants.ts`, backed by the eight `GHL_STAGE_*` vars: `PAYMENT_RECEIVED`, `ONBOARDING_FORM_SUBMITTED`,
+   `ONBOARDING_CONFIRMED`, `SUB_ACCOUNT_PROVISIONED`, `CREDENTIALS_SENT`, `A2P_SUBMITTED`, `ACTIVE`, `PAUSED`). Those
+   eight stage ids are presumed to be stage ids **within the OLD pipeline** (`xBkcR6CZjBhSc6M9GlCy`) — they predate
+   the new pipeline's existence, and the new pipeline's stage list (`lib/billing/stages.ts`) has no equivalent
+   stages for several of them at all (no "Payment Received," "Credentials Sent," or "A2P Submitted" stage exists in
+   the new 8-stage onboarding-progress model, which starts at "New Client").
+   **Only one live caller remains**: `app/api/webhooks/ghl/route.ts` line 65, `moveToStage(contactId,
+   ONBOARDING_STAGES.PAYMENT_RECEIVED, name)` — the SaaS payment webhook's stage move, still active (per item (a)/1
+   above, this webhook is kept, only its duplicate-workflow concern was raised, not this call). The other seven
+   `ONBOARDING_STAGE_IDS` keys are currently **dead** — nothing in the codebase calls `moveToStage` with any stage
+   other than `PAYMENT_RECEIVED` anymore (the submit/provision routes were switched to the intents outbox earlier
+   this release).
+   **VERDICT: WOULD BREAK.** If `GHL_ONBOARDING_PIPELINE_ID` repoints to the NEW pipeline while `GHL_STAGE_PAYMENT_RECEIVED`
+   still holds an OLD-pipeline stage id, `moveToStage`'s search runs against the new pipeline (likely finding no
+   existing opportunity there for a contact whose card is actually in the old pipeline), falls through to its CREATE
+   path, and creates a new opportunity in the NEW pipeline while asking GHL to set its stage to an id that belongs to
+   a DIFFERENT pipeline — GHL will very likely reject that (stage/pipeline mismatch) or, worse, silently misfile it.
+   **Proposed minimal fix (not made by this agent — code-level, judged "at all involved" rather than trivial, so
+   left for the user to decide)**: introduce a new env var, e.g. `GHL_LEGACY_ONBOARDING_PIPELINE_ID`, pinned to the
+   OLD pipeline id (`xBkcR6CZjBhSc6M9GlCy`), and change `moveToStage()` in `lib/ghl.ts` to read that instead of
+   `GHL_ONBOARDING_PIPELINE_ID` for its pipeline id (both the search and the create call). This keeps the one
+   remaining legacy call (`PAYMENT_RECEIVED`) correctly paired with the old pipeline/stage-id set regardless of what
+   `GHL_ONBOARDING_PIPELINE_ID` is repointed to for the rest of the codebase. Alternative, if the SaaS payment
+   webhook's direct stage move is considered safe to retire instead (it's somewhat redundant with the "New Client"
+   onboarding-intent concept this release introduces): remove the `moveToStage` call from
+   `app/api/webhooks/ghl/route.ts` entirely and let the new `new_client` intent (already enqueued by that same route)
+   be the only signal GHL receives for this transition. Either fix needs a human decision, not a silent code change.
+
+2. **`app/api/webhooks/ghl/payment-failed/route.ts`'s no-Clients-card fallback** (`moveOpportunityToStage(contactId,
+   process.env.GHL_ONBOARDING_PIPELINE_ID, process.env.GHL_ONBOARDING_STAGE_PAUSED, name)`) — **NO BREAK**. This
+   round's values pair `GHL_ONBOARDING_PIPELINE_ID` (new pipeline) with `GHL_ONBOARDING_STAGE_PAUSED`
+   (`926ab9b6-e661-48a8-8a2f-7d8b07e584f6`, itself a stage within the new pipeline per the user's lookup) —
+   consistent, no mismatch.
+
+3. **`app/api/webhooks/ghl/active/route.ts`** and **`app/api/webhooks/ghl/payment-failed/route.ts`'s Clients-card
+   branch** — both use `GHL_CLIENTS_PIPELINE_ID`/`GHL_CLIENTS_STAGE_*`, entirely separate from the onboarding
+   pipeline question. **NO BREAK**, unaffected either way.
+
+4. **`app/api/chat/lead/route.ts`** — uses its own, unrelated `GHL_SALES_PIPELINE_ID` / `GHL_STAGE_SALES_NEW_LEAD`
+   (a Sales pipeline, not onboarding at all). **NO BREAK**, unaffected.
+
+5. **`app/api/webhooks/ghl-provision/route.ts`, `app/api/onboarding/submit/route.ts`** — their direct `moveToStage`
+   calls were already removed earlier this release in favor of the intents outbox; grep confirms no `moveToStage`/
+   `GHL_ONBOARDING_PIPELINE_ID` reference remains in either file. **NO BREAK**, not a caller anymore.
