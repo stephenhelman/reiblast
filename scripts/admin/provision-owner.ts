@@ -12,7 +12,7 @@
  */
 import { arg, connect } from "../billing/_cli";
 
-const { db, apply } = connect();
+const { db, apply } = await connect();
 
 const maskEmail = (e: string) => `${e.slice(0, 2)}***@${e.split("@")[1] ?? "?"}`;
 const maskPhone = (p: string) => `${p.replace(/\d/g, "•").slice(0, Math.max(0, p.length - 4))}${p.slice(-4)}`;

@@ -24,7 +24,7 @@ import type { BalanceReading, BillingState, SubscriptionInfo } from "../../lib/b
 import { sub as msub, sumOf, ZERO } from "../../lib/billing/reports/money";
 import { connect } from "./_cli";
 
-const { db, apply } = connect();
+const { db, apply } = await connect();
 const skipSubs = process.argv.includes("--skip-subscription-reads");
 const memberFilter = (process.argv.find((a) => a.startsWith("--member="))?.slice(9) ?? "").split(",").map((x) => x.trim()).filter(Boolean);
 const last4 = (s: string | null | undefined) => (s ? `…${s.slice(-4)}` : "(no location)");

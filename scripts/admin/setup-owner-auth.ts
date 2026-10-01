@@ -12,7 +12,7 @@ import { generateBackupCode, hashBackupCode } from "../../lib/admin/backupCodes"
 import { generateTotpSecret, otpauthUri } from "../../lib/admin/totp";
 import { connect } from "../billing/_cli";
 
-const { db, apply } = connect();
+const { db, apply } = await connect();
 const rotate = process.argv.includes("--rotate");
 const COUNT = 10;
 

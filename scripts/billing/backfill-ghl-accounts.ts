@@ -9,19 +9,10 @@
  * everyone else stays null ("not yet seeded") until seed-billing-state.ts runs.
  * Never copies ghlUserId, ghlLocationApiKey, or OTP fields.
  */
-import { PrismaClient, BillingState, PauseReason } from "@prisma/client";
+import { BillingState, PauseReason } from "@prisma/client";
+import { connect } from "./_cli";
 
-const PROD_HOST = "ep-restless-silence";
-const apply = process.argv.includes("--apply");
-
-const url = process.env.DATABASE_URL ?? "";
-if (!url) throw new Error("DATABASE_URL is not set.");
-if (url.includes(PROD_HOST)) throw new Error("Refusing to run against the production host.");
-const host = new URL(url).host;
-console.log(`Host: ${host}`);
-console.log(`Mode: ${apply ? "APPLY (writing)" : "dry-run"}\n`);
-
-const prisma = new PrismaClient({ datasources: { db: { url } } });
+const { db: prisma, apply } = await connect();
 
 function maskEmail(email: string | null): string {
   if (!email) return "(no email)";

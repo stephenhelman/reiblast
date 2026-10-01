@@ -10,22 +10,14 @@
  * Refuses the production host.
  */
 import fs from "node:fs";
-import { PrismaClient } from "@prisma/client";
 import { ingestTransaction, type IngestResult } from "../../lib/billing/ingestTransaction";
 import { normalizeTransaction } from "../../lib/billing/normalizeTransaction";
+import { connect } from "./_cli";
 
-const PROD_HOST = "ep-restless-silence";
-const apply = process.argv.includes("--apply");
 const file = process.argv.slice(2).find((a) => !a.startsWith("--"));
 if (!file) throw new Error("usage: load-ledger-from-pull.ts <transactions.json> [--apply]");
 
-const url = process.env.DATABASE_URL ?? "";
-if (!url) throw new Error("DATABASE_URL is not set.");
-if (url.includes(PROD_HOST)) throw new Error("Refusing to run against the production host.");
-console.log(`Host: ${new URL(url).host}`);
-console.log(`Mode: ${apply ? "APPLY (writing)" : "dry-run (writes rolled back)"}\n`);
-
-const prisma = new PrismaClient({ datasources: { db: { url } } });
+const { db: prisma, apply } = await connect();
 class DryRunRollback extends Error {}
 const last4 = (s: string) => `…${s.slice(-4)}`;
 

@@ -7,7 +7,7 @@
 import { runJob } from "../../lib/billing/jobs/runner";
 import { connect } from "./_cli";
 
-const { db, apply } = connect();
+const { db, apply } = await connect();
 runJob("sub_sweep", { db, apply, budgetMs: Infinity, selfContinue: false })
   .then((o) => console.log(JSON.stringify(o, null, 2)))
   .finally(() => db.$disconnect());

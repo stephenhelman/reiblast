@@ -13,7 +13,7 @@ import { listWalletLocations } from "../../lib/billing/jobs/locations";
 import { microsToDecimalString, type RollupRow } from "../../lib/billing/usageRollup";
 import { arg, connect } from "./_cli";
 
-const { db, apply } = connect();
+const { db, apply } = await connect();
 
 function monthWindows(fromDay: string, toDay: string): { from: string; to: string }[] {
   const out: { from: string; to: string }[] = [];

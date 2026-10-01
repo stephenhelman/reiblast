@@ -11,7 +11,7 @@ import { classify, CLASSIFIER_VERSION } from "../../lib/billing/classify";
 import { normalizeTransaction } from "../../lib/billing/normalizeTransaction";
 import { connect } from "./_cli";
 
-const { db, apply } = connect();
+const { db, apply } = await connect();
 
 async function main() {
   const rows = await db.billingLedgerEntry.findMany({ select: { id: true, ghlTransactionId: true, classification: true, classifierVersion: true, status: true, amount: true, provider: true, occurredAt: true, raw: true } });

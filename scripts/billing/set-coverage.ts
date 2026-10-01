@@ -12,7 +12,7 @@
 import { applyPlan, coverageUpdate, diffSnapshots, parseCoverageOptions, type CoverageSnapshot } from "../../lib/billing/coverage";
 import { arg, connect } from "./_cli";
 
-const { db, apply } = connect();
+const { db, apply } = await connect();
 
 async function main() {
   const parsed = parseCoverageOptions(arg);

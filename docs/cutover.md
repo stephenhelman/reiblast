@@ -37,9 +37,9 @@ The payment-event webhook (`/api/webhooks/ghl/payment-event`) and all nightly jo
 
 ### Phase A — Production readiness (before anything touches production)
 
-**A1. Code: an explicit production mode (design only — not built).** Today `getBillingDb()` (`lib/billing/db.ts`) and every CLI
-(`scripts/billing/_cli.ts`, `scripts/admin/*`) *refuse* the production host. Production access must be a deliberate, loud opt-in that
-replaces nothing silently:
+**A1. Code: an explicit production mode (built — Task 8a).** `getBillingDb()` (`lib/billing/db.ts`) and every CLI (`scripts/billing/_cli.ts`,
+used by every billing/admin script including `scripts/admin/*`) *refuse* the production host absent an explicit, loud opt-in that
+replaces nothing silently — nobody has set `BILLING_DB_TARGET=prod` anywhere yet, so this remains inert until Phase A actually runs:
 - **Library:** `getBillingDb()` targets production only when `BILLING_DB_TARGET=prod` is set explicitly. Unset = today's behavior
   (preview → pipeline branch via `PIPELINE_DATABASE_URL`, everything else per the existing guard). A mismatch (prod target with a
   non-prod URL, or the reverse) throws.
@@ -81,7 +81,8 @@ Stop at the first unexplained difference. Re-run the reconciliation views on Hea
 `GHL_ONBOARDING_PIPELINE_ID`, the `GHL_STAGE_*` ids, `GHL_WEBHOOK_SECRET`, `GHL_BILLING_WEBHOOK_SECRET`, `GHL_JOBS_SECRET`,
 `GHL_EVENTS_SECRET`, `GHL_INTENT_URL_ACTIVE_CLIENT`, `GHL_INTENT_URL_ONBOARDING`, `JOBS_BASE_URL`, `JOBS_TIME_BUDGET_MS`,
 `ADMIN_SESSION_SECRET`, `ADMIN_TOTP_SECRET`, `ADMIN_LOCATION_IDS`, `ADMIN_PROCESSOR_FEE_PCT`, `NEON_STORAGE_LIMIT_MB`,
-`GHL_FROM_EMAIL`, the `GHL_OTP_WEBHOOK_URL_*`, the app/checkout `NEXT_PUBLIC_*` URLs, `RENTCAST_API_KEY`, `ANTHROPIC_API_KEY`, and
+`GHL_FROM_EMAIL`, the `GHL_OTP_WEBHOOK_URL_*`, the app/checkout `NEXT_PUBLIC_*` URLs, `RENTCAST_API_KEY`, `ANTHROPIC_API_KEY`,
+`BILLING_DB_TARGET=prod` (the explicit opt-in from A1 — `getBillingDb()` refuses the production host without it), and
 `DUNNING_MODE=shadow` (explicit) with `DUNNING_LIVE_ACCOUNTS` empty. **`ADMIN_PATH_ACCESS` must be unset in production** (it is a preview/dev
 convenience; production serves admin only on the `admin.reiblast.app` host). Add the `admin.reiblast.app` domain to the production
 project and verify DNS, TLS and the host-routing rule before the first login. `PIPELINE_DATABASE_URL` is preview-only.

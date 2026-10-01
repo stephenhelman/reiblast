@@ -13,7 +13,7 @@ import { apiStats, getLocationName, GhlScopeError, walletTransactionsPage } from
 import { latestLocationName } from "../../lib/billing/usageRollup";
 import { connect } from "./_cli";
 
-const { db, apply } = connect();
+const { db, apply } = await connect();
 const refresh = process.argv.includes("--refresh");
 const last4 = (s: string) => `…${s.slice(-4)}`;
 const peek = (s: string) => `"${s.slice(0, 3)}…" (${s.length} chars)`;

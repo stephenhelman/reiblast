@@ -2,7 +2,7 @@
 import { getJobHealth, STALE_AFTER_HOURS } from "../../lib/billing/jobHealth";
 import { connect } from "./_cli";
 
-const { db } = connect();
+const { db } = await connect();
 getJobHealth(db)
   .then((rows) => {
     console.log(`Stale = no success in ${STALE_AFTER_HOURS}h\n`);

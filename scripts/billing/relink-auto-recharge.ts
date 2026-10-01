@@ -11,7 +11,7 @@ import { locationIdFromDescription } from "../../lib/billing/matchAccount";
 import { normalizeTransaction } from "../../lib/billing/normalizeTransaction";
 import { connect } from "./_cli";
 
-const { db, apply } = connect();
+const { db, apply } = await connect();
 
 async function main() {
   const rows = await db.billingLedgerEntry.findMany({ where: { classification: "wallet_auto_recharge", ghlAccountId: null }, select: { id: true, ghlTransactionId: true, raw: true, amount: true, status: true, occurredAt: true } });
