@@ -22,19 +22,52 @@ failure handling, and a minimal repoint of the legacy payment-failed/active rout
      ever sends `new_client`, `onboarding_form_submitted`, `sub_account_provisioned`).
    - Action per branch: Create/Update Opportunity in the onboarding pipeline, setting the stage to the matching
      display name from the table below.
-   - This workflow is only ever fed by the server when `ONBOARDING_INTENTS=live`; while off, nothing is sent (rows
-     are still recorded in `GhlIntent` as `skipped_shadow`) — safe to build and test this workflow before flipping
-     the flag.
+   - **Timing dependency at cutover, read this carefully:** the code no longer moves the "Onboarding Form
+     Submitted"/"Sub Account Provisioned" cards directly — those `moveToStage` calls were replaced with these
+     intents in an earlier round. That means **intents must be live (`ONBOARDING_INTENTS=live`) from the moment this
+     code deploys to production**, not shadow-first: shadow-first would mean no card ever gets created for those two
+     transitions during the shadow window (a gap, not a safe default, now that the old direct-move path is gone).
+     Validate the workflow itself on GHL's **Preview/staging environment** first — set `ONBOARDING_INTENTS=live`
+     scoped to Preview only, confirm cards move correctly there — then deploy to production with
+     `ONBOARDING_INTENTS=live` set from the start. See the rollout steps in (b) below.
+   - **SaaS payment workflow timing dependency:** the SaaS workflow's own "Create Opportunity" action (the one that
+     today directly creates the onboarding card on payment) must be **removed at the exact moment `ONBOARDING_INTENTS`
+     goes live in production** — the server's `new_client` intent now replaces that action. Removing it earlier
+     (before intents are live) means no card gets created for that window; removing it later (after intents are
+     already live) creates a duplicate card per new payment. There is no safe straddle — this is a single atomic
+     cutover moment, not a gradual one.
 
-3. **"Onboarding stage-changed" workflow**: GHL's default stage-change webhook, already assumed configured, posting
-   to `POST /api/webhooks/ghl/stage-changed`. The payload contract this code expects (documented in
-   `lib/billing/events/stageChanged.ts`):
+3. **"Onboarding stage-changed" / "Clients stage-changed" workflows**: build **one GHL workflow per pipeline** (two
+   total — one for `onboarding`, one for `active_client`), each on GHL's standard/default "pipeline stage changed"
+   webhook trigger, posting to `POST /api/webhooks/ghl/stage-changed`. **Do not override GHL's default request body**
+   — add the fields this code needs as **customData** on the standard webhook action instead:
+   - `customData.contactId` — the contact id merge field
+   - `customData.pipeline` — a **hardcoded literal** per workflow (`"onboarding"` in the onboarding-pipeline
+     workflow, `"active_client"` in the Clients-pipeline workflow) — NOT a merge field; this is what distinguishes
+     the two workflows' events once they land in the same route
+   - `customData.stage` — the opportunity's new stage name merge field
+   - `customData.secret` — the shared secret (`GHL_EVENTS_SECRET`), **only if** the `x-reiblast-events-secret`
+     header isn't configurable on this webhook action (see the auth note below) — omit it if the header works, since
+     a header is preferred over a body field for a secret
+   The payload contract this code expects (documented in `lib/billing/events/stageChanged.ts` and
+   `lib/billing/events/payloadFields.ts`):
    ```json
-   { "contactId": "<GHL contact id>", "pipeline": "onboarding" | "active_client", "stage": "<exact opportunity stage name>" }
+   { "...GHL's own default fields...": "...", "customData": { "contactId": "<GHL contact id>", "pipeline": "onboarding" | "active_client", "stage": "<exact opportunity stage name>" } }
    ```
-   `stage` must be the opportunity's new stage **name**, exactly matching one of the strings in the verification
-   list below — any other string is treated as unrecognized (onboardingStage display field is still updated, but
+   `contactId`/`pipeline`/`stage` are read from `customData` first; a flat top-level field of the same name is only
+   a fallback for manual/curl testing with an unwrapped body — don't rely on it for the real GHL workflow. `stage`
+   must be the opportunity's new stage **name**, exactly matching one of the strings in the verification list below
+   — any other string is treated as unrecognized (onboardingStage display field is still updated, but
    onboardingProgress is left alone and a `GhlEvent` row is written for investigation, never guessed).
+   **Auth:** the existing `payment-failed` workflow authenticates via a custom header
+   (`x-reiblast-secret`/`GHL_WEBHOOK_SECRET`, checked in `lib/ghl/verifyWebhook.ts`), which assumes GHL's webhook
+   action on that workflow supports adding a custom header. If the standard/default webhook action on your GHL plan
+   does **not** expose custom headers (this can vary by plan/action type — confirm in the GHL workflow builder before
+   relying on either path), use the `customData.secret` fallback above instead: the server accepts **either** the
+   `x-reiblast-events-secret` header **or** a matching `customData.secret` value (timing-safe compared either way;
+   never logged; redacted to `"[redacted]"` before the raw payload is ever stored in `GhlEvent`). Prefer the header
+   when it's available — a body-carried secret is inherently slightly more exposed (visible in GHL's own workflow
+   logs/history) than a header.
 
 4. **Active/Pause workflows** (today: `app/api/webhooks/ghl/payment-failed/route.ts`,
    `app/api/webhooks/ghl/pause/route.ts`, `app/api/webhooks/ghl/active/route.ts`) should be retriggered based on the
@@ -75,20 +108,49 @@ Note `Payment Failed` and `Paused` exist in **both** pipelines as distinct stage
 2. On that fresh branch, run `prisma migrate deploy` and diff the `_prisma_migrations` table against
    production/main to confirm parity before touching anything else.
 3. Only then run `prisma migrate deploy` (never `migrate dev`) against production itself.
-4. Run the existing `scripts/billing/backfill-ghl-accounts.ts`, then the new
-   `scripts/billing/backfill-onboarding-progress.ts` (dry-run first, review the unmapped list, then `--apply`).
+4. On that SAME fresh production-rehearsal branch, run BOTH backfill scripts — `scripts/billing/backfill-ghl-accounts.ts`
+   then `scripts/billing/backfill-onboarding-progress.ts` — in dry-run first, and compare the counts against what the
+   same scripts produced on the pipeline branch (reported to this doc's author as **82 floored via the
+   `provisionedFloor` path / 1 mapped / 0 unmapped**, but note: that pipeline-branch figure was NOT independently
+   verified by the agent that wrote this doc — every attempt to run these scripts against a real database in that
+   session was blocked by the environment's own permission system, so this number is secondhand and should be
+   treated as "what to compare against, pending confirmation" rather than a verified baseline). A rehearsal run with
+   materially different counts needs explaining before proceeding, not just applying — and if the "82/1/0" figure
+   itself can't be traced to an actual dry-run log, get that log before trusting the comparison at all. Only after
+   that comparison checks out, run both against production for real (`--apply`).
 5. Set required env vars before/with the deploy:
-   - `ONBOARDING_INTENTS=off` (deploy code first with this off; flip to `live` only after verifying shadow output)
+   - **`ONBOARDING_INTENTS=live` from the start** — do NOT deploy with it `off`/shadow-first. The code no longer
+     moves form-submitted/provisioned cards directly (superseded by intents in an earlier round), so shadow-first
+     would mean no card is created for those transitions during the shadow window. Validate the "Onboarding intent"
+     workflow on GHL's Preview/staging environment first (scoped `ONBOARDING_INTENTS=live` there), then deploy to
+     production already live. See the timing-dependency note in (a) item 2.
    - `GHL_INTENT_URL_ONBOARDING` (already-existing var, reused — confirm it points at the new "Onboarding intent"
      workflow's inbound webhook URL)
    - `GHL_EVENTS_SECRET` (existing shared secret for the stage-changed webhook, reused naming — same one used by
-     `app/api/webhooks/ghl/stage-changed/route.ts` and the invoice-event route today)
+     `app/api/webhooks/ghl/stage-changed/route.ts` and the invoice-event route today; also the value the GHL
+     workflow's `customData.secret` fallback must match, if that fallback path is used instead of a header)
    - `GHL_CLIENTS_PIPELINE_ID`, `GHL_CLIENTS_STAGE_PAUSED`, `GHL_CLIENTS_STAGE_ACTIVE` (new, item 6)
+   - `GHL_ONBOARDING_STAGE_PAUSED` (new, item 6 — the onboarding pipeline's own "Paused" side-stage id)
+   - `GHL_ONBOARDING_PIPELINE_ID` (existing var, reused by item 6's no-Clients-card fallback) — **before deploy,
+     explicitly confirm this value points at the CURRENT/new onboarding pipeline, not a legacy/old pipeline id left
+     over from an earlier GHL setup.** A stale value here would silently misfile the item-6 fallback moves.
+   - `BILLING_DB_TARGET=prod`, **set in the Production environment ONLY** — but only if `getBillingDb()`'s runtime
+     production guard (`lib/billing/db.ts`) is confirmed **committed** at deploy time. As of this writing that guard
+     (along with its `scripts/billing/_cli.ts` counterpart) is sitting uncommitted in the working tree — see the
+     separate investigation note for this round. Do not set `BILLING_DB_TARGET=prod` anywhere until that code is
+     actually merged; setting it against a build that doesn't have the guard does nothing useful and risks confusion
+     about what's actually gating production access.
 6. Merge order: migrations must be deployed (step 3) **before** the application code that reads/writes
    `GhlAccount.onboardingProgress`/`onboardingProgressAt` is deployed — a nullable-column add is backward compatible
    for old code, but new code deployed before the column exists will error on every onboarding stage-changed event.
-7. After deploy, watch `GhlIntent` rows for the new `onboarding` pipeline kinds — confirm they land as
-   `skipped_shadow` with sane payloads before flipping `ONBOARDING_INTENTS=live`.
+7. After deploy, watch `GhlIntent` rows for the new `onboarding` pipeline kinds — confirm they're actually sending
+   (not `skipped_shadow`, since intents are live from the start per step 5) and that payloads look sane.
+8. **Pre-flight sanity check before merging this branch to main** (this branch also carries out-of-scope admin/jobs
+   work that will ship to production as a side effect of the merge): confirm `/admin` still 404s in production —
+   i.e. `ADMIN_PATH_ACCESS` is unset in the Production environment, and no dedicated admin domain
+   (`admin.reiblast.app` or similar) is configured there yet — and confirm nothing is scheduled/cron'd to call the
+   production jobs routes yet. Neither of those should be live in production until they're each deliberately turned
+   on; merging this branch must not be what turns them on by accident.
 
 ## Item 6: legacy dunning routes repointed at the Clients pipeline
 

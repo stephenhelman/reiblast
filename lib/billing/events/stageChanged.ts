@@ -2,15 +2,19 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { applyDunning, dunningMode, type ApplyDeps } from "../state/apply";
 import type { BillingState, DunningEvent } from "../state/types";
 import { isForwardProgress, isKnownOnboardingStage } from "../stages";
+import { customDataField } from "./payloadFields";
 
 /**
  * GHL "stage changed" webhook → GhlEvent (source "stage_change") → engine command / onboarding progress tracking.
  *
  * Payload contract this code expects from GHL's default "pipeline stage changed" workflow (documented here since
- * downstream GHL config must match it exactly — see docs/oct1-release.md):
- *   { "contactId": "<GHL contact id, 8-64 alphanumeric chars>", "pipeline": "active_client" | "onboarding", "stage": "<exact opportunity stage name>" }
- * "stage" is the opportunity's new stage NAME (not an id) — for the onboarding pipeline it must be one of
- * lib/billing/stages.ts ONBOARDING_STAGE_NAMES; for active_client, one of BILLING_STAGES below (or "paused_confirm").
+ * downstream GHL config must match it exactly — see docs/oct1-release.md): GHL's STANDARD webhook action body, with
+ * our fields added as customData:
+ *   { ...GHL's default fields..., "customData": { "contactId": "<GHL contact id, 8-64 alphanumeric chars>", "pipeline": "active_client" | "onboarding", "stage": "<exact opportunity stage name>" } }
+ * `contactId`/`pipeline`/`stage` are read from `customData` first, falling back to a flat top-level field of the
+ * same name so a manual/curl test posting flat JSON still works. "stage" is the opportunity's new stage NAME (not an
+ * id) — for the onboarding pipeline it must be one of lib/billing/stages.ts ONBOARDING_STAGE_NAMES; for
+ * active_client, one of BILLING_STAGES below (or "paused_confirm").
  */
 export const BILLING_STAGES: BillingState[] = ["trial", "active", "payment_failed", "paused", "inactive", "churned"];
 export const PAUSE_CONFIRM_STAGE = "paused_confirm";
@@ -22,12 +26,15 @@ export type StagePayload = { contactId: string; pipeline: "active_client" | "onb
 export function parseStagePayload(p: unknown): { ok: true; value: StagePayload } | { ok: false; why: string } {
   if (typeof p !== "object" || p === null || Array.isArray(p)) return { ok: false, why: "payload is not an object" };
   const o = p as Record<string, unknown>;
-  const contactId = typeof o.contactId === "string" ? o.contactId.trim() : "";
-  const stage = typeof o.stage === "string" ? o.stage.trim() : "";
+  const rawContactId = customDataField(o, "contactId");
+  const rawStage = customDataField(o, "stage");
+  const rawPipeline = customDataField(o, "pipeline");
+  const contactId = typeof rawContactId === "string" ? rawContactId.trim() : "";
+  const stage = typeof rawStage === "string" ? rawStage.trim() : "";
   if (!/^[A-Za-z0-9]{8,64}$/.test(contactId)) return { ok: false, why: "invalid contactId" };
-  if (o.pipeline !== "active_client" && o.pipeline !== "onboarding") return { ok: false, why: "unknown pipeline" };
+  if (rawPipeline !== "active_client" && rawPipeline !== "onboarding") return { ok: false, why: "unknown pipeline" };
   if (!stage || stage.length > 120) return { ok: false, why: "invalid stage" };
-  return { ok: true, value: { contactId, pipeline: o.pipeline, stage } };
+  return { ok: true, value: { contactId, pipeline: rawPipeline, stage } };
 }
 
 /** active_client stage → engine event: "paused_confirm" is the confirmation, a BillingState key is a command, anything else is ignored. */
