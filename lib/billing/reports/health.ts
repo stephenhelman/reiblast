@@ -1,5 +1,6 @@
 import type { BillingState, PrismaClient } from "@prisma/client";
 import { getJobHealth, type JobHealth } from "../jobHealth";
+import { getFailedSideEffects } from "../state/effects";
 
 /** Read-only queries for the admin Health/Overview views. Every function takes the db client (getBillingDb() in the app). */
 
@@ -381,6 +382,22 @@ export async function getRecentJobTriggers(db: PrismaClient) {
   });
 }
 
+/** Live-mode side effects (saas_pause/saas_resume) that failed at least once and haven't succeeded or been superseded —
+ *  cutover.md: an exhausted saas_resume is an alert (a member stays paused after paying), an exhausted saas_pause a
+ *  warning; anything still under its retry budget is shown as "retrying", not alerted on. */
+export async function getSideEffectHealth(db: PrismaClient) {
+  const rows = await getFailedSideEffects(db);
+  const labels = await labelMap(db, { ids: [...new Set(rows.map((r) => r.ghlAccountId))] });
+  return {
+    rows: rows.map((r) => ({ ...r, label: labels.get(r.ghlAccountId) ?? null })),
+    counts: {
+      alert: rows.filter((r) => r.severity === "alert").length,
+      warning: rows.filter((r) => r.severity === "warning").length,
+      retrying: rows.filter((r) => r.severity === "retrying").length,
+    },
+  };
+}
+
 /** Informational: subscriptions GHL reports as `unpaid`. No engine event is emitted for them. */
 export async function getUnpaidSubscriptions(db: PrismaClient) {
   const rows = await db.ghlSubscriptionState.findMany({ where: { status: "unpaid" }, orderBy: { lastSeenAt: "desc" }, select: { subscriptionId: true, contactId: true, name: true, lastSeenAt: true } });
@@ -398,12 +415,14 @@ export function buildBadges(x: {
   balances: Pick<BalancesHealth, "counts">;
   inactiveUsage: { rows: unknown[] };
   db: { level: DbSizeLevel; pct: number | null };
+  sideEffects?: { counts: { alert: number; warning: number; retrying: number } };
 }): Badge[] {
   const stale = x.jobs.filter((j) => j.stale).length;
   const errored = x.jobs.filter((j) => j.lastError).length;
   const mismatch = x.jobs.find((j) => j.job === "wallet_usage")?.rollupMismatchCount ?? null;
   const { alert, warning } = x.balances.counts;
   const inactive = x.inactiveUsage.rows.length;
+  const se = x.sideEffects?.counts;
   return [
     { key: "jobs", label: "Jobs", value: stale || errored ? `${stale} stale · ${errored} erroring` : "all fresh", tone: stale || errored ? "bad" : "ok" },
     { key: "rollup", label: "Rollup check", value: mismatch === null ? "not recorded yet" : `${mismatch} mismatches`, tone: mismatch === null ? "warn" : mismatch > 0 ? "bad" : "ok" },
@@ -412,6 +431,7 @@ export function buildBadges(x: {
     { key: "events", label: "Failed events", value: String(x.quality.failedEventCount), tone: x.quality.failedEventCount > 0 ? "bad" : "ok" },
     { key: "balances", label: "Balance alerts", value: `${alert} alert · ${warning} warning`, tone: alert > 0 ? "bad" : warning > 0 ? "warn" : "ok" },
     { key: "inactive-usage", label: "Usage on non-active", value: String(inactive), tone: inactive > 0 ? "bad" : "ok" },
+    ...(se ? [{ key: "side-effects", label: "Side effect retries", value: `${se.alert} alert · ${se.warning} warning · ${se.retrying} retrying`, tone: (se.alert > 0 ? "bad" : se.warning > 0 ? "warn" : "ok") as Badge["tone"] }] : []),
     { key: "db", label: "Database", value: x.db.pct === null ? "limit not set" : `${x.db.pct.toFixed(0)}% of limit`, tone: x.db.level === "critical" ? "bad" : x.db.level === "warning" || x.db.level === "unset" ? "warn" : "ok" },
   ];
 }

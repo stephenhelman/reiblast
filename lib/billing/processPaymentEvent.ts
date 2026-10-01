@@ -3,6 +3,7 @@ import { fetchTransactionById } from "./ghlTransactions";
 import { ingestTransaction, type IngestResult } from "./ingestTransaction";
 import { sendPendingIntents } from "./intents/send";
 import { shadowDunningForLedger } from "./state/apply";
+import { retrySideEffects } from "./state/effects";
 
 export const MAX_EVENT_ATTEMPTS = 5;
 export const MIN_EVENT_AGE_MS = 5 * 60 * 1000;
@@ -69,6 +70,9 @@ export async function processPaymentEvent(eventId: string, opts: ProcessOptions)
   if (ingested && ingested.action === "written") await shadowDunningForLedger(db, ingested.ghlTransactionId);
   // Opportunistic retry of failed/pending GHL intents (max 5 attempts each). Hard no-op unless DUNNING_MODE=live; never throws.
   await sendPendingIntents(db).catch((e) => console.error("[intents] retry failed:", e instanceof Error ? e.message : e));
+  // Opportunistic retry of failed live-mode side effects (saas_pause/saas_resume, with backoff, max 5 attempts). No-op
+  // when there are no live decisions with a due retry; never throws.
+  await retrySideEffects(db).catch((e) => console.error("[effects] retry failed:", e instanceof Error ? e.message : e));
 
   if (opts.retryPending !== false) await retryPendingEvents(db, event.id);
   return "processed";
