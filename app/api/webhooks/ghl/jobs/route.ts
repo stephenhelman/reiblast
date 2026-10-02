@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { Prisma } from "@prisma/client";
 import { waitUntil } from "@vercel/functions";
-import { getBillingDb } from "@/lib/billing/db";
+import { getBillingDb, dbHost } from "@/lib/billing/db";
 import { claim, runJob, configuredBudgetMs, MAX_CONTINUATIONS } from "@/lib/billing/jobs/runner";
 import { isJobName, type JobCursor, type JobName } from "@/lib/billing/jobs/types";
 import { checkSecret, headerNames, bodyKeys, missingEnvVars, logInternalError, type Reason } from "@/lib/billing/reason";
@@ -25,7 +25,9 @@ async function record(
   job: string | undefined,
   extra: Record<string, unknown> = {},
 ): Promise<NextResponse> {
-  const payload = { reason, headersPresent: headerNames(req), contentType: req.headers.get("content-type"), bodyKeys: extra.bodyKeys ?? [], ...(extra.jobRunId ? { jobRunId: extra.jobRunId } : {}) };
+  const host = dbHost();
+  console.log(`[jobs] job_trigger reason=${reason} job=${job ?? "-"} dbHost=${host}`);
+  const payload = { reason, dbHost: host, headersPresent: headerNames(req), contentType: req.headers.get("content-type"), bodyKeys: extra.bodyKeys ?? [], ...(extra.jobRunId ? { jobRunId: extra.jobRunId } : {}) };
   if (db) {
     try {
       // processedAt is set immediately: nothing ever "processes" a job_trigger row later, so it must never look unprocessed
@@ -33,6 +35,7 @@ async function record(
       await db.ghlEvent.create({ data: { source: "job_trigger", externalId: job ?? null, payload: payload as Prisma.InputJsonObject, processedAt: new Date() } });
     } catch (err) {
       // The insert itself failed — log it, but still return the reason below; a logging failure must never mask it.
+      console.error(`[jobs] job_trigger insert failed (reason=${reason} job=${job ?? "-"} dbHost=${host})`);
       logInternalError("jobs", err);
     }
   }
@@ -93,14 +96,15 @@ export async function POST(req: NextRequest) {
       preClaimed = true;
     }
 
-    const jobRun = await db.jobRun.upsert({ where: { job }, create: { job }, update: {} });
+    // claim() creates the JobRun row (and runJob upserts it for continuations); this only reads its id for the trigger record.
+    const jobRun = await db.jobRun.findUnique({ where: { job }, select: { id: true } });
 
     waitUntil(
       runJob(job, { db: db!, apply: true, cursor, budgetMs: configuredBudgetMs(), selfContinue: true, preClaimed })
         .then((o) => console.log(`[jobs] ${job}:`, o.status))
         .catch((e) => console.error(`[jobs] ${job} crashed:`, e instanceof Error ? e.message : e)),
     );
-    return record(db, req, "accepted", job, { bodyKeys: keys, jobRunId: jobRun.id });
+    return record(db, req, "accepted", job, { bodyKeys: keys, jobRunId: jobRun?.id });
   } catch (err) {
     logInternalError("jobs", err);
     return record(db, req, "internal_error", undefined);

@@ -65,3 +65,14 @@ describe("getBillingDb", () => {
     await expect(getBillingDb()).rejects.toThrow(/mismatch/);
   });
 });
+
+describe("dbHost", () => {
+  it("returns the host only — never user, password, path or query — preferring PIPELINE_DATABASE_URL", async () => {
+    const { dbHost } = await import("../db");
+    const env = { NODE_ENV: "production", DATABASE_URL: "postgresql://user:secret@ep-restless-silence-1.neon.tech/db?sslmode=require" };
+    expect(dbHost(env)).toBe("ep-restless-silence-1.neon.tech");
+    expect(dbHost({ ...env, PIPELINE_DATABASE_URL: "postgresql://a:b@pipe.neon.tech:5432/x" })).toBe("pipe.neon.tech:5432");
+    expect(dbHost({})).toBe("unknown");
+    expect(dbHost({ NODE_ENV: "production", DATABASE_URL: "not a url secret" })).toBe("unknown");
+  });
+});
