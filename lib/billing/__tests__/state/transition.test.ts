@@ -28,10 +28,10 @@ describe("wallet recharge FAILURE", () => {
     expect(d.intents).toEqual([]);
     expect(d.sideEffects).toEqual([]);
   });
-  it("the 3rd strike pauses (non_payment) with a paused intent — and NO saas_pause (that waits for pause_confirmed)", () => {
+  it("the 3rd strike pauses (non_payment) with a paused intent AND saas_pause in the same decision (no confirmation step)", () => {
     const d = decide(snap({ state: "payment_failed", strikes: 2 }), wFail, ctx({ walletBalance: neg }));
     expect(d).toMatchObject({ nextState: "paused", pauseReason: "non_payment", warningCount: 3 });
-    expect(d.sideEffects).toEqual([]);
+    expect(effects(d)).toEqual(["saas_pause"]);
     expect(stages(d)).toEqual(["paused"]);
     expect(d.intents[0]).toMatchObject({ pipeline: "active_client", fields: { warningCount: 3, pauseReason: "non_payment" } });
     expect(d.reason).toMatch(/strike 3 of 3/);
@@ -168,10 +168,10 @@ describe("core subscription FAILURE", () => {
 
 describe("expired invoice", () => {
   const inv: DunningEvent = { kind: "invoice_expired", invoiceId: "inv_1" };
-  it("→ paused (expired_invoice) with a paused intent and NO saas_pause (waits for pause_confirmed)", () => {
+  it("→ paused (expired_invoice) with a paused intent AND saas_pause in the same decision", () => {
     const d = decide(snap(), inv, ctx());
     expect(d).toMatchObject({ nextState: "paused", pauseReason: "expired_invoice", coreFailureOpen: true, warningCount: 0 });
-    expect(d.sideEffects).toEqual([]);
+    expect(effects(d)).toEqual(["saas_pause"]);
     expect(stages(d)).toEqual(["paused"]);
   });
   it("from payment_failed and trial as well; strikes unchanged", () => {
@@ -282,10 +282,10 @@ describe("inactive and churned: never struck, never auto-resumed", () => {
 
 describe("manual commands", () => {
   const cmd = (stage: BillingState): DunningEvent => ({ kind: "command", stage });
-  it("paused → paused (manual_killswitch), no immediate side effect (the pause waits for pause_confirmed)", () => {
+  it("paused → paused (manual_killswitch) with saas_pause in the same decision", () => {
     const d = decide(snap(), cmd("paused"), ctx());
     expect(d).toMatchObject({ nextState: "paused", pauseReason: "manual_killswitch" });
-    expect(d.sideEffects).toEqual([]);
+    expect(effects(d)).toEqual(["saas_pause"]);
     expect(stages(d)).toEqual(["paused"]);
   });
   it("inactive → voluntary pause", () => {
@@ -309,7 +309,7 @@ describe("manual commands", () => {
     expect(effects(d)).toEqual(["saas_pause"]);
     expect(d.reason).toMatch(/billing stopped/);
   });
-  it("a command whose stage already matches is a CONFIRMATION: no intent; inactive/churned/active re-assert their side effect idempotently, paused does not (pause_confirmed owns it)", () => {
+  it("a command whose stage already matches is a CONFIRMATION: no intent; inactive/churned/active re-assert their side effect idempotently, paused does not (its own decision already carried the saas_pause)", () => {
     const paused = decide(snap({ state: "paused", pauseReason: "non_payment", strikes: 3 }), cmd("paused"), ctx());
     expect(paused).toMatchObject({ nextState: "paused", pauseReason: "non_payment", noop: true });
     expect(paused.sideEffects).toEqual([]);
@@ -332,32 +332,23 @@ describe("manual commands", () => {
   });
 });
 
-describe("pause_confirmed (the Paused workflow's 15-minute wait elapsed)", () => {
+describe("pause_confirmed (legacy; the 15-minute debounce was removed)", () => {
   const pc: DunningEvent = { kind: "pause_confirmed" };
-  it("still paused → saas_pause (the ONLY place a pause executes), state unchanged", () => {
-    for (const pauseReason of ["non_payment", "expired_invoice", "manual_killswitch"] as PauseReason[]) {
-      const d = decide(snap({ state: "paused", pauseReason, strikes: 3 }), pc, ctx());
-      expect(d).toMatchObject({ nextState: "paused", pauseReason, warningCount: 3, noop: false });
-      expect(effects(d)).toEqual(["saas_pause"]);
-      expect(d.intents).toEqual([]);
-      expect(d.reason).toMatch(/still paused/);
-    }
-  });
-  it("cured before confirmation → recorded, no pause", () => {
-    for (const state of ["active", "trial", "payment_failed", "inactive", "churned", null] as (BillingState | null)[]) {
-      const d = decide(snap({ state }), pc, ctx());
+  it("decides nothing from any state: no side effect, no intent, no state change", () => {
+    for (const state of ["paused", "active", "trial", "payment_failed", "inactive", "churned", null] as (BillingState | null)[]) {
+      const d = decide(snap({ state, pauseReason: state === "paused" ? "non_payment" : null }), pc, ctx());
       expect(d.noop).toBe(true);
       expect(d.sideEffects).toEqual([]);
-      expect(d.reason).toMatch(/cured before confirmation, no pause/);
+      expect(d.intents).toEqual([]);
+      expect(d.nextState).toBe(state);
+      expect(d.reason).toMatch(/no confirmation step/);
     }
   });
-  it("the full path: 3rd strike (no effect) → confirmation after the wait (saas_pause) — or a cure in between (no pause at all)", () => {
+  it("the full path: the 3rd strike pauses at once; a later cure resumes", () => {
     const strike = decide(snap({ state: "payment_failed", strikes: 2 }), wFail, ctx({ walletBalance: neg }));
+    expect(effects(strike)).toEqual(["saas_pause"]);
     const paused = snap({ state: strike.nextState, strikes: strike.warningCount, pauseReason: strike.pauseReason });
-    expect(effects(decide(paused, pc, ctx()))).toEqual(["saas_pause"]);
-    const cured = decide(paused, wOk, ctx({ walletBalance: pos }));
-    expect(effects(cured)).toEqual(["saas_resume"]);
-    expect(decide(snap({ state: cured.nextState, strikes: cured.warningCount, pauseReason: cured.pauseReason }), pc, ctx()).reason).toMatch(/cured before confirmation/);
+    expect(effects(decide(paused, wOk, ctx({ walletBalance: pos })))).toEqual(["saas_resume"]);
   });
 });
 

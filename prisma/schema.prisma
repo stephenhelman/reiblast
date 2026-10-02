@@ -984,6 +984,9 @@ model GhlAccount {
   // (current-stage display field, set to whatever GHL sends including side stages); this only ever advances.
   onboardingProgress   String?
   onboardingProgressAt DateTime?
+  // Set when the member is handed off to the Clients pipeline (first reaches A2P Approved, or the backfill found an existing
+  // Clients opportunity). Null = still in onboarding: the engine routes billing intents to the Onboarding pipeline.
+  activeClientSince    DateTime?
   locationToken        String?
   locationTokenExpires DateTime?
   ledgerEntries        BillingLedgerEntry[]

@@ -19,7 +19,7 @@ export function matches(row: Row, where: Row = {}): boolean {
     return v === cond;
   });
 }
-export type FakeAccount = { id: string; accountType: "member" | "internal"; locationId: string | null; coreCoveredUntil: Date | null; billingState: any; warningCount: number; pauseReason: any; contactId?: string; trialOffer?: string | null; trialEndsAt?: Date | null; userId?: string; onboardingStage?: string | null };
+export type FakeAccount = { id: string; accountType: "member" | "internal"; locationId: string | null; coreCoveredUntil: Date | null; billingState: any; warningCount: number; pauseReason: any; contactId?: string; trialOffer?: string | null; trialEndsAt?: Date | null; userId?: string; onboardingStage?: string | null; onboardingProgress?: string | null; activeClientSince?: Date | null };
 
 /**
  * In-memory stand-in for the delegates the engine touches. `ghlAccount` deliberately has NO update/updateMany/create: a shadow run
@@ -52,7 +52,7 @@ export function makeFake(accounts: FakeAccount[], ledger: Row[] = [], opts: { wr
         return row;
       },
       findUnique: async ({ where }: any) => intents.find((i) => (where.id ? i.id === where.id : i.dedupeKey === where.dedupeKey)) ?? null,
-      findMany: async ({ where, take }: any) => intents.filter((i) => where.status.in.includes(i.status) && i.attempts < where.attempts.lt && (!where.id || where.id.in.includes(i.id))).slice(0, take ?? 999),
+      findMany: async ({ where, take }: any) => intents.filter((i) => where.status.in.includes(i.status) && i.attempts < where.attempts.lt && (!where.id || where.id.in.includes(i.id)) && (!where.dedupeKey?.startsWith || String(i.dedupeKey).startsWith(where.dedupeKey.startsWith))).slice(0, take ?? 999),
       update: async ({ where, data }: any) => {
         const row = intents.find((i) => i.id === where.id)!;
         for (const [k, v] of Object.entries(data)) row[k] = v && typeof v === "object" && "increment" in (v as any) ? (row[k] ?? 0) + (v as any).increment : v;
@@ -88,8 +88,10 @@ export function makeFake(accounts: FakeAccount[], ledger: Row[] = [], opts: { wr
     ghlAccount: {
       findUnique: async ({ where }: any) => accounts.find((a) => a.id === where.id) ?? null,
       findFirst: async ({ where }: any) => accounts.find((a) => matches(a, where)) ?? null,
+      findMany: async ({ where }: any) => accounts.filter((a) => matches(a, where)),
       // read-only unless the test opts in (live mode): a shadow run that tried to write state would throw a TypeError here
       ...(opts.writable ? { update: async ({ where, data }: any) => { writes.push(`ghlAccount.update ${JSON.stringify(data)}`); Object.assign(accounts.find((a) => a.id === where.id)!, data); } } : {}),
+      ...(opts.writable ? { updateMany: async ({ where, data }: any) => { const hit = accounts.filter((x) => matches(x, where)); for (const x of hit) { writes.push(`ghlAccount.updateMany ${JSON.stringify(data)}`); Object.assign(x, data); } return { count: hit.length }; } } : {}),
     },
     ...(opts.writable ? { user: { updateMany: async ({ where, data }: any) => { writes.push(`user.updateMany ${JSON.stringify(data)}`); const u = users.find((x) => x.id === where.id); if (u && (!where.status || where.status.in.includes(u.status))) Object.assign(u, data); return { count: u ? 1 : 0 }; } } } : {}),
     billingLedgerEntry: {
@@ -148,7 +150,7 @@ export function makeFake(accounts: FakeAccount[], ledger: Row[] = [], opts: { wr
   return db;
 }
 
-export const member = (o: Partial<FakeAccount> = {}): FakeAccount => ({ id: "A1", accountType: "member", locationId: "LOC_A1", coreCoveredUntil: null, billingState: "active", warningCount: 0, pauseReason: null, contactId: "CONTACT_A1", trialOffer: null, trialEndsAt: null, userId: "U1", onboardingStage: null, ...o });
+export const member = (o: Partial<FakeAccount> = {}): FakeAccount => ({ id: "A1", accountType: "member", locationId: "LOC_A1", coreCoveredUntil: null, billingState: "active", warningCount: 0, pauseReason: null, contactId: "CONTACT_A1", trialOffer: null, trialEndsAt: null, userId: "U1", onboardingStage: null, onboardingProgress: null, activeClientSince: new Date("2026-09-01T00:00:00Z"), ...o }); // handed off by default (Clients routing); pass activeClientSince: null for an onboarding member
 export const NOW = new Date("2026-09-27T12:00:00.000Z");
 export const hoursAgo = (h: number, from = NOW) => new Date(from.getTime() - h * 3600 * 1000);
 export const negBal = async () => ({ status: "ok" as const, value: "-3.000000", estimated: false });

@@ -1,4 +1,5 @@
 import type { BillingState, PauseReason } from "@prisma/client";
+import type { OnboardingStageKey } from "../onboardingStages";
 
 export type { BillingState, PauseReason };
 
@@ -22,7 +23,7 @@ export type DunningEvent =
   | { kind: "invoice_expired"; invoiceId?: string }
   /** Stage-change webhook: a manual pipeline move, or the echo of a move the engine sent. */
   | { kind: "command"; stage: BillingState }
-  /** The Paused workflow's 15-minute wait elapsed ("paused_confirm"). Only THIS executes saas_pause for a pause. */
+  /** Legacy "paused_confirm" (the removed 15-minute debounce). Still parsed, but decides nothing: the pause is part of the paused decision itself. */
   | { kind: "pause_confirmed" }
   /** Nightly subscription sweep (no ledger event exists for these). */
   | { kind: "subscription_canceled"; duringTrial: boolean }
@@ -41,6 +42,12 @@ export type Context = {
   coveredUntil: Date | null;
   walletBalance?: BalanceReading;
   subscription?: SubscriptionInfo | null;
+  /**
+   * Where the member's card lives: handedOff (GhlAccount.activeClientSince set) → Clients pipeline; otherwise Onboarding, with
+   * `onboardingProgress` (the forward-only progress stage name) deciding where a cured card returns. Omitted = handed off
+   * (the pre-routing behaviour, used by pure-engine callers that have no account row).
+   */
+  routing?: { handedOff: boolean; onboardingProgress: string | null };
 };
 
 export type SideEffect = { type: "saas_pause" | "saas_resume"; /** true = re-asserting an already-true state (a confirmation) */ idempotent?: boolean };
@@ -52,6 +59,12 @@ export type Intent = {
   fields: Record<string, unknown>;
   /** "stage" (default) moves the opportunity; "fields" only refreshes contact fields (stage = the current stage). */
   kind?: "stage" | "fields";
+} | {
+  /** Members still in onboarding: only payment_failed / paused, and the return to the progress stage after a cure. */
+  pipeline: "onboarding";
+  stage: OnboardingStageKey;
+  fields: Record<string, unknown>;
+  kind?: "stage";
 };
 
 export type Decision = {
