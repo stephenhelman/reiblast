@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import {
-  moveToStage,
   addTag,
   findSubAccountByName,
   findSubAccountByEmail,
@@ -10,6 +9,9 @@ import {
 } from "@/lib/ghl";
 import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 import { MEMBER_TAGS, ONBOARDING_STAGES } from "@/lib/constants";
+import { setGhlAccountLocation } from "@/lib/billing/state/dualWrite";
+import { progressRank } from "@/lib/billing/stages";
+import { enqueueOnboardingIntent } from "@/lib/billing/onboardingIntents";
 
 export async function POST(req: NextRequest) {
   if (!verifyWebhook(req)) {
@@ -43,6 +45,18 @@ export async function POST(req: NextRequest) {
   });
   if (!user) {
     return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
+  const ghlAccount = await prisma.ghlAccount.findUnique({
+    where: { userId: user.id },
+    select: { id: true, contactId: true, onboardingProgress: true },
+  });
+  const confirmedRank = progressRank("Onboarding Form Confirmed")!;
+  if (ghlAccount && ghlAccount.onboardingProgress && (progressRank(ghlAccount.onboardingProgress) ?? -1) >= confirmedRank) {
+    console.log(
+      `[Provision] No-op: onboardingProgress=${ghlAccount.onboardingProgress} is already at/past "Onboarding Form Confirmed" for user ${user.id} — not re-provisioning`,
+    );
+    return NextResponse.json({ success: true, noop: true, reason: "already provisioned past Onboarding Form Confirmed" });
   }
 
   try {
@@ -81,6 +95,8 @@ export async function POST(req: NextRequest) {
       },
     });
 
+    await setGhlAccountLocation(prisma, { userId: user.id, locationId, contactId }); // additive dual-write; never throws (swallows + logs)
+
     console.log(
       "[Provision] Populating sub-account custom values:",
       locationId,
@@ -91,7 +107,7 @@ export async function POST(req: NextRequest) {
     const zip = user.businessZip || "";
     const fullAddress = [street, city, state, zip].filter(Boolean).join(", ");
 
-    await populateSubAccountCustomValues(locationId, {
+    const customValuesOk = await populateSubAccountCustomValues(locationId, {
       business_name: user.businessName || name,
       business_address: fullAddress,
       business_city: city,
@@ -101,10 +117,17 @@ export async function POST(req: NextRequest) {
       service_area: user.targetMarket || "",
       effective_date: new Date().toLocaleDateString("en-US", { month: "long", day: "2-digit", year: "numeric" }),
     });
+    if (!customValuesOk) {
+      console.error("[Provision] Custom-values population failed:", locationId);
+      return NextResponse.json(
+        { error: "Configuration failed", details: "populateSubAccountCustomValues returned failure" },
+        { status: 502 },
+      );
+    }
 
     const [firstName, ...rest] = name.trim().split(" ");
     console.log("[Provision] Updating sub-account business profile:", locationId);
-    await updateSubAccountProfile(locationId, {
+    const profileOk = await updateSubAccountProfile(locationId, {
       name: user.businessName || name,
       address: street,
       city,
@@ -115,6 +138,13 @@ export async function POST(req: NextRequest) {
       authorizedRepFirstName: firstName || "",
       authorizedRepLastName: rest.join(" ") || "",
     });
+    if (!profileOk) {
+      console.error("[Provision] Business profile update failed:", locationId);
+      return NextResponse.json(
+        { error: "Configuration failed", details: "updateSubAccountProfile returned failure" },
+        { status: 502 },
+      );
+    }
 
     if (!contactId || contactId.startsWith("test_")) {
       console.log(
@@ -122,13 +152,21 @@ export async function POST(req: NextRequest) {
       );
     } else {
       console.log(
-        "[Provision] Updating HQ contact tags and pipeline:",
+        "[Provision] Updating HQ contact tags:",
         contactId,
       );
       await addTag(contactId, MEMBER_TAGS.ONBOARDING_COMPLETE);
       await addTag(contactId, MEMBER_TAGS.ACTIVE);
       await addTag(contactId, MEMBER_TAGS.A2P_PENDING);
-      await moveToStage(contactId, ONBOARDING_STAGES.SUB_ACCOUNT_PROVISIONED, name);
+    }
+
+    // Replaces the old direct moveToStage call: record (and, if ONBOARDING_INTENTS=live, send) a sub_account_provisioned
+    // intent via the existing outbox. Only reached on full success above.
+    const acct = await prisma.ghlAccount.findUnique({ where: { userId: user.id }, select: { id: true, contactId: true } });
+    if (acct) {
+      await enqueueOnboardingIntent(prisma, { account: { id: acct.id, contactId: acct.contactId }, stageKey: "sub_account_provisioned" });
+    } else {
+      console.error("[Provision] No GhlAccount row to enqueue sub_account_provisioned intent for user", user.id);
     }
 
     console.log("[Provision] Complete:", locationId);

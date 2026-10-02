@@ -4,8 +4,8 @@ import { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 import { getWalletBalance } from "@/lib/ghl/client";
-import { addTag, removeTag, moveToStage } from "@/lib/ghl";
-import { MEMBER_TAGS, ONBOARDING_STAGES } from "@/lib/constants";
+import { addTag, removeTag, moveOpportunityToStage, hasOpportunityInPipeline } from "@/lib/ghl";
+import { MEMBER_TAGS } from "@/lib/constants";
 
 export async function POST(req: NextRequest) {
   if (!verifyWebhook(req)) {
@@ -109,9 +109,26 @@ export async function POST(req: NextRequest) {
   const action = newCount >= 3 ? "threshold" : "warn";
 
   if (contactId && action === "threshold") {
-    // Server drives the pause directly — moving the opportunity here
-    // triggers the separate `pause` webhook, which pauses the sub-account.
-    await moveToStage(contactId, ONBOARDING_STAGES.PAUSED, name);
+    // Server drives the pause directly — moving the opportunity here triggers the separate `pause` webhook, which
+    // pauses the sub-account. Repointed at the Clients pipeline's "Paused" stage identity (lib/billing/stages.ts),
+    // NOT the legacy single onboarding pipeline — see docs/oct1-release.md item 6 for the env vars this needs.
+    //
+    // A member who was never handed off (no A2P Approved yet) has no Clients-pipeline card at all. Rather than
+    // creating a brand-new Clients-pipeline opportunity for them (which would silently skip Trial/Active Member),
+    // move their EXISTING Onboarding-pipeline card into the onboarding pipeline's own "Paused" SIDE stage instead —
+    // a distinct stage identity from the Clients-pipeline "Paused" (docs/oct1-release.md item 5).
+    if (process.env.GHL_CLIENTS_PIPELINE_ID && process.env.GHL_CLIENTS_STAGE_PAUSED) {
+      const hasClientsCard = await hasOpportunityInPipeline(contactId, process.env.GHL_CLIENTS_PIPELINE_ID);
+      if (hasClientsCard) {
+        await moveOpportunityToStage(contactId, process.env.GHL_CLIENTS_PIPELINE_ID, process.env.GHL_CLIENTS_STAGE_PAUSED, name);
+      } else if (process.env.GHL_ONBOARDING_PIPELINE_ID && process.env.GHL_ONBOARDING_STAGE_PAUSED) {
+        await moveOpportunityToStage(contactId, process.env.GHL_ONBOARDING_PIPELINE_ID, process.env.GHL_ONBOARDING_STAGE_PAUSED, name);
+      } else {
+        console.error("[Payment Failed webhook] No Clients-pipeline card and GHL_ONBOARDING_PIPELINE_ID / GHL_ONBOARDING_STAGE_PAUSED not configured — cannot pause");
+      }
+    } else {
+      console.error("[Payment Failed webhook] GHL_CLIENTS_PIPELINE_ID / GHL_CLIENTS_STAGE_PAUSED not configured — cannot move opportunity");
+    }
   }
 
   return NextResponse.json({ action, warningCount: newCount, wasZero });

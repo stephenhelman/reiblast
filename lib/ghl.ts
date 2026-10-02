@@ -350,6 +350,24 @@ export async function moveOpportunityToStage(
   }
 }
 
+/**
+ * Does this contact already have an opportunity in the given pipeline? Read-only — never creates anything. Used to
+ * decide whether a Clients-pipeline move should happen there, or whether the member has never been handed off
+ * (never reached A2P Approved) and so has no Clients-pipeline card to move.
+ */
+export async function hasOpportunityInPipeline(contactId: string, pipelineId: string): Promise<boolean> {
+  const searchRes = await fetch(
+    `${GHL_BASE_URL}/opportunities/search?location_id=${process.env.GHL_HQ_LOCATION_ID}&pipeline_id=${pipelineId}&contact_id=${contactId}`,
+    { headers: hqHeaders() },
+  );
+  if (!searchRes.ok) {
+    console.error("[GHL] hasOpportunityInPipeline search failed:", await searchRes.text());
+    return false;
+  }
+  const searchData = await searchRes.json();
+  return !!searchData?.opportunities?.[0];
+}
+
 export async function provisionSubAccount(
   name: string,
   email: string,
@@ -626,7 +644,7 @@ export async function updateSubAccountProfile(
     authorizedRepFirstName: string
     authorizedRepLastName: string
   },
-): Promise<void> {
+): Promise<boolean> {
   const res = await fetch(`${GHL_BASE_URL}/locations/${locationId}`, {
     method: "PUT",
     headers: agencyHeaders(),
@@ -650,9 +668,10 @@ export async function updateSubAccountProfile(
   if (!res.ok) {
     const err = await res.text()
     console.error("[GHL] updateSubAccountProfile failed:", res.status, err)
-  } else {
-    console.log("[GHL] Sub-account profile updated:", locationId)
+    return false
   }
+  console.log("[GHL] Sub-account profile updated:", locationId)
+  return true
 }
 
 export type SubAccountCustomValues = {

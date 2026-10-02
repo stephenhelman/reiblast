@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { createHQContact, addTag, moveToStage } from "@/lib/ghl";
+import { createHQContact, addTag } from "@/lib/ghl";
 import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
-import { MEMBER_TAGS, ONBOARDING_STAGES } from "@/lib/constants";
+import { MEMBER_TAGS } from "@/lib/constants";
+import { ensureGhlAccount } from "@/lib/billing/state/dualWrite";
+import { enqueueOnboardingIntent } from "@/lib/billing/onboardingIntents";
 
 export async function POST(req: NextRequest) {
   if (!verifyWebhook(req)) {
@@ -32,16 +34,19 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const user = await prisma.user.upsert({
-      where: { email: email.toLowerCase() },
-      update: { name, plan: "core", status: "pending_onboarding" },
-      create: {
-        email: email.toLowerCase(),
-        name,
-        plan: "core",
-        status: "pending_onboarding",
-      },
-    });
+    const existingUser = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+    const isNewMember = !existingUser;
+
+    // BUG FIX: an existing member hitting this route again (e.g. a renewal payment) must never have their status
+    // reset back to "pending_onboarding" — only plan/name are refreshed for an existing user.
+    const user = existingUser
+      ? await prisma.user.update({
+          where: { id: existingUser.id },
+          data: { name, plan: "core" },
+        })
+      : await prisma.user.create({
+          data: { email: email.toLowerCase(), name, plan: "core", status: "pending_onboarding" },
+        });
 
     const { contactId } = await createHQContact(name, email, phone);
 
@@ -53,10 +58,17 @@ export async function POST(req: NextRequest) {
       data: { ghlContactId: contactId, otpCode: otp, otpExpiry },
     });
     console.log(`[GHL webhook] OTP stored for ${email}`);
+    await ensureGhlAccount(prisma, { userId: user.id, contactId }); // additive dual-write; never throws (swallows + logs)
 
     await addTag(contactId, MEMBER_TAGS.PAYMENT_RECEIVED);
     await addTag(contactId, MEMBER_TAGS.CORE);
-    await moveToStage(contactId, ONBOARDING_STAGES.PAYMENT_RECEIVED, name);
+    // No direct moveToStage() here anymore: the new_client intent below (sent when ONBOARDING_INTENTS=live) is now
+    // the sole mechanism that creates/moves the New Client card for this route — see docs/oct1-release.md.
+
+    if (isNewMember) {
+      const acct = await prisma.ghlAccount.findUnique({ where: { userId: user.id }, select: { id: true, contactId: true } });
+      if (acct) await enqueueOnboardingIntent(prisma, { account: { id: acct.id, contactId: acct.contactId }, stageKey: "new_client" });
+    }
 
     return NextResponse.json({ success: true });
   } catch (err) {

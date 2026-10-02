@@ -82,6 +82,9 @@ model User {
   memberActions MemberAction[] @relation("MemberActions")
   carts         Cart[]         @relation("Carts")
 
+  // GHL billing/lifecycle account — schema-only, no column on User.
+  ghlAccount GhlAccount?
+
   @@unique([ghlLocationId], map: "User_ghlLocationId_key")
 }
 
@@ -918,4 +921,268 @@ model CartLine {
   createdAt DateTime @default(now())
 
   @@index([cartId])
+}
+
+// ── GHL billing/lifecycle record (see docs/ghl-server-contract.md) ──────────
+
+enum BillingState {
+  trial
+  active
+  payment_failed
+  paused
+  inactive
+  churned
+}
+
+enum PauseReason {
+  non_payment
+  expired_invoice
+  voluntary
+  manual_killswitch
+}
+
+enum BillingClass {
+  core_subscription
+  wallet_auto_recharge
+  wallet_manual_recharge
+  trial_auth
+  failed_signup
+  refund
+  unclassified
+}
+
+// member = a paying REIblast member; internal = our own account (e.g. the HQ owner used for the admin entry flow).
+// Member logic (jobs, seeds, reports) must filter accountType = member.
+enum GhlAccountType {
+  member
+  internal
+}
+
+model GhlAccount {
+  id                   String               @id @default(cuid())
+  userId               String               @unique
+  user                 User                 @relation(fields: [userId], references: [id])
+  contactId            String               @unique
+  locationId           String?              @unique
+  billingState         BillingState? // null = not yet seeded
+  pauseReason          PauseReason?
+  warningCount         Int                  @default(0)
+  trialOffer           String?
+  trialEndsAt          DateTime?
+  legacyUnreconciled   Boolean              @default(false)
+  accountType          GhlAccountType       @default(member)
+  // Display name seen in agency wallet rows for this location (wallet_usage keeps it fresh). Null = not yet known.
+  locationName          String?
+  locationNameUpdatedAt DateTime?
+  // Manual core-subscription coverage override (scripts/billing/set-coverage.ts). While now < coreCoveredUntil the account is
+  // covered even if no core payment is on record; dunning must not treat a missing/failed core payment as delinquency.
+  coreCoveredUntil DateTime?
+  coreCoverageNote String?
+  dunningDecisions DunningDecision[]
+  onboardingStage      String?
+  // Forward-only onboarding progress (lib/billing/stages.ts ONBOARDING_PROGRESS_STAGES). Distinct from onboardingStage
+  // (current-stage display field, set to whatever GHL sends including side stages); this only ever advances.
+  onboardingProgress   String?
+  onboardingProgressAt DateTime?
+  locationToken        String?
+  locationTokenExpires DateTime?
+  ledgerEntries        BillingLedgerEntry[]
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+}
+
+model BillingLedgerEntry {
+  id                String       @id @default(cuid())
+  ghlTransactionId  String       @unique
+  ghlAccountId      String?
+  ghlAccount        GhlAccount?  @relation(fields: [ghlAccountId], references: [id])
+  contactId         String?
+  classification    BillingClass
+  classifierVersion Int
+  status            String
+  amount            Decimal      @db.Decimal(12, 6)
+  amountRefunded    Decimal      @default(0) @db.Decimal(12, 6)
+  provider          String
+  subscriptionId    String?
+  occurredAt        DateTime
+  // Stored exactly as received (list-endpoint shape from the historical load, single-transaction
+  // shape from the webhook; a row can switch shapes on update). ONLY lib/billing/normalizeTransaction.ts
+  // may read this column.
+  raw               Json
+  // First time an update raised amountRefunded above its prior value. Null = never detected (rows refunded before this
+  // column existed stay null: "predates tracking").
+  refundDetectedAt  DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @default(now()) @updatedAt
+
+  @@index([ghlAccountId, occurredAt])
+  @@index([classification, occurredAt])
+  @@index([occurredAt])
+  @@index([status, occurredAt])
+}
+
+// Inbox for GHL → server events (contract rule 5: record before side effects).
+model GhlEvent {
+  id          String    @id @default(cuid())
+  source      String // e.g. "payment", later "stage_change"
+  externalId  String? // e.g. GHL transaction id, when present
+  payload     Json
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+  attempts    Int       @default(0)
+  lastError   String?
+
+  @@index([source, processedAt])
+  @@index([externalId])
+}
+
+// Cost side of the billing dashboard: daily usage per scope and category (see lib/billing/walletCategories.ts).
+model UsageRollup {
+  id           String   @id @default(cuid())
+  scopeKey     String // member/HQ locationId, "_agency" (blank-name rows), or "_unattributed" (named, non-member)
+  ghlAccountId String? // set when scopeKey matches a GhlAccount.locationId
+  day          DateTime @db.Date // UTC day of settlementTime
+  category     String // parsed category, e.g. outbound_sms, a2p_registration, agency_auto_recharge, wallet_sales_tax, other
+  count        Int
+  amount       Decimal  @db.Decimal(12, 6) // signed: charges negative, recharges positive
+  updatedAt    DateTime @updatedAt
+
+  @@unique([scopeKey, day, category])
+  @@index([ghlAccountId, day])
+  @@index([day])
+}
+
+// Evidence layer for UsageRollup: one row per GHL wallet transaction (insert-or-ignore on id).
+model WalletTransaction {
+  id             String   @id // GHL wallet transaction id
+  scopeKey       String // member locationId, HQ locationId, "_agency", "_unattributed"
+  ghlAccountId   String?
+  settlementTime DateTime
+  category       String
+  description    String
+  amount         Decimal  @db.Decimal(12, 6) // signed like UsageRollup: charges negative, recharges positive
+  createdAt      DateTime @default(now())
+
+  // Member/scope drill-downs filter by scopeKey (= the member's locationId); ghlAccountId is a write-time snapshot and
+  // is not indexed. A bare settlementTime index was dropped as redundant.
+  @@index([scopeKey, settlementTime])
+  @@index([category, settlementTime])
+}
+
+model WalletBalanceSnapshot {
+  id           String   @id @default(cuid())
+  locationId   String
+  ghlAccountId String?
+  takenOn      DateTime @db.Date
+  status       String // "ok" | "unavailable" | "error"
+  balance      Decimal? @db.Decimal(12, 6)
+  raw          Json?
+  createdAt    DateTime @default(now())
+
+  @@unique([locationId, takenOn])
+}
+
+// Bookkeeping for the nightly jobs (replay | tx_sweep | wallet_usage | balances).
+model JobRun {
+  id          String    @id @default(cuid())
+  job         String    @unique
+  lastStartAt DateTime?
+  lastOkAt    DateTime?
+  cursor      Json?
+  lastError   String?
+  lastSummary Json?
+}
+
+// ── REIblast admin auth (owner-only; entirely separate from the REItools admin) ──
+
+// One SMS one-time-code challenge. codeHash is an HMAC — never the code.
+model AdminAuthChallenge {
+  id         String    @id @default(cuid())
+  method     String // "sms"
+  codeHash   String
+  expiresAt  DateTime
+  attempts   Int       @default(0)
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([createdAt])
+}
+
+model AdminBackupCode {
+  id        String    @id @default(cuid())
+  codeHash  String    @unique
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+}
+
+// Append-only. action: login_sms | login_totp | login_backup | login_failed | sms_sent | export | logout
+model AdminAuditLog {
+  id        String   @id @default(cuid())
+  action    String
+  detail    Json?
+  ip        String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// Shadow-mode record of what the billing state engine WOULD do (lib/billing/state). One row per (trigger, account, mode);
+// the unique key makes reprocessing idempotent. Shadow/replay rows never change GhlAccount — the shadow-projected state of an
+// account is the to* values of its latest shadow|replay decision by eventAt (docs/dunning-engine.md).
+model DunningDecision {
+  id               String        @id @default(cuid())
+  ghlAccountId     String
+  ghlAccount       GhlAccount    @relation(fields: [ghlAccountId], references: [id])
+  trigger          String // ledger:<ghlTransactionId> | command:<stage> | invoice:<id>
+  eventKind        String
+  eventAt          DateTime // when the triggering event happened (ledger occurredAt); projections order by this
+  fromState        BillingState?
+  toState          BillingState?
+  fromStrikes      Int
+  toStrikes        Int
+  pauseReason      PauseReason?
+  coreFailureOpen  Boolean       @default(false) // an unpaid core-subscription failure is open after this decision
+  sideEffects      Json
+  intents          Json
+  reason           String
+  mode             String // shadow | replay | live
+  walletBalance    Decimal?      @db.Decimal(12, 6)
+  balanceEstimated Boolean       @default(false) // walletBalance was reconstructed (replay), not read
+  createdAt        DateTime      @default(now())
+
+  @@unique([trigger, ghlAccountId, mode])
+  @@index([ghlAccountId, createdAt])
+  @@index([ghlAccountId, eventAt])
+  @@index([createdAt])
+}
+
+// Outbox of GHL pipeline/field updates the billing engine wants made (lib/billing/intents). Always recorded first. In shadow mode
+// (or for an account not allowlisted for live) the status is "skipped_shadow" and nothing is sent.
+model GhlIntent {
+  id           String    @id @default(cuid())
+  ghlAccountId String
+  kind         String // stage | fields
+  pipeline     String // active_client | onboarding
+  payload      Json
+  dedupeKey    String    @unique
+  status       String // pending | sent | failed | skipped_shadow
+  attempts     Int       @default(0)
+  lastError    String?
+  sentAt       DateTime?
+  createdAt    DateTime  @default(now())
+
+  @@index([status, createdAt])
+}
+
+// Last-seen state of each GHL subscription (the nightly sub_sweep job). A status change is what feeds the dunning engine.
+model GhlSubscriptionState {
+  subscriptionId String   @id
+  contactId      String
+  status         String
+  name           String?
+  trialEndsAt    DateTime?
+  lastSeenAt     DateTime
+  updatedAt      DateTime @updatedAt
+
+  @@index([contactId])
 }
