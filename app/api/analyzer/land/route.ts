@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { analyzerDisabledResponse } from '@/lib/analyzerFlag'
 import { prisma } from "@/lib/prisma";
 import { requireMember } from "@/lib/requireMember";
 
@@ -165,6 +166,9 @@ OUTPUT — valid JSON only, no markdown, no preamble:
 }`;
 
 export async function POST(req: NextRequest) {
+  const disabled = analyzerDisabledResponse()
+  if (disabled) return disabled
+
   try {
     await requireMember(req);
   } catch {

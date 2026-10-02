@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { analyzerDisabledResponse } from '@/lib/analyzerFlag'
 import { getGhlAccessToken } from '@/lib/ghl-token'
 
 const GHL_BASE = 'https://services.leadconnectorhq.com'
 
 export async function POST(req: NextRequest) {
+  const disabled = analyzerDisabledResponse()
+  if (disabled) return disabled
+
   let body: { locationId?: string; firstName?: string; lastName?: string; address1?: string }
   try {
     body = await req.json()

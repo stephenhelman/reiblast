@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { analyzerDisabledResponse } from '@/lib/analyzerFlag'
 import { requireMember } from "@/lib/requireMember";
 
 const ARV_SYSTEM_PROMPT = `You are a real estate deal analyzer for wholesale investors. You analyze a subject property and comparable sales and return a structured JSON object. You never fabricate data. You only analyze what is provided.
@@ -98,6 +99,9 @@ OUTPUT — return only valid JSON, no markdown, no preamble:
 // daysSinceSold is calculated client-side at request time using current Date.now()
 // Never trust stored daysSinceSold values — always recalculate from saleDate before sending
 export async function POST(req: NextRequest) {
+  const disabled = analyzerDisabledResponse()
+  if (disabled) return disabled
+
   try {
     await requireMember(req);
   } catch {

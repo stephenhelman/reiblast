@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
+import { isAnalyzerDisabled } from "@/lib/analyzerFlag";
 import { verifyToolsSession } from "@/lib/toolsSession";
 import { TOOLS_SESSION_COOKIE } from "@/lib/constants";
 import { ADMIN_BASE_HEADER, ADMIN_COOKIE } from "@/lib/admin/config";
@@ -85,6 +86,19 @@ export async function middleware(request: NextRequest) {
         expiredUrl.search = "";
         return NextResponse.rewrite(expiredUrl);
       }
+    }
+
+    // Kill switch: ANALYZER_DISABLED=true replaces every analyzer page with a notice.
+    if (
+      isAnalyzerDisabled() &&
+      (pathname === "/analyzer" ||
+        pathname.startsWith("/analyzer/") ||
+        pathname.startsWith("/widget/analyzer"))
+    ) {
+      const disabledUrl = request.nextUrl.clone();
+      disabledUrl.pathname = "/tools/analyzer-disabled";
+      disabledUrl.search = "";
+      return NextResponse.rewrite(disabledUrl);
     }
 
     const toolsUrl = request.nextUrl.clone();
