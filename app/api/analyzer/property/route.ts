@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { analyzerDisabledResponse } from '@/lib/analyzerFlag'
 import { lookupProperty } from '@/lib/melissa'
 import { prisma } from '@/lib/prisma'
 import { requireMember } from '@/lib/requireMember'
@@ -6,6 +7,9 @@ import { requireMember } from '@/lib/requireMember'
 const NINETY_DAYS_MS = 90 * 24 * 60 * 60 * 1000
 
 export async function POST(req: NextRequest) {
+  const disabled = analyzerDisabledResponse()
+  if (disabled) return disabled
+
   try {
     await requireMember(req)
   } catch {

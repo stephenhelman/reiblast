@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { analyzerDisabledResponse } from '@/lib/analyzerFlag'
 import { getSalesComps } from '@/lib/rentcast'
 import { prisma } from '@/lib/prisma'
 import { requireMember } from '@/lib/requireMember'
@@ -130,6 +131,9 @@ function mapDbCompToComp(
 }
 
 export async function POST(req: NextRequest) {
+  const disabled = analyzerDisabledResponse()
+  if (disabled) return disabled
+
   try {
     await requireMember(req)
   } catch {

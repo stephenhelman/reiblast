@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { analyzerDisabledResponse } from '@/lib/analyzerFlag'
 import { prisma } from '@/lib/prisma'
 
 // 0.072 degrees ≈ 5 miles
@@ -41,6 +42,9 @@ function getMostRecentLandAssessment(taxAssessments: Record<string, any> | null 
 }
 
 export async function POST(req: NextRequest) {
+  const disabled = analyzerDisabledResponse()
+  if (disabled) return disabled
+
   let body: {
     lat?: number
     lng?: number

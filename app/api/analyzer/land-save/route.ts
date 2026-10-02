@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { analyzerDisabledResponse } from '@/lib/analyzerFlag'
 import { prisma } from '@/lib/prisma'
 import { getGhlAccessToken } from '@/lib/ghl-token'
 import { TOOLS_URL } from '@/lib/constants'
@@ -39,6 +40,9 @@ interface LandSaveBody {
 }
 
 export async function POST(req: NextRequest) {
+  const disabled = analyzerDisabledResponse()
+  if (disabled) return disabled
+
   let body: Partial<LandSaveBody>
   try {
     body = await req.json()

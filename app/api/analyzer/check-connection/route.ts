@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { analyzerDisabledResponse } from '@/lib/analyzerFlag'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(req: NextRequest) {
+  const disabled = analyzerDisabledResponse()
+  if (disabled) return disabled
+
   const locationId = req.nextUrl.searchParams.get('locationId')
   console.log('[check-connection] Connection check for locationId', locationId)
 

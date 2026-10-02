@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { analyzerDisabledResponse } from '@/lib/analyzerFlag'
 import { prisma } from '@/lib/prisma'
 
 export async function GET(req: NextRequest) {
+  const disabled = analyzerDisabledResponse()
+  if (disabled) return disabled
+
   const { searchParams } = new URL(req.url)
   const dealId = searchParams.get('dealId')
   const locationId = searchParams.get('locationId')
