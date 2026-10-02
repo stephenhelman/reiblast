@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../../intents/send", () => ({ sendPendingIntents: vi.fn(async () => ({ sent: 0, failed: 0 })) }));
+vi.mock("../../state/effects", () => ({ retrySideEffects: vi.fn(async () => ({ attempted: 0, succeeded: 0, stillFailing: 0, exhausted: 0, superseded: 0 })) }));
 
 import { runReplay } from "../../jobs/replay";
 import { NON_REPLAYABLE_SOURCES, replayableWhere } from "../../processPaymentEvent";

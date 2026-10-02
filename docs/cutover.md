@@ -66,7 +66,7 @@ and explain every difference before applying):
 | # | Step | Comparison baseline (pipeline branch) |
 |---|---|---|
 | 1 | `backfill-ghl-accounts` | GhlAccount rows per member / location |
-| 2 | `seed-billing-state` — **with the trailing-30-day activity check, not August** (the script currently keys off August wallet activity: change before use, this is a code task) | state distribution (paused / churned / active / trial …) |
+| 2 | `seed-billing-state` — trailing-30-Denver-day `WalletTransaction` activity check (`--wallet-dir` is now an optional fallback only) | state distribution (paused / churned / active / trial …) |
 | 3 | `scripts/admin/provision-owner` (the internal HQ account, `accountType = internal`) | 1 internal account |
 | 4 | load the historical ledger — `load-ledger-from-pull` or `tx_sweep` over the full history | ledger row count and classification breakdown |
 | 5 | `backfill-usage` (wallet usage) | usage rows / totals per month |
@@ -105,8 +105,10 @@ the balance, the 15-minute pause debounce). Health's "differs" count should be s
 
 **3. Build the GHL workflows** (section 2), disabled; send test payloads to `stage-changed` / `invoice-event`; confirm `GhlEvent` rows and decisions.
 
-**4. Code gaps to close before the canary** (from the resolved decisions in section 5): automatic retry of failed side effects with backoff,
-and a Health alert for resume failures. Both are code tasks, not yet built.
+**4. Code gaps closed before the canary** (Task 8a): automatic retry of failed side effects with backoff (`lib/billing/state/effects.ts`,
+5 attempts, 5m/30m/2h/6h/24h — replay job + opportunistic after each processed payment event) and the Health alert for exhausted resume
+failures (warning for pause) are built. Production access to `getBillingDb()`/every billing script now requires the explicit opt-in in
+`docs/cutover.md` A1 (`BILLING_DB_TARGET=prod` + `--i-mean-production` + typed host confirmation).
 
 **5. Enable the new workflows** (1 and 3–6 from section 2; the old ones stay on for now).
 
@@ -147,7 +149,8 @@ re-enable the old workflows and disable the new ones. Effects already executed (
 - **Card-update message** stays in the Paused workflow (after the 15-minute wait, if still Paused). The server sends no comms.
 - **15-minute wait is sufficient** as the debounce before `saas_pause`; no extra debounce.
 - **`unpaid` subscriptions stay informational** (Health list only, no engine event).
-- **Side effects** (`saas_pause` / `saas_resume`) **retry automatically, up to 5 attempts with backoff, via the replay job.** Resume failures
-  raise an alert on Health (a member left paused after paying is the costly failure). *Not built yet* — today failures are recorded on the
-  decision and shown, without retry (see Phase B step 4).
+- **Side effects** (`saas_pause` / `saas_resume`) **retry automatically, up to 5 attempts with backoff (5m/30m/2h/6h/24h), via the replay job
+  and opportunistically after each processed payment event.** An exhausted `saas_resume` raises an ALERT on Health (a member left paused
+  after paying is the costly failure); an exhausted `saas_pause` raises a WARNING. Idempotent: a retry never fires once a later live decision
+  for the account supersedes it. **Built** — `lib/billing/state/effects.ts` (see Phase B step 4).
 - **Old routes** are removed **2 weeks after the last account goes live**.

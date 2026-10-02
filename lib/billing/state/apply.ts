@@ -1,11 +1,12 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { executeEffects, type SideEffectResult } from "./effects";
 import { enqueueIntents, sendPendingIntents, type SendDeps } from "../intents/send";
 import { readBalance } from "./balance";
 import { eventFromLedger } from "./events";
 import { loadProjection, seedFromAccount, type Projection } from "./projection";
 import { fetchSubscription } from "./subscription";
 import { decide, needsBalance, needsSubscription } from "./transition";
-import type { BalanceReading, BillingState, Context, Decision, DunningEvent, SideEffect, SubscriptionInfo } from "./types";
+import type { BalanceReading, BillingState, Context, Decision, DunningEvent, SubscriptionInfo } from "./types";
 
 /**
  * THE shared write path for dunning decisions.
@@ -60,7 +61,7 @@ export type ApplyResult =
   | { status: "recorded"; decision: Decision; balance?: BalanceReading; mode: Mode; executed?: SideEffectResult[] }
   | { status: "duplicate" }
   | { status: "skipped"; why: string };
-export type SideEffectResult = SideEffect & { executedAt?: string; error?: string };
+export type { SideEffectResult };
 
 type Db = PrismaClient;
 const isUnique = (e: unknown): boolean => e instanceof Prisma.PrismaClientKnownRequestError && e.code === "P2002";
@@ -106,21 +107,6 @@ async function loadLiveSnapshot(db: Pick<PrismaClient, "dunningDecision" | "ghlA
   const last = await db.dunningDecision.findFirst({ where: { ghlAccountId: id, mode: "live" }, orderBy: [{ eventAt: "desc" }, { createdAt: "desc" }], select: { coreFailureOpen: true, eventAt: true } });
   const base = seedFromAccount(a);
   return last ? { ...base, coreFailureOpen: last.coreFailureOpen, source: "decision", lastEventAt: last.eventAt } : base;
-}
-
-async function executeEffects(effects: SideEffect[], locationId: string | null, deps: ApplyDeps): Promise<SideEffectResult[]> {
-  const out: SideEffectResult[] = [];
-  for (const e of effects) {
-    try {
-      if (!locationId) throw new Error("account has no locationId");
-      if (e.type === "saas_pause") await (deps.pause ?? (await import("@/lib/ghl/client")).pauseLocation)(locationId);
-      else await (deps.unpause ?? (await import("@/lib/ghl/client")).unpauseLocation)(locationId);
-      out.push({ ...e, executedAt: new Date().toISOString() });
-    } catch (err) {
-      out.push({ ...e, error: (err instanceof Error ? err.message : String(err)).slice(0, 300) });
-    }
-  }
-  return out;
 }
 
 /**
