@@ -2,7 +2,7 @@ import { NextRequest } from "next/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const holder = vi.hoisted(() => ({ db: null as any, boom: false, claimResult: true }));
-vi.mock("@/lib/billing/db", () => ({ getBillingDb: async () => { if (holder.boom) throw new Error("db down"); return holder.db; } }));
+vi.mock("@/lib/billing/db", () => ({ dbHost: () => "test-host.example:5432", getBillingDb: async () => { if (holder.boom) throw new Error("db down"); return holder.db; } }));
 vi.mock("@vercel/functions", () => ({ waitUntil: (_p: Promise<unknown>) => { _p.catch(() => {}); } }));
 const runJobMock = vi.hoisted(() => vi.fn(async () => ({ status: "done", summary: {} })));
 vi.mock("@/lib/billing/jobs/runner", async (orig) => {
@@ -19,7 +19,7 @@ function makeDb() {
   return {
     events,
     ghlEvent: { create: async ({ data }: any) => { const row = { id: `ev${events.length + 1}`, ...data }; events.push(row); return row; } },
-    jobRun: { upsert: async ({ where }: any) => ({ id: "jr1", job: where.job }) },
+    jobRun: { findUnique: async () => ({ id: "jr1" }) },
   };
 }
 
@@ -78,7 +78,7 @@ describe("jobs route: reason codes, always 200, every attempt recorded", () => {
   it("a fresh, authenticated, known job → accepted, recorded with the job and its JobRun id, and the job is started", async () => {
     const res = await jobsRoute(req({ job: "replay" }));
     expect(await res.json()).toEqual({ accepted: true, job: "replay", reason: "accepted" });
-    expect(holder.db.events[0]).toMatchObject({ source: "job_trigger", externalId: "replay", payload: { reason: "accepted", jobRunId: "jr1" } });
+    expect(holder.db.events[0]).toMatchObject({ source: "job_trigger", externalId: "replay", payload: { reason: "accepted", jobRunId: "jr1", dbHost: "test-host.example:5432" } });
     expect(runJobMock).toHaveBeenCalledWith("replay", expect.objectContaining({ preClaimed: true }));
   });
   it("a continuation (cursor present) is accepted without re-claiming", async () => {

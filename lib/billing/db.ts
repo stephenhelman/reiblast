@@ -49,3 +49,15 @@ export async function getBillingDb(): Promise<PrismaClient> {
   }
   return (await import("@/lib/prisma")).prisma;
 }
+
+/** Host (and port) of the database getBillingDb() would resolve, for diagnostics — never the user, password, path or query.
+ *  Mirrors getBillingDb's URL selection without connecting or throwing; "unknown" if unset or unparseable. */
+export function dbHost(env: Record<string, string | undefined> = process.env): string {
+  const url = env.PIPELINE_DATABASE_URL || resolvedAppDbUrl(env);
+  if (!url) return "unknown";
+  try {
+    return new URL(url).host;
+  } catch {
+    return "unknown";
+  }
+}

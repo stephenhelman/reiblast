@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { apiStats } from "../ghlWallet";
 import { JOBS } from "./index";
@@ -40,6 +41,9 @@ const CONT_KEY = "_continuation";
 /** Atomic claim: succeeds only if no run started in the last GUARD_MINUTES without finishing (success or error). Exported so
  *  the jobs route can claim synchronously, before responding, and report "in_flight" when it can't. */
 export async function claim(db: PrismaClient, job: JobName): Promise<boolean> {
+  // Bootstrap: the UPDATE below matches nothing on a table with no row for this job, which would read as "in flight"
+  // forever. "id" has no DB default (Prisma generates cuids client-side), so supply one.
+  await db.$executeRaw`INSERT INTO "JobRun" ("id", "job") VALUES (${randomUUID()}, ${job}) ON CONFLICT ("job") DO NOTHING`;
   const n = await db.$executeRaw`
     UPDATE "JobRun" SET "lastStartAt" = NOW(), "lastError" = NULL
     WHERE "job" = ${job}
