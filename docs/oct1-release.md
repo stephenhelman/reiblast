@@ -357,3 +357,44 @@ Every remaining reader of `GHL_ONBOARDING_PIPELINE_ID` or any `GHL_STAGE_*` var 
 5. **`app/api/webhooks/ghl-provision/route.ts`, `app/api/onboarding/submit/route.ts`** — their direct `moveToStage`
    calls were already removed earlier this release in favor of the intents outbox; grep confirms no `moveToStage`/
    `GHL_ONBOARDING_PIPELINE_ID` reference remains in either file. **NO BREAK**, not a caller anymore.
+
+## B2 — seed billing states in production
+
+`scripts/billing/seed-billing-state.ts` sets `GhlAccount.billingState` once, for members whose state is still null. Same
+production guard as the backfills in (c): `BILLING_DB_TARGET=prod` + `--i-mean-production` + typing the host. Dry-run is the
+default; nothing is written without `--apply`.
+
+**Prerequisites:** `GhlSubscriptionState` is populated (sub_sweep has run at least once — the script stops with an error if
+it is empty), and the ledger is loaded (`BillingLedgerEntry` has succeeded wallet recharges).
+
+**Inputs, as run in production:**
+- Subscriptions: read from `GhlSubscriptionState`. It has no creation time, so a contact with several subscriptions is
+  resolved by liveness (active > trialing > unpaid > paused > expired > canceled > incomplete_expired). Passing a
+  `<subscriptions.json>` path instead uses the old pull file (newest by `createdAt`).
+- Recent activity (paused vs churned for paused/expired/canceled/incomplete_expired): `WalletTransaction` when the location
+  has any rows (preferred); otherwise succeeded `wallet_auto_recharge`/`wallet_manual_recharge` ledger entries in the
+  trailing 30 Denver days. Production has no `WalletTransaction` rows, so expect the ledger path. If the ledger has no
+  succeeded recharges at all the account is left null and listed (never guessed as churned).
+
+Rules: never overwrites a non-null `billingState` (listed under "Skipped — DB state wins"); members only; `trialOffer`
+only for names matching `/\d+\s*Day Trial/i`; `unpaid` → `payment_failed`; `trialing` → `trial`; `active` → `active`;
+recent activity → `paused` (`non_payment`, `legacyUnreconciled`); none → `churned` (`legacyUnreconciled`).
+
+**Dry-run, then apply:**
+```sh
+DATABASE_URL="$PROD" BILLING_DB_TARGET=prod npx tsx scripts/billing/seed-billing-state.ts --i-mean-production
+# review the output, then:
+DATABASE_URL="$PROD" BILLING_DB_TARGET=prod npx tsx scripts/billing/seed-billing-state.ts --i-mean-production --apply
+```
+Both prompt `Type the host name to confirm:` — type the host exactly as printed.
+
+**What to expect from the dry-run:**
+- Header: `Target: PRODUCTION (confirmed)`, `Mode: dry-run`, then `Subscription source: GhlSubscriptionState (N rows)` and
+  `Activity sources: WalletTransaction rows for 0/<locations> locations; ledger has succeeded wallet recharges (...)`.
+  If it says `ledger has NO succeeded wallet recharges`, stop: paused/expired/canceled members would all be left null.
+- `Would apply W writes`, the `Outcomes` tally, and `Final billingState distribution`. Every member with a subscription
+  should land in `trial`, `active`, `payment_failed`, `paused/non_payment`, or `churned`.
+- Review: "Skipped — DB state wins" (accounts already holding a state, e.g. from the backfills), "Left null" lists (should be
+  empty or explainable), `GhlAccounts with no subscription`, and `trialOffer values set` (only real "N Day Trial" names).
+- `--apply` re-prints the same report, writes W rows, and ends with `Done.` Re-running is safe: seeded accounts are then
+  skipped as "DB state wins".
