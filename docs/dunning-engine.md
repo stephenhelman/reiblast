@@ -2,7 +2,7 @@
 
 The engine decides how a member's billing state should change when a payment event arrives. **In this release it executes
 nothing**: no SaaS pause/resume, no GHL write, no pipeline move, no `GhlAccount` update. It only records decisions
-(`DunningDecision`). The live routes (`payment-failed`, `pause`, `active`) and the `Transaction` table remain the authority; see
+(`DunningDecision`) — the one exception is the onboarding → Clients handoff, which sends only when `CLIENT_HANDOFF=live` (see *Engine completion*). The live routes (`payment-failed`, `pause`, `active`) and the `Transaction` table remain the authority; see
 `docs/payments-webhook-system.md`. The engine follows `docs/ghl-server-contract.md` (rule 4 one write path, rule 5 idempotency,
 stage keys equal `BillingState` values).
 
@@ -10,16 +10,16 @@ stage keys equal `BillingState` values).
 
 | Event | Effect |
 |---|---|
-| wallet recharge **failed**, balance < 0 | strike +1. active/trial → `payment_failed`; strikes 1–2 stay `payment_failed`; the **3rd → paused (non_payment)** — the location is paused later, on `pause_confirmed` |
+| wallet recharge **failed**, balance < 0 | strike +1. active/trial → `payment_failed`; strikes 1–2 stay `payment_failed`; the **3rd → paused (non_payment)** with **`saas_pause` in the same decision** |
 | wallet recharge failed, balance ≥ 0 or unknown | recorded, nothing changes ("no strike" / "balance unknown; strike not counted") |
 | wallet recharge **succeeded** | strikes = 0 always. It only **cures** — `payment_failed` → active, or paused/`non_payment` → resume — when the **post-recharge balance is ≥ 0** (live: read after the recharge; replay: estimated). Otherwise strikes reset but the state stays: *"recharge succeeded, balance still negative"* (an unknown balance counts as not confirmed). An unpaid core failure keeps `payment_failed` regardless (a resume then lands in `payment_failed`). Other pause reasons are never resumed |
 | core subscription **failed** | → `payment_failed`, **no strike**, marks a core failure open — unless `now < coreCoveredUntil` ("covered, ignored") |
-| invoice **expired** | → paused (`expired_invoice`) — pause executes on `pause_confirmed`; same coverage protection |
+| invoice **expired** | → paused (`expired_invoice`) with `saas_pause` in the same decision; same coverage protection |
 | core subscription **succeeded** | clears the core failure. trial / `payment_failed` → active (stays `payment_failed` while wallet strikes remain); paused `expired_invoice`/`non_payment` → active + `saas_resume`, strikes reset. `manual_killswitch`/`voluntary` pauses are not resumed |
 | `trial_auth` succeeded | null/trial → **trial**, `trialOffer` only if the subscription name matches `/\d+\s*Day Trial/i`, `trialEndsAt` from the subscription. Any other state: "ignored (state X)" |
 | any payment event on **inactive** / **churned** | recorded as "state excludes action" — never struck, never auto-resumed |
-| command `paused` / `inactive` / `churned` / `active` | `manual_killswitch` pause (no immediate effect — waits for `pause_confirmed`) / `voluntary` pause + `saas_pause` / churned + `saas_pause` / resume + strikes reset. If the state **already matches**, it is a **confirmation**: no intent; `inactive`/`churned`/`active` re-assert their effect idempotently |
-| `pause_confirmed` (Paused workflow's 15-minute wait) | still paused → **`saas_pause`** (the only place a pause executes); otherwise "cured before confirmation, no pause" |
+| command `paused` / `inactive` / `churned` / `active` | `manual_killswitch` pause + `saas_pause` / `voluntary` pause + `saas_pause` / churned + `saas_pause` / resume + strikes reset. If the state **already matches**, it is a **confirmation**: no intent; `inactive`/`churned`/`active` re-assert their effect idempotently; `paused` re-sends nothing (its own decision already carried the pause and its retries) |
+| `pause_confirmed` (legacy `paused_confirm` stage) | **removed as a step**: still parsed, but always a no-op ("no confirmation step"). Nothing depends on it |
 | sweep: subscription canceled / expired | → churned + `saas_pause` (deferred while covered; a cancel during the trial churns at once); nothing if the contact has another live subscription |
 | sweep: trial ended unconverted | trial → `payment_failed`, core failure open (coverage protects) |
 | sweep: subscription trialing | null/trial → trial with offer and end date |
@@ -28,7 +28,7 @@ A failure is tracked by kind: wallet strikes (counter) and `coreFailureOpen` (fl
 A `null` (unseeded) state is treated like active, except that `trial_auth` moves it to trial.
 
 `decide` returns `{ nextState, pauseReason, warningCount, coreFailureOpen, trialOffer, trialEndsAt, sideEffects[], intents[], reason }`.
-Side effects are `saas_pause` / `saas_resume`; intents are `{ pipeline: "active_client", stage: <BillingState>, fields }`. Both are only
+Side effects are `saas_pause` / `saas_resume`; intents are `{ pipeline: "active_client", stage: <BillingState>, fields }` or, for a member still in onboarding, `{ pipeline: "onboarding", stage: <onboarding key> }` (see *Engine completion*). Both are only
 *data* here.
 
 ## Write path and modes (`lib/billing/state/apply.ts`)
@@ -104,15 +104,17 @@ does nothing unless `DUNNING_MODE=live`. The exact GHL workflow to build is in `
 **GHL → server routes** (`GHL_EVENTS_SECRET`, header `x-reiblast-events-secret`, timing-safe; GhlEvent recorded first; always 200):
 `POST /api/webhooks/ghl/stage-changed` `{ contactId, pipeline, stage }` — onboarding: updates `GhlAccount.onboardingStage` (the only DB
 write outside the engine); `active_client`: a stage key becomes a **command** (trigger `command:<stage>:<ghlEventId>`, so a later manual
-move is never mistaken for an earlier one), `paused_confirm` becomes `pause_confirmed`, anything else is ignored. A repeat of the same
+move is never mistaken for an earlier one), a legacy `paused_confirm` becomes a no-op `pause_confirmed`, anything else is ignored. A repeat of the same
 move within 60 s is a duplicate delivery. `POST /api/webhooks/ghl/invoice-event` `{ invoiceId }` — the invoice is fetched by id (the HQ key
 has invoices read scope); only an expired or voided **core recovery invoice** (`source: payments_subscription`) becomes `invoice_expired`.
-Failed events are retried by the replay job, dispatched by source.
+**This route is left in place but is unused**: no GHL workflow calls it. The nightly `sub_sweep` invoice check is the source of
+`invoice_expired`. Failed events are retried by the replay job, dispatched by source.
 
-**The debounced pause.** A strike, an expired invoice or a manual move to Paused changes the state and emits a `paused` intent — but never
-`saas_pause`. GHL's Paused workflow waits 15 minutes and then sends `paused_confirm`; if the account is still paused the decision carries
-`saas_pause`, otherwise it is recorded as cured. A cure resumes immediately. `inactive`/`churned` commands and sweep-driven churn pause at
-once (deliberate). An engine-sent stage move echoes back through `stage-changed` as a confirmation (no intent), so there is no loop.
+**Pausing.** A strike (the 3rd), an expired invoice or a manual move to Paused changes the state, emits a `paused` intent **and** carries
+`saas_pause` in the same decision (executed only in live mode, retried with backoff). There is no 15-minute debounce and no `paused_confirm`
+step. A cure resumes immediately. `inactive`/`churned` commands and sweep-driven churn pause at once. An engine-sent stage move echoes
+back through `stage-changed`; because the DB state already matches it is recorded as a confirmation (no intent), so there is no loop — there
+is no separate echo-detection mechanism.
 
 **Live branch** (`applyDunning`, unreachable unless `DUNNING_MODE=live`). One transaction, under the per-account advisory lock, persists
 `GhlAccount` (state, strikes, pause reason, trial fields), mirrors `User.warningCount` and — only when it is currently `active`,
@@ -121,6 +123,63 @@ removable once the tools app stops reading `User`), writes the decision (mode `l
 sends the intents and executes the side effects; failures are recorded on the decision/intent, never rolled back. Idempotent on
 `(trigger, account, mode)`. **Even in live mode it acts only for `DUNNING_LIVE_ACCOUNTS`**; every other account is processed as shadow.
 Until cutover the old routes still change `User`, so live mode is for a named test account only.
+
+## Engine completion (still shadow)
+
+Everything below records decisions and intents (`skipped_shadow`); the only live send is the Clients handoff, and only when
+`CLIENT_HANDOFF=live`.
+
+### Where a member's card lives: `GhlAccount.activeClientSince`
+
+Null = still in onboarding; set = handed off to the Clients pipeline. `routeIntents` (`transition.ts`, applied to every decision) retargets
+the decision's intents. The state, strikes and side effects are identical either way; only the intents differ.
+
+| Decision | Handed off (`activeClientSince` set) | Still in onboarding |
+|---|---|---|
+| → `payment_failed` | Clients **Payment Failed** | Onboarding **Payment Failed** (key `payment_failed`) |
+| → `paused` | Clients **Paused** | Onboarding **Paused** (key `paused`) |
+| cure: `payment_failed`/`paused` → `active` (core success, or a recharge leaving balance ≥ 0, or a manual `active`) | Clients **Active Member** | back to the onboarding stage matching `onboardingProgress` — exactly that stage, never forward, never a side stage; no recorded progress → no card move (the decision's reason says so) |
+| trial / `active` / `inactive` / `churned`, trial-field refreshes | Clients intents as before | **nothing** is sent |
+
+Onboarding keys live in `lib/billing/onboardingStages.ts` (`payment_failed`, `paused` added; `ONBOARDING_KEY_TO_STAGE_NAME` maps every key to
+the exact stage name in `lib/billing/stages.ts`, enforced by a test). The onboarding workflow's If/Else needs the two new keys (`docs/ghl-workflows.md` A2).
+The shadow dedupe key of an onboarding intent carries `onboarding:` so it can never collide with a Clients intent for the same trigger.
+
+### The Clients handoff (`lib/billing/clientHandoff.ts`)
+
+When the onboarding stage-changed webhook reports **A2P Approved** (idempotent — a redelivery or a replay retry cannot send twice) and
+`activeClientSince` is null, the server enqueues ONE `active_client` intent placing the card by `GhlAccount.billingState`: trial → Trial,
+active → Active Member, payment_failed → Payment Failed, paused → Paused (inactive/churned → Inactive/Churned). The receiver is the
+ordinary Active Client workflow (`GHL_INTENT_URL_ACTIVE_CLIENT`), which creates or updates the opportunity. A **null** `billingState` sends
+nothing: the event is noted and a `GhlEvent` of source `client_handoff_review` is recorded, and `activeClientSince` stays null.
+
+`CLIENT_HANDOFF=live|off` (default **off**) gates it, independent of `DUNNING_MODE` and `DUNNING_LIVE_ACCOUNTS`:
+
+- **live** — records the intent as `pending` (dedupe `handoff:<ghlAccountId>`), sets `activeClientSince`, sends it. A failed send is retried (max 5)
+  by the replay job / after each processed payment event even while `DUNNING_MODE=shadow` (only `handoff:` rows are retried in that case).
+- **off** — records a `skipped_shadow` preview (`handoff-shadow:<ghlAccountId>`) and writes nothing else: `activeClientSince` stays null, so
+  the member is still handed off if the flag is later turned on. **Gap to know about:** a member who reaches A2P Approved while the flag
+  is off is not handed off retroactively (progress is already at the maximum, so no new event arrives). Those members are exactly the
+  `handoff-shadow:` rows; hand them off with the backfill (once their Clients card exists) or by re-sending A2P Approved.
+
+`scripts/billing/backfill-active-client-since.ts` sets `activeClientSince` for members who **already** have a Clients-pipeline opportunity
+(read-only `opportunities/search` per member, `GHL_CLIENTS_PIPELINE_ID`). Dry-run by default, production guard like the other backfills;
+`--estimate-only` prints the member count and call estimate and exits before any GHL call. A lookup error is listed, never read as "no card".
+
+### Pause timing (B6)
+
+The 15-minute `paused_confirm` requirement is gone — see *Pausing* above. The Paused-stage workflow in GHL only needs to send the card-update message.
+
+### Cuts
+
+- **No echo detection** (B7): an engine move echoing back is just a stage-change whose state already matches (a confirmation).
+- **No invoice-event workflow** (B8): the nightly `sub_sweep` invoice check is the source of `invoice_expired`; the route stays, unused.
+
+### Confirmed rules (each has a test in `engineCompletion.test.ts`)
+
+- A payment event never moves an **inactive** or **churned** account ("state excludes action").
+- A **manual_killswitch** pause (and a voluntary one) is never auto-resumed by a payment: core success and a recharge with balance ≥ 0 both leave it paused, with no `saas_resume`.
+- **trial_ended_unconverted** → `payment_failed` with a core failure open (only from trial; coverage still protects).
 
 ## Not built yet
 

@@ -122,7 +122,7 @@ export async function applyDunning(db: Db, input: ApplyInput, opts: { mode?: Mod
 
   const account = await db.ghlAccount.findUnique({
     where: { id: input.ghlAccountId },
-    select: { id: true, accountType: true, contactId: true, locationId: true, coreCoveredUntil: true, trialOffer: true, trialEndsAt: true, userId: true },
+    select: { id: true, accountType: true, contactId: true, locationId: true, coreCoveredUntil: true, trialOffer: true, trialEndsAt: true, userId: true, activeClientSince: true, onboardingProgress: true },
   });
   if (!account) return { status: "skipped", why: "account not found" };
   if (account.accountType !== "member") return { status: "skipped", why: "not a member account" };
@@ -167,7 +167,7 @@ export async function applyDunning(db: Db, input: ApplyInput, opts: { mode?: Mod
       // The projection may have moved while we were reading; a read we didn't make degrades to "unknown", never to a guess.
       let reading = balance;
       if (needsBalance(cur, input.event) && !reading) reading = { status: "unknown", why: "state changed while processing" };
-      const ctx: Context = { now: mode === "replay" ? input.eventAt : now, coveredUntil: account.coreCoveredUntil, walletBalance: reading, subscription };
+      const ctx: Context = { now: mode === "replay" ? input.eventAt : now, coveredUntil: account.coreCoveredUntil, walletBalance: reading, subscription, routing: { handedOff: !!account.activeClientSince, onboardingProgress: account.onboardingProgress } };
       const decision = decide(cur, input.event, ctx);
       const row = await tx.dunningDecision.create({
         data: decisionRow({ ghlAccountId: input.ghlAccountId, trigger: input.trigger, eventAt: input.eventAt, event: input.event, from: cur, decision, mode, balance: reading }),

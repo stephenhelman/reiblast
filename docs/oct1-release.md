@@ -398,3 +398,22 @@ Both prompt `Type the host name to confirm:` — type the host exactly as printe
   empty or explainable), `GhlAccounts with no subscription`, and `trialOffer values set` (only real "N Day Trial" names).
 - `--apply` re-prints the same report, writes W rows, and ends with `Done.` Re-running is safe: seeded accounts are then
   skipped as "DB state wins".
+
+## Engine completion (billing/engine-completion) — still shadow
+
+Nothing here turns the dunning engine on. Release notes for the pieces that touch production:
+
+- **Migration (additive):** `20261001120000_add_active_client_since` adds nullable `GhlAccount.activeClientSince`. Deploy with the usual
+  `PRISMA_TARGET=prod npx prisma migrate deploy`.
+- **New env vars (Vercel, Production):** `CLIENT_HANDOFF` (`live` | `off`, default off — leave off until the A1 workflow is built and the
+  backfill below has run) and `GHL_INTENT_URL_ACTIVE_CLIENT` (the A1 inbound-webhook URL; `docs/ghl-workflows.md`).
+- **Backfill — run BEFORE turning `CLIENT_HANDOFF` on:** sets `activeClientSince` for members who already have a Clients-pipeline opportunity.
+  ```sh
+  DATABASE_URL="$PROD" BILLING_DB_TARGET=prod npx tsx scripts/billing/backfill-active-client-since.ts --i-mean-production --estimate-only   # count + call estimate, no GHL calls
+  DATABASE_URL="$PROD" BILLING_DB_TARGET=prod npx tsx scripts/billing/backfill-active-client-since.ts --i-mean-production                   # read-only lookups, no writes
+  DATABASE_URL="$PROD" BILLING_DB_TARGET=prod npx tsx scripts/billing/backfill-active-client-since.ts --i-mean-production --apply
+  ```
+  One read-only GHL GET per member without `activeClientSince` (250 ms apart). Members with a null `billingState` are called out — seed them (B2) first.
+- **Behaviour changes in shadow:** the engine's recorded `saas_pause` now rides the paused decision (no `paused_confirm`); recorded intents for a
+  member without `activeClientSince` are onboarding intents. Health's shadow-vs-account comparison is unaffected (state is unchanged).
+- Details, the gap for members who reach A2P Approved while `CLIENT_HANDOFF=off`, and the confirmed rules: `docs/dunning-engine.md` → *Engine completion*.

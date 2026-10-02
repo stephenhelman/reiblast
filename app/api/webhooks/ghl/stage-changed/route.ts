@@ -7,8 +7,8 @@ import { customDataStringField } from "@/lib/billing/events/payloadFields";
 // action posts its own default shape; our fields are read from customData first, falling back to a flat top-level
 // field (for manual/curl testing): customData.contactId / customData.pipeline / customData.stage, and optionally
 // customData.secret as an auth fallback when a custom header isn't configurable on the workflow action.
-// onboarding → GhlAccount.onboardingStage (display only). active_client → a dunning-engine command; stage "paused_confirm"
-// (sent by the Paused workflow after its 15-minute wait) confirms a pause. In shadow mode only decisions are recorded.
+// onboarding → GhlAccount.onboardingStage / onboardingProgress (and the Clients handoff on A2P Approved, gated by CLIENT_HANDOFF).
+// active_client → a dunning-engine command. A legacy "paused_confirm" is still parsed but decides nothing. In shadow mode only decisions are recorded.
 export async function POST(req: NextRequest) {
   return handleEventRoute(req, {
     label: "stage-changed",

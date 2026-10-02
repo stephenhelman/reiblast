@@ -1,6 +1,7 @@
 import type { Prisma, PrismaClient } from "@prisma/client";
 import { applyDunning, dunningMode, type ApplyDeps } from "../state/apply";
 import type { BillingState, DunningEvent } from "../state/types";
+import { handoffToClients, HANDOFF_TRIGGER_STAGE } from "../clientHandoff";
 import { isForwardProgress, isKnownOnboardingStage } from "../stages";
 import { customDataField } from "./payloadFields";
 
@@ -14,7 +15,7 @@ import { customDataField } from "./payloadFields";
  * `contactId`/`pipeline`/`stage` are read from `customData` first, falling back to a flat top-level field of the
  * same name so a manual/curl test posting flat JSON still works. "stage" is the opportunity's new stage NAME (not an
  * id) — for the onboarding pipeline it must be one of lib/billing/stages.ts ONBOARDING_STAGE_NAMES; for
- * active_client, one of BILLING_STAGES below (or "paused_confirm").
+ * active_client, one of BILLING_STAGES below (a legacy "paused_confirm" is still accepted and ignored by the engine).
  */
 export const BILLING_STAGES: BillingState[] = ["trial", "active", "payment_failed", "paused", "inactive", "churned"];
 export const PAUSE_CONFIRM_STAGE = "paused_confirm";
@@ -37,7 +38,7 @@ export function parseStagePayload(p: unknown): { ok: true; value: StagePayload }
   return { ok: true, value: { contactId, pipeline: rawPipeline, stage } };
 }
 
-/** active_client stage → engine event: "paused_confirm" is the confirmation, a BillingState key is a command, anything else is ignored. */
+/** active_client stage → engine event: a BillingState key is a command; the legacy "paused_confirm" parses to a no-op event; anything else is ignored. */
 export function eventForStage(stage: string): DunningEvent | null {
   if (stage === PAUSE_CONFIRM_STAGE) return { kind: "pause_confirmed" };
   return (BILLING_STAGES as string[]).includes(stage) ? { kind: "command", stage: stage as BillingState } : null;
@@ -61,7 +62,7 @@ export async function processStageChanged(eventId: string, opts: { db: PrismaCli
     }
     const { contactId, pipeline, stage } = parsed.value;
 
-    const account = await db.ghlAccount.findFirst({ where: { contactId, accountType: "member" }, select: { id: true, onboardingStage: true, onboardingProgress: true } });
+    const account = await db.ghlAccount.findFirst({ where: { contactId, accountType: "member" }, select: { id: true, onboardingStage: true, onboardingProgress: true, activeClientSince: true } });
     if (!account) {
       await done("ignored: no member account for this contact");
       return "processed";
@@ -100,7 +101,14 @@ export async function processStageChanged(eventId: string, opts: { db: PrismaCli
         return "processed";
       }
 
-      await done(null);
+      // Reaching A2P Approved is the handoff to the Clients pipeline (gated by CLIENT_HANDOFF; idempotent, so a redelivery or a replay
+      // retry is safe). A handoff failure fails the event so the replay job retries it.
+      let note: string | null = null;
+      if (stage === HANDOFF_TRIGGER_STAGE && !account.activeClientSince) {
+        const h = await handoffToClients(db, account.id, { env: opts.deps?.env, send: opts.deps?.send });
+        if (h.status === "no_billing_state") note = "handoff: null billingState — no Clients intent, listed for review (client_handoff_review)";
+      }
+      await done(note);
       return "processed";
     }
 

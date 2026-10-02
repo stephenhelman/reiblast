@@ -8,13 +8,15 @@ import type { BillingState, Decision, Intent } from "../state/types";
  * (DUNNING_LIVE_ACCOUNTS); otherwise it is stored as "skipped_shadow" and nothing leaves the server.
  */
 export const MAX_INTENT_ATTEMPTS = 5;
+/** dedupeKey prefix of a real (CLIENT_HANDOFF=live) Clients handoff intent: `handoff:<ghlAccountId>`. */
+export const HANDOFF_DEDUPE_PREFIX = "handoff:";
 const SEND_TIMEOUT_MS = 10_000;
 
 export type IntentBody = {
   contactId: string;
   pipeline: "active_client" | "onboarding";
-  /** Equals a BillingState value for active_client. */
-  stage: BillingState;
+  /** Equals a BillingState value for active_client; an ONBOARDING_STAGE_KEYS value for onboarding. */
+  stage: string;
   fields: { pause_reason: string | null; trial_offer: string | null; trial_end_date: string | null };
 };
 
@@ -57,7 +59,7 @@ export async function enqueueIntents(db: Db, i: EnqueueInput): Promise<string[]>
           kind,
           pipeline: intent.pipeline,
           payload: body as unknown as Prisma.InputJsonObject,
-          dedupeKey: `${i.mode}:${i.account.id}:${i.trigger}:${kind}:${intent.stage}`,
+          dedupeKey: `${i.mode}:${i.account.id}:${i.trigger}:${kind}:${intent.pipeline === "onboarding" ? "onboarding:" : ""}${intent.stage}`,
           status: i.mode === "live" && i.sendable ? "pending" : "skipped_shadow",
           lastError: i.mode === "live" && !i.sendable ? "account not allowlisted for live (DUNNING_LIVE_ACCOUNTS)" : null,
         },
@@ -144,9 +146,17 @@ export async function sendIntent(db: Db, id: string, deps: SendDeps = {}): Promi
  */
 export async function sendPendingIntents(db: Pick<PrismaClient, "ghlIntent">, opts: { limit?: number; onlyIds?: string[]; deps?: SendDeps } = {}): Promise<{ sent: number; failed: number }> {
   const env = opts.deps?.env ?? process.env;
-  if ((env.DUNNING_MODE ?? "shadow") !== "live") return { sent: 0, failed: 0 };
+  const dunningLive = (env.DUNNING_MODE ?? "shadow") === "live";
+  // The Clients handoff has its own switch: with DUNNING_MODE=shadow, only handoff rows (and only when CLIENT_HANDOFF=live) are retried.
+  const handoffLive = env.CLIENT_HANDOFF === "live";
+  if (!dunningLive && !handoffLive) return { sent: 0, failed: 0 };
   const rows = await db.ghlIntent.findMany({
-    where: { status: { in: ["pending", "failed"] }, attempts: { lt: MAX_INTENT_ATTEMPTS }, ...(opts.onlyIds ? { id: { in: opts.onlyIds } } : {}) },
+    where: {
+      status: { in: ["pending", "failed"] },
+      attempts: { lt: MAX_INTENT_ATTEMPTS },
+      ...(dunningLive ? {} : { dedupeKey: { startsWith: HANDOFF_DEDUPE_PREFIX } }),
+      ...(opts.onlyIds ? { id: { in: opts.onlyIds } } : {}),
+    },
     orderBy: { createdAt: "asc" },
     take: opts.limit ?? 20,
     select: { id: true },

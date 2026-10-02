@@ -36,12 +36,12 @@ describe("shadow write path", () => {
     expect(db.decisions).toHaveLength(1);
   });
 
-  it("three counted strikes walk the projection: payment_failed → payment_failed → paused (non_payment); the pause itself waits for pause_confirmed", async () => {
+  it("three counted strikes walk the projection: payment_failed → payment_failed → paused (non_payment); the third strike carries saas_pause", async () => {
     const db = makeFake([member()]);
     for (const [i, h] of [3, 2, 1].entries()) await applyDunning(db, failed(`s${i}`, hoursAgo(h)), { mode: "shadow", deps: deps() });
     expect(db.decisions.map((d: any) => [d.fromState, d.toState, d.toStrikes])).toEqual([["active", "payment_failed", 1], ["payment_failed", "payment_failed", 2], ["payment_failed", "paused", 3]]);
     expect(db.decisions[2].pauseReason).toBe("non_payment");
-    expect(db.decisions[2].sideEffects).toEqual([]); // no saas_pause at the strike
+    expect(db.decisions[2].sideEffects).toEqual([{ type: "saas_pause" }]); // recorded in shadow; executed only in live
     expect(db.decisions[2].intents).toEqual([expect.objectContaining({ pipeline: "active_client", stage: "paused" })]);
   });
 

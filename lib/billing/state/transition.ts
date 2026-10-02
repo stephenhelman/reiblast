@@ -1,3 +1,4 @@
+import { keyForProgressStage } from "../onboardingStages";
 import { isNeg } from "../reports/money";
 import { STRIKE_LIMIT, TRIAL_OFFER_RE, type BillingState, type Context, type Decision, type DunningEvent, type Intent, type Snapshot } from "./types";
 
@@ -14,8 +15,12 @@ import { STRIKE_LIMIT, TRIAL_OFFER_RE, type BillingState, type Context, type Dec
  *  - Core failure → payment_failed, NO strike — unless covered (now < coreCoveredUntil). Expired invoice → paused/expired_invoice
  *    (same coverage protection). Core success → active from trial / payment_failed / paused(expired_invoice|non_payment).
  *  - trial_auth success → trial, only from null/trial. inactive & churned: payments change nothing ("state excludes action").
- *  - saas_pause is NEVER emitted by the strike or the expiry itself: a pause executes only on `pause_confirmed` (after GHL's 15-minute
- *    wait, if the account is still paused) — or immediately for the deliberate inactive/churned commands and sweep-driven churn.
+ *  - saas_pause is part of the decision that pauses: the 3rd strike, an expired invoice, a manual move to Paused, and the deliberate
+ *    inactive/churned commands / sweep-driven churn. (Still executed only in live mode.) There is no 15-minute debounce any more;
+ *    `pause_confirmed` is parsed but decides nothing.
+ *  - Intent routing (routeIntents): a handed-off member (activeClientSince) gets Clients-pipeline intents; a member still in onboarding gets
+ *    onboarding intents instead — payment_failed / paused, and on a cure (payment_failed|paused → active) a return to the stage matching
+ *    onboardingProgress (never forward, never a side stage). Nothing else is sent for them.
  *  - Subscription events (nightly sweep): canceled/expired → churned (deferred while covered, except a cancel during the trial);
  *    trial ended unconverted → payment_failed (core failure open); newly trialing → trial.
  *  - Commands (manual stage moves) apply from any state; a command whose stage already matches is a confirmation that
@@ -38,7 +43,7 @@ const cleanBase = (s: Snapshot): Decision => ({
 
 const noop = (s: Snapshot, reason: string): Decision => ({ ...cleanBase(s), reason });
 
-const intent = (stage: BillingState, d: Pick<Decision, "warningCount" | "pauseReason" | "trialOffer" | "trialEndsAt" | "trialChanged">, extra: Record<string, unknown> = {}): Intent => ({
+const intent = (stage: BillingState, d: Pick<Decision, "warningCount" | "pauseReason" | "trialOffer" | "trialEndsAt" | "trialChanged">, extra: Record<string, unknown> = {}): Extract<Intent, { pipeline: "active_client" }> => ({
   pipeline: "active_client",
   stage,
   fields: { warningCount: d.warningCount, pauseReason: d.pauseReason, ...(d.trialChanged ? { trialOffer: d.trialOffer, trialEndsAt: d.trialEndsAt?.toISOString() ?? null } : {}), ...extra },
@@ -69,6 +74,31 @@ export function needsSubscription(s: Snapshot, e: DunningEvent): boolean {
 }
 
 export function decide(s: Snapshot, e: DunningEvent, ctx: Context): Decision {
+  return routeIntents(s, decideCore(s, e, ctx), ctx);
+}
+
+/**
+ * Re-target the decision's (Clients-pipeline) intents for a member who has not been handed off yet. Pure; never touches state.
+ * Handed-off (or routing omitted) → unchanged.
+ */
+export function routeIntents(s: Snapshot, d: Decision, ctx: Context): Decision {
+  if (!ctx.routing || ctx.routing.handedOff || d.intents.length === 0) return d;
+  const leavingBillingSideStage = s.state === "payment_failed" || s.state === "paused";
+  const intents: Intent[] = [];
+  let note = "";
+  for (const i of d.intents) {
+    if (i.pipeline !== "active_client" || i.kind === "fields") continue; // contact-field refreshes ride the Clients workflow only
+    if (i.stage === "payment_failed" || i.stage === "paused") intents.push({ pipeline: "onboarding", stage: i.stage, fields: i.fields });
+    else if ((i.stage === "active" || i.stage === "trial") && leavingBillingSideStage) {
+      const key = keyForProgressStage(ctx.routing.onboardingProgress);
+      if (key) intents.push({ pipeline: "onboarding", stage: key, fields: i.fields });
+      else note = " (onboarding card not moved back: no recorded progress stage)";
+    }
+  }
+  return { ...d, intents, reason: d.reason + note };
+}
+
+function decideCore(s: Snapshot, e: DunningEvent, ctx: Context): Decision {
   if (e.kind === "command") return decideCommand(s, e.stage);
   if (e.kind === "pause_confirmed") return decidePauseConfirmed(s);
   if (e.kind === "subscription_canceled" || e.kind === "subscription_expired") return decideSubscriptionEnd(s, e, ctx);
@@ -88,7 +118,7 @@ export function decide(s: Snapshot, e: DunningEvent, ctx: Context): Decision {
       const strikes = s.strikes + 1;
       let d: Decision = { ...cleanBase(s), warningCount: strikes };
       if (strikes >= STRIKE_LIMIT) {
-        d = { ...d, pauseReason: "non_payment", reason: `strike ${strikes} of ${STRIKE_LIMIT} (balance ${b.value}${est} < 0) → paused (non_payment); location is paused when the pause is confirmed` };
+        d = { ...d, pauseReason: "non_payment", sideEffects: [{ type: "saas_pause" }], reason: `strike ${strikes} of ${STRIKE_LIMIT} (balance ${b.value}${est} < 0) → paused (non_payment), pause location` };
         return finish(s, moveTo(s, d, "paused"));
       }
       d = { ...d, reason: `strike ${strikes} of ${STRIKE_LIMIT} (balance ${b.value}${est} < 0) → payment_failed` };
@@ -153,7 +183,7 @@ export function decide(s: Snapshot, e: DunningEvent, ctx: Context): Decision {
     case "invoice_expired": {
       if (covered(ctx)) return noop(s, "covered, ignored (expired invoice while now < coreCoveredUntil)");
       if (st === "paused") return finish(s, { ...cleanBase(s), coreFailureOpen: true, reason: `expired invoice recorded; already paused (${s.pauseReason ?? "no reason recorded"})` });
-      const d: Decision = { ...cleanBase(s), coreFailureOpen: true, pauseReason: "expired_invoice", reason: "invoice expired → paused (expired_invoice); location is paused when the pause is confirmed" };
+      const d: Decision = { ...cleanBase(s), coreFailureOpen: true, pauseReason: "expired_invoice", sideEffects: [{ type: "saas_pause" }], reason: "invoice expired → paused (expired_invoice), pause location" };
       return finish(s, moveTo(s, d, "paused"));
     }
   }
@@ -178,10 +208,9 @@ function trialDecision(s: Snapshot, ctx: Context, why: string): Decision {
   return finish(s, st === "trial" ? { ...moved, intents: [{ ...intent("trial", d), kind: "fields" }] } : moved);
 }
 
-/** The Paused workflow's 15-minute wait elapsed: pause the location only if the account is STILL paused. */
+/** Legacy "paused_confirm" (the removed 15-minute debounce): harmless if still delivered — the pause already rode on the paused decision. */
 function decidePauseConfirmed(s: Snapshot): Decision {
-  if (s.state === "paused") return finish(s, { ...cleanBase(s), sideEffects: [{ type: "saas_pause" }], reason: `pause confirmed: still paused (${s.pauseReason ?? "no reason recorded"}) after the wait → saas_pause` });
-  return noop(s, `cured before confirmation, no pause (state ${s.state ?? "unseeded"})`);
+  return noop(s, "pause_confirmed ignored: the pause is part of the paused decision (no confirmation step)");
 }
 
 /** canceled / expired subscription → churned. Deferred while covered — except a cancel DURING the trial, which churns immediately. */
@@ -207,9 +236,9 @@ function decideCommand(s: Snapshot, stage: BillingState): Decision {
   switch (stage) {
     case "paused": {
       const pauseReason = same ? (s.pauseReason ?? "manual_killswitch") : "manual_killswitch";
-      // No side effect here: the pause executes on pause_confirmed (the Paused workflow's 15-minute wait). An echo of a pause the engine
-      // itself sent is a plain confirmation of state.
-      const d: Decision = { ...cleanBase(s), pauseReason, reason: same ? "command paused: already paused — confirmation, no change" : "command paused → paused (manual_killswitch); location is paused when the pause is confirmed" };
+      // A manual move to Paused pauses the location in the same decision. An echo of a pause the engine itself decided (state already
+      // paused) is a plain confirmation: that decision already carried the saas_pause (and its retries), so nothing is re-sent.
+      const d: Decision = { ...cleanBase(s), pauseReason, sideEffects: same ? [] : [{ type: "saas_pause" }], reason: same ? "command paused: already paused — confirmation, no change" : "command paused → paused (manual_killswitch), pause location" };
       return finish(s, moveTo(s, d, "paused"));
     }
     case "inactive": {

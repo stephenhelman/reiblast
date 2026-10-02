@@ -108,11 +108,11 @@ describe("stage-changed: onboarding pipeline (display data only)", () => {
 });
 
 describe("stage-changed: active_client → engine (shadow: decisions only)", () => {
-  it("a manual move to paused is a COMMAND: paused/manual_killswitch, an intent recorded as skipped_shadow, NO side effect and NO account write", async () => {
+  it("a manual move to paused is a COMMAND: paused/manual_killswitch, an intent recorded as skipped_shadow, saas_pause recorded (not executed) and NO account write", async () => {
     const db = setup({ billingState: "active" }, { writable: true });
     await stage({ contactId: CONTACT, pipeline: "active_client", stage: "paused" });
     expect(db.decisions).toHaveLength(1);
-    expect(db.decisions[0]).toMatchObject({ mode: "shadow", eventKind: "command", fromState: "active", toState: "paused", pauseReason: "manual_killswitch", sideEffects: [] });
+    expect(db.decisions[0]).toMatchObject({ mode: "shadow", eventKind: "command", fromState: "active", toState: "paused", pauseReason: "manual_killswitch", sideEffects: [{ type: "saas_pause" }] });
     expect(db.decisions[0].trigger).toBe(`command:paused:${db.events[0].id}`);
     expect(db.intents.map((i: any) => i.status)).toEqual(["skipped_shadow"]);
     expect(db.writes).toEqual([]); // shadow never writes account state
@@ -134,18 +134,18 @@ describe("stage-changed: active_client → engine (shadow: decisions only)", () 
     await stage({ contactId: CONTACT, pipeline: "active_client", stage: "churned" });
     expect(db.decisions[0]).toMatchObject({ toState: "churned", sideEffects: [expect.objectContaining({ type: "saas_pause" })] });
   });
-  it("paused_confirm while STILL paused → the decision's side effect is saas_pause (recorded; nothing executes in shadow)", async () => {
+  it("a legacy paused_confirm is harmless: recorded, decides nothing (no side effect, no state change)", async () => {
     const db = setup({ billingState: "paused", warningCount: 3, pauseReason: "non_payment" });
     await stage({ contactId: CONTACT, pipeline: "active_client", stage: "paused_confirm" });
-    expect(db.decisions[0]).toMatchObject({ eventKind: "pause_confirmed", toState: "paused", sideEffects: [{ type: "saas_pause" }] });
+    expect(db.decisions[0]).toMatchObject({ eventKind: "pause_confirmed", toState: "paused", sideEffects: [] });
     expect(db.decisions[0].trigger).toBe(`command:paused_confirm:${db.events[0].id}`);
     expect(db.writes).toEqual([]);
   });
-  it("paused_confirm after a cure → recorded 'cured before confirmation, no pause'", async () => {
+  it("a legacy paused_confirm for an active account → recorded, no pause", async () => {
     const db = setup({ billingState: "active" });
     await stage({ contactId: CONTACT, pipeline: "active_client", stage: "paused_confirm" });
     expect(db.decisions[0]).toMatchObject({ eventKind: "pause_confirmed", sideEffects: [] });
-    expect(db.decisions[0].reason).toMatch(/cured before confirmation, no pause/);
+    expect(db.decisions[0].reason).toMatch(/no confirmation step/);
   });
   it("payment_failed / trial moves (GHL's own display stages) are recorded as 'command not supported' no-ops; an unknown stage is ignored entirely", async () => {
     const db = setup({ billingState: "active" });
@@ -202,13 +202,13 @@ describe("invoice-event route", () => {
     expect(db.events).toHaveLength(0);
     expect(invoices.fetches).toBe(0);
   });
-  it("an expired (past due, unpaid) CORE recovery invoice → invoice_expired → paused/expired_invoice, no saas_pause", async () => {
+  it("an expired (past due, unpaid) CORE recovery invoice → invoice_expired → paused/expired_invoice with saas_pause", async () => {
     invoices.byId.INVOICE0000001 = inv();
     const db = setup({ billingState: "active" });
     await invoice({ invoiceId: "INVOICE0000001" });
     expect(db.events[0]).toMatchObject({ source: "invoice", externalId: "INVOICE0000001" });
     expect(db.decisions).toHaveLength(1);
-    expect(db.decisions[0]).toMatchObject({ trigger: "invoice:INVOICE0000001", eventKind: "invoice_expired", toState: "paused", pauseReason: "expired_invoice", coreFailureOpen: true, sideEffects: [] });
+    expect(db.decisions[0]).toMatchObject({ trigger: "invoice:INVOICE0000001", eventKind: "invoice_expired", toState: "paused", pauseReason: "expired_invoice", coreFailureOpen: true, sideEffects: [{ type: "saas_pause" }] });
     expect(db.intents.map((i: any) => i.status)).toEqual(["skipped_shadow"]);
   });
   it("a voided unpaid invoice expires too", async () => {

@@ -8,7 +8,7 @@ shadow mode (`DUNNING_MODE` unset/`shadow`): it records decisions and `skipped_s
 | | Before (today) | After |
 |---|---|---|
 | Who counts strikes / decides pauses | `payment-failed` route + `User.warningCount` | the engine (`GhlAccount`, `DunningDecision`) |
-| Who pauses / resumes the location | `pause` / `active` routes (`pauseLocation` / `unpauseLocation`) | the engine: resume on cure, pause only on `paused_confirm` |
+| Who pauses / resumes the location | `pause` / `active` routes (`pauseLocation` / `unpauseLocation`) | the engine: resume on cure, pause in the same decision that pauses (no confirmation step) |
 | Who moves GHL pipeline stages | GHL workflows + the routes' `moveToStage` | the engine's intents → the "Billing intent" workflow |
 | What gates tools access | `User.status` | still `User.status` (mirrored by the engine) until the tools repoint |
 
@@ -19,7 +19,7 @@ shadow mode (`DUNNING_MODE` unset/`shadow`): it records decisions and `skipped_s
 2. Billing intent — Onboarding → `GHL_INTENT_URL_ONBOARDING`
 3. Stage changed — Active Client → `/api/webhooks/ghl/stage-changed`
 4. Stage changed — Onboarding → `/api/webhooks/ghl/stage-changed`
-5. Paused — confirm after 15 minutes (wait 15 → `paused_confirm` → if still Paused, send the card-update message)
+5. ~~Paused — confirm after 15 minutes~~ — removed: the pause is part of the paused decision. Optionally keep a Paused-stage workflow that only sends the card-update message
 6. Invoice — expired / voided → `/api/webhooks/ghl/invoice-event`
 7. Scheduled: `sub_sweep` nightly (next to the existing four)
 
@@ -101,7 +101,7 @@ members and that the shadow hook records decisions after each payment.
 
 **2. Soak in shadow (≥ 1–2 weeks).** Compare, per account, the shadow decisions against what the old routes actually did (`User.status`,
 `warningCount`, `Transaction`). Every mismatch is a bug to fix or an intended difference to accept (auto-resume on a recharge that clears
-the balance, the 15-minute pause debounce). Health's "differs" count should be small and explained.
+the balance). Health's "differs" count should be small and explained.
 
 **3. Build the GHL workflows** (section 2), disabled; send test payloads to `stage-changed` / `invoice-event`; confirm `GhlEvent` rows and decisions.
 
@@ -124,7 +124,7 @@ failures (warning for pause) are built. Production access to `getBillingDb()`/ev
 
 **7. Canary.** A **dedicated test sub-account you own, with a card you control — not a real member.** Create it (and its GhlAccount/contact)
 first, set `DUNNING_LIVE_ACCOUNTS=<that account>`, then `DUNNING_MODE=live`. Only the canary is acted on; every other account stays shadow.
-Drive it through: a failed recharge with a negative balance ×3 → paused intent → 15 minutes → `saas_pause`; a recharge that clears the
+Drive it through: a failed recharge with a negative balance ×3 → paused intent + `saas_pause` at once; a recharge that clears the
 balance → resume; a manual stage move; a canceled subscription; an expired invoice. Check the decision rows, intents (`sent`), the GHL stage,
 the location's pause state and `User.status` at each step.
 
@@ -146,8 +146,8 @@ re-enable the old workflows and disable the new ones. Effects already executed (
 - **Stage names:** the stage keys (`trial`, `active`, `payment_failed`, `paused`, `inactive`, `churned`) are fixed; GHL stage *names* are a GHL-side
   mapping of those keys. When building the intent workflow, verify the If/Else branches match the keys **exactly** (case, underscores) —
   an unmatched key would silently do nothing.
-- **Card-update message** stays in the Paused workflow (after the 15-minute wait, if still Paused). The server sends no comms.
-- **15-minute wait is sufficient** as the debounce before `saas_pause`; no extra debounce.
+- **Card-update message** stays in a GHL Paused-stage workflow. The server sends no comms.
+- **No pause debounce** (the 15-minute `paused_confirm` wait was removed): `saas_pause` rides the paused decision, and a failed pause is retried with backoff (see Side-effect retries).
 - **`unpaid` subscriptions stay informational** (Health list only, no engine event).
 - **Side effects** (`saas_pause` / `saas_resume`) **retry automatically, up to 5 attempts with backoff (5m/30m/2h/6h/24h), via the replay job
   and opportunistically after each processed payment event.** An exhausted `saas_resume` raises an ALERT on Health (a member left paused

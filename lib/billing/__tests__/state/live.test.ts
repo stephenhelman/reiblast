@@ -22,34 +22,27 @@ const failed = (id: string, at = hoursAgo(1)) => ({ ghlAccountId: "A1", trigger:
 const strikeTwo = { billingState: "payment_failed", warningCount: 2 };
 
 describe("live branch (only reachable with DUNNING_MODE=live)", () => {
-  it("the 3rd strike persists account + User in ONE transaction, writes a live decision, enqueues an intent, sends it — and does NOT pause the location", async () => {
+  it("the 3rd strike persists account + User in ONE transaction, writes a live decision, enqueues an intent, sends it — and pauses the location in the same decision", async () => {
     const { db, calls, deps } = rig(strikeTwo);
     const r = await applyDunning(db, failed("s3"), { mode: "live", deps: deps() });
     expect(r).toMatchObject({ status: "recorded", mode: "live" });
     expect(db.decisions).toHaveLength(1);
-    expect(db.decisions[0]).toMatchObject({ mode: "live", toState: "paused", toStrikes: 3, pauseReason: "non_payment", sideEffects: [] });
+    expect(db.decisions[0]).toMatchObject({ mode: "live", toState: "paused", toStrikes: 3, pauseReason: "non_payment", sideEffects: [expect.objectContaining({ type: "saas_pause", executedAt: expect.any(String) })] });
     expect(db.writes.filter((w: string) => w.startsWith("ghlAccount"))).toHaveLength(1);
     expect(db.users[0]).toMatchObject({ status: "suspended", warningCount: 3 }); // User mirror while User is the live gate
     expect(db.intents).toHaveLength(1);
     expect(db.intents[0]).toMatchObject({ status: "sent", attempts: 1, kind: "stage" });
     expect(calls.posts).toEqual([["https://hooks.example.test/active", expect.objectContaining({ contactId: "CONTACT_A1", stage: "paused", fields: expect.objectContaining({ pause_reason: "non_payment" }) })]]);
-    expect(calls.pause).toEqual([]); // saas_pause waits for pause_confirmed
+    expect(calls.pause).toEqual(["LOC_A1"]); // no 15-minute confirmation any more
   });
 
-  it("pause_confirmed while still paused executes saas_pause (and records that it ran)", async () => {
+  it("a legacy pause_confirmed decides nothing: no pause call, no intent", async () => {
     const { db, calls, deps } = rig({ billingState: "paused", warningCount: 3, pauseReason: "non_payment" }, { status: "suspended", warningCount: 3 });
     const r = await applyDunning(db, { ghlAccountId: "A1", trigger: "command:paused_confirm:e1", event: { kind: "pause_confirmed" }, eventAt: hoursAgo(0.1) }, { mode: "live", deps: deps() });
     expect(r.status).toBe("recorded");
-    expect(calls.pause).toEqual(["LOC_A1"]);
-    expect(db.decisions[0].sideEffects).toEqual([expect.objectContaining({ type: "saas_pause", executedAt: expect.any(String) })]);
-    expect(db.intents).toHaveLength(0); // nothing changed state → no intent
-  });
-
-  it("pause_confirmed after a cure: no pause at all", async () => {
-    const { db, calls, deps } = rig({ billingState: "active" });
-    await applyDunning(db, { ghlAccountId: "A1", trigger: "command:paused_confirm:e2", event: { kind: "pause_confirmed" }, eventAt: hoursAgo(0.1) }, { mode: "live", deps: deps() });
     expect(calls.pause).toEqual([]);
-    expect(db.decisions[0].reason).toMatch(/cured before confirmation, no pause/);
+    expect(db.decisions[0].sideEffects).toEqual([]);
+    expect(db.intents).toHaveLength(0);
   });
 
   it("a cure (recharge succeeded, balance >= 0) resumes the location immediately and reactivates the User", async () => {

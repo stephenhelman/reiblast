@@ -46,7 +46,7 @@ export const runSubSweep: JobFn = async (ctx) => {
 
   /** Run (or preview) one engine event for the account owning `contactId`. */
   async function fire(contactId: string, event: DunningEvent, trigger: string, info?: SubscriptionInfo | null) {
-    const account = await db.ghlAccount.findFirst({ where: { contactId, accountType: "member" }, select: { id: true, coreCoveredUntil: true } });
+    const account = await db.ghlAccount.findFirst({ where: { contactId, accountType: "member" }, select: { id: true, coreCoveredUntil: true, activeClientSince: true, onboardingProgress: true } });
     if (!account) return bump("noAccount");
     if (emitting) {
       const r = await applyDunning(db, { ghlAccountId: account.id, trigger, event, eventAt: ctx.now, subscriptionInfo: info }, { mode, deps: { now: () => ctx.now } }); // the job's clock, so coverage is judged at the sweep's own time
@@ -61,7 +61,7 @@ export const runSubSweep: JobFn = async (ctx) => {
     // preview: decide against the current shadow projection, write nothing
     const proj = await loadProjection(db, account.id, "shadow");
     if (!proj) return bump("noAccount");
-    const d = decide(proj, event, { now: ctx.now, coveredUntil: account.coreCoveredUntil, subscription: info ?? undefined });
+    const d = decide(proj, event, { now: ctx.now, coveredUntil: account.coreCoveredUntil, subscription: info ?? undefined, routing: { handedOff: !!account.activeClientSince, onboardingProgress: account.onboardingProgress } });
     bump(`wouldEmit:${event.kind}`);
     bump(d.noop ? "wouldNoop" : "wouldChange");
     bump(`wouldTransition:${proj.state ?? "unseeded"}→${d.nextState ?? "—"}${d.noop ? " (no change)" : ""} on ${event.kind}`);
