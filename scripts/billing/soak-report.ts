@@ -147,7 +147,7 @@ async function main() {
   console.log(`\nIntents in period: ${intents.length} (skipped_shadow ${intents.length - live.length}, non-shadow ${live.length}); failed/stuck non-shadow: ${stuck.length}`);
   for (const i of stuck) console.log(`  ${label(byId.get(i.ghlAccountId))}  ${i.pipeline}/${i.kind} ${i.status} attempts=${i.attempts} since ${iso(i.createdAt)} ${i.lastError ?? ""}`);
 
-  let unknown = 0, nameForm = 0;
+  let unknown = 0;
   const badStages: string[] = [];
   for (const e of stageEvents) {
     const p = parseStage(e.payload);
@@ -158,9 +158,8 @@ async function main() {
     }
     const v = classifyStageName(p.pipeline, p.stage);
     if (v === "unknown") { unknown++; badStages.push(`  ${iso(e.receivedAt)} ${maskId(e.externalId)} ${p.pipeline} -> "${p.stage}" [unknown]`); }
-    else if (v === "name-form") { nameForm++; badStages.push(`  ${iso(e.receivedAt)} ${maskId(e.externalId)} ${p.pipeline} -> "${p.stage}" [Clients stage NAME; the engine only accepts lowercase keys, so this is IGNORED]`); }
   }
-  console.log(`\nstage_change events: ${stageEvents.length}; unknown stage names: ${unknown}; Clients stage names sent in name form (ignored by engine): ${nameForm}`);
+  console.log(`\nstage_change events: ${stageEvents.length}; unknown stage names: ${unknown}`);
   for (const l of badStages.slice(0, 40)) console.log(l);
   if (badStages.length > 40) console.log(`  ... ${badStages.length - 40} more`);
 

@@ -1,4 +1,4 @@
-import { CLIENTS_STAGES, isKnownOnboardingStage } from "../stages";
+import { billingStateForClientsStage, isKnownOnboardingStage } from "../stages";
 
 /**
  * Pure logic behind scripts/billing/soak-report.ts (the shadow-period soak report). No db access here: the script reads rows and hands
@@ -181,19 +181,12 @@ export function hasActivity(decisions: DecisionLite[], legacy: LegacyEvidence): 
 
 // ── 4. health ───────────────────────────────────────────────────────────────
 
-export type StageVerdict = "known" | "name-form" | "unknown";
+export type StageVerdict = "known" | "unknown";
 
-/**
- * How the stage-changed handler (lib/billing/events/stageChanged.ts) treats a stage string. active_client accepts ONLY the lowercase
- * BillingState keys (+ legacy "paused_confirm"); a Clients stage NAME such as "Paused" is not a command and is ignored by the engine,
- * so it is reported as "name-form" rather than silently counted as fine.
- */
+/** Whether the stage-changed handler (lib/billing/events/stageChanged.ts) recognizes a stage string: onboarding names; Clients names or lowercase keys (+ legacy "paused_confirm"). */
 export function classifyStageName(pipeline: string, stage: string): StageVerdict {
   if (pipeline === "onboarding") return isKnownOnboardingStage(stage) ? "known" : "unknown";
-  if (pipeline === "active_client") {
-    if (["trial", "active", "payment_failed", "paused", "inactive", "churned", "paused_confirm"].includes(stage)) return "known";
-    return (CLIENTS_STAGES as readonly string[]).includes(stage) ? "name-form" : "unknown";
-  }
+  if (pipeline === "active_client") return stage === "paused_confirm" || billingStateForClientsStage(stage) ? "known" : "unknown";
   return "unknown";
 }
 

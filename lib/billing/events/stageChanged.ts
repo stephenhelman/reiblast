@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { applyDunning, dunningMode, type ApplyDeps } from "../state/apply";
 import type { BillingState, DunningEvent } from "../state/types";
 import { handoffToClients, HANDOFF_TRIGGER_STAGE } from "../clientHandoff";
-import { isForwardProgress, isKnownOnboardingStage } from "../stages";
+import { billingStateForClientsStage, isForwardProgress, isKnownOnboardingStage } from "../stages";
 import { customDataField } from "./payloadFields";
 
 /**
@@ -15,7 +15,10 @@ import { customDataField } from "./payloadFields";
  * `contactId`/`pipeline`/`stage` are read from `customData` first, falling back to a flat top-level field of the
  * same name so a manual/curl test posting flat JSON still works. "stage" is the opportunity's new stage NAME (not an
  * id) — for the onboarding pipeline it must be one of lib/billing/stages.ts ONBOARDING_STAGE_NAMES; for
- * active_client, one of BILLING_STAGES below (a legacy "paused_confirm" is still accepted and ignored by the engine).
+ * active_client, either an exact Clients stage NAME (lib/billing/stages.ts CLIENTS_STAGES: "Trial", "Active Member", "Payment Failed",
+ * "Paused", "Inactive", "Churned" — what the workflows actually send) or an exact lowercase BillingState key (BILLING_STAGES below). Matching is
+ * exact (no case folding or trimming beyond the payload parse); anything else is recorded, never guessed. A legacy "paused_confirm" is still
+ * accepted and ignored by the engine.
  */
 export const BILLING_STAGES: BillingState[] = ["trial", "active", "payment_failed", "paused", "inactive", "churned"];
 export const PAUSE_CONFIRM_STAGE = "paused_confirm";
@@ -38,11 +41,20 @@ export function parseStagePayload(p: unknown): { ok: true; value: StagePayload }
   return { ok: true, value: { contactId, pipeline: rawPipeline, stage } };
 }
 
-/** active_client stage → engine event: a BillingState key is a command; the legacy "paused_confirm" parses to a no-op event; anything else is ignored. */
+/** The BillingState an active_client stage means (exact Clients stage name or exact lowercase key), or null. */
+export function billingStateForStage(stage: string): BillingState | null {
+  return billingStateForClientsStage(stage);
+}
+
+/** active_client stage → engine event: a Clients stage name or BillingState key is a command (named by its key); the legacy "paused_confirm" parses to a no-op event; anything else is ignored. */
 export function eventForStage(stage: string): DunningEvent | null {
   if (stage === PAUSE_CONFIRM_STAGE) return { kind: "pause_confirmed" };
-  return (BILLING_STAGES as string[]).includes(stage) ? { kind: "command", stage: stage as BillingState } : null;
+  const state = billingStateForStage(stage);
+  return state ? { kind: "command", stage: state } : null;
 }
+
+/** Stage identity for duplicate detection: "Paused" and "paused" are the same move. */
+const canonicalStage = (pipeline: string, stage: string): string => (pipeline === "active_client" ? (billingStateForStage(stage) ?? stage) : stage);
 
 export type ProcessResult = "processed" | "failed" | "already_processed" | "not_found";
 
@@ -77,7 +89,7 @@ export async function processStageChanged(eventId: string, opts: { db: PrismaCli
       take: 1,
     });
     const prior = latest ? parseStagePayload(latest.payload) : null;
-    if (prior && prior.ok && prior.value.pipeline === pipeline && prior.value.stage === stage) {
+    if (prior && prior.ok && prior.value.pipeline === pipeline && canonicalStage(pipeline, prior.value.stage) === canonicalStage(pipeline, stage)) {
       await done("ignored: duplicate delivery within 60 s");
       return "processed";
     }
@@ -114,10 +126,14 @@ export async function processStageChanged(eventId: string, opts: { db: PrismaCli
 
     const dunningEvent = eventForStage(stage);
     if (!dunningEvent) {
-      await done(`ignored: stage "${stage}" is not a billing stage`);
+      // Unrecognized Clients stage: never guess-map it. Record it separately for investigation (same as onboarding).
+      await db.ghlEvent.create({ data: { source: "stage_change_unmapped", externalId: contactId, payload: event.payload as Prisma.InputJsonValue } });
+      await done(`ignored: unrecognized Clients stage "${stage}" (recorded for investigation)`);
       return "processed";
     }
-    await applyDunning(db, { ghlAccountId: account.id, trigger: `command:${stage}:${event.id}`, event: dunningEvent, eventAt: event.receivedAt }, { mode: dunningMode(opts.deps?.env), deps: opts.deps });
+    // The trigger uses the canonical stage key whichever form arrived, so a name and a key can't produce two different triggers for one move.
+    const triggerStage = dunningEvent.kind === "command" ? dunningEvent.stage : PAUSE_CONFIRM_STAGE;
+    await applyDunning(db, { ghlAccountId: account.id, trigger: `command:${triggerStage}:${event.id}`, event: dunningEvent, eventAt: event.receivedAt }, { mode: dunningMode(opts.deps?.env), deps: opts.deps });
     await done(null);
     return "processed";
   } catch (err) {

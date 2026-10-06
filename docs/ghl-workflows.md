@@ -88,8 +88,9 @@ standard webhook action, with these added under **customData**:
 - `customData.contactId` ← `{{contact.id}}`
 - `customData.pipeline` ← the **literal string** `active_client` (hardcoded in this workflow, not a merge field —
   this is what tells the server which pipeline's workflow a given event came from)
-- `customData.stage` ← the **key** (table in A1), not the display name: use an If/Else on
-  `{{opportunity.pipeline_stage_name}}` to set it, or one workflow per stage with a literal
+- `customData.stage` ← `{{opportunity.pipeline_stage_name}}` (the exact stage **name**: `Trial`, `Active Member`, `Payment Failed`, `Paused`,
+  `Inactive`, `Churned`) **or** the lowercase key (table in A1). The server accepts both, matched exactly (no case folding); any other value is
+  recorded as `stage_change_unmapped` and never guessed
 - `customData.secret` ← only if the header isn't usable on this action (see above)
 
 A manual move by staff is a *command*; an engine move arriving back is a *confirmation*.

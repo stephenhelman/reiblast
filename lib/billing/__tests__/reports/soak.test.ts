@@ -119,12 +119,13 @@ describe("classifyMember", () => {
 });
 
 describe("health helpers", () => {
-  it("stage names: onboarding known/unknown; Clients keys known, names are name-form, others unknown", () => {
+  it("stage names: onboarding known/unknown; Clients keys and names known, others unknown", () => {
     expect(classifyStageName("onboarding", "A2P Approved")).toBe("known");
     expect(classifyStageName("onboarding", "Mystery")).toBe("unknown");
     expect(classifyStageName("active_client", "paused")).toBe("known");
     expect(classifyStageName("active_client", "paused_confirm")).toBe("known");
-    expect(classifyStageName("active_client", "Paused")).toBe("name-form");
+    expect(classifyStageName("active_client", "Paused")).toBe("known");
+    expect(classifyStageName("active_client", "paused ")).toBe("unknown");
     expect(classifyStageName("active_client", "Nope")).toBe("unknown");
     expect(classifyStageName("other", "paused")).toBe("unknown");
   });

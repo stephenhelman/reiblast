@@ -147,15 +147,16 @@ describe("stage-changed: active_client → engine (shadow: decisions only)", () 
     expect(db.decisions[0]).toMatchObject({ eventKind: "pause_confirmed", sideEffects: [] });
     expect(db.decisions[0].reason).toMatch(/no confirmation step/);
   });
-  it("payment_failed / trial moves (GHL's own display stages) are recorded as 'command not supported' no-ops; an unknown stage is ignored entirely", async () => {
+  it("payment_failed / trial moves (GHL's own display stages) are recorded as 'command not supported' no-ops; an unknown stage is ignored and recorded as unmapped", async () => {
     const db = setup({ billingState: "active" });
     for (const s of ["payment_failed", "trial", "Some Custom Stage"]) await stage({ contactId: CONTACT, pipeline: "active_client", stage: s });
     expect(db.decisions).toHaveLength(2);
     expect(db.decisions.every((d: any) => d.fromState === "active" && d.toState === "active" && /command not supported/.test(d.reason))).toBe(true);
     expect(db.intents).toHaveLength(0);
-    expect(db.events).toHaveLength(3);
-    expect(db.events.every((e: any) => e.processedAt)).toBe(true);
-    expect(db.events[2].lastError).toMatch(/not a billing stage/);
+    expect(db.events).toHaveLength(4); // 3 stage_change + 1 stage_change_unmapped for "Some Custom Stage"
+    expect(db.events.filter((e: any) => e.source === "stage_change").every((e: any) => e.processedAt)).toBe(true);
+    expect(db.events[2].lastError).toMatch(/unrecognized Clients stage/);
+    expect(db.events.some((e: any) => e.source === "stage_change_unmapped" && e.externalId === CONTACT)).toBe(true);
   });
   it("an unknown contact, an internal account, or a malformed payload is recorded and ignored (no error, no retry)", async () => {
     const db = setup({ accountType: "internal" });
