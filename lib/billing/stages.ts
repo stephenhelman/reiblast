@@ -10,6 +10,8 @@
  * code-level identifier stays "active_client" so there is only one name for it).
  */
 
+import type { BillingState } from "@prisma/client";
+
 export const PIPELINES = ["onboarding", "active_client"] as const;
 export type Pipeline = (typeof PIPELINES)[number];
 
@@ -35,6 +37,22 @@ export const ONBOARDING_STAGE_NAMES: readonly string[] = [...ONBOARDING_PROGRESS
 /** Clients ("active_client") pipeline stage names. */
 export const CLIENTS_STAGES = ["Trial", "Active Member", "Payment Failed", "Paused", "Inactive", "Churned"] as const;
 export type ClientsStage = (typeof CLIENTS_STAGES)[number];
+
+/** Clients stage NAME → BillingState key (docs/ghl-server-contract.md: stage keys equal BillingState values). Exact-name matching only. */
+export const CLIENTS_STAGE_NAME_TO_STATE: Record<ClientsStage, BillingState> = {
+  Trial: "trial",
+  "Active Member": "active",
+  "Payment Failed": "payment_failed",
+  Paused: "paused",
+  Inactive: "inactive",
+  Churned: "churned",
+};
+
+/** The BillingState a Clients stage NAME or lowercase key means (exact match, case and spacing included), or null. Never guesses. */
+export function billingStateForClientsStage(stage: string): BillingState | null {
+  if (Object.prototype.hasOwnProperty.call(CLIENTS_STAGE_NAME_TO_STATE, stage)) return CLIENTS_STAGE_NAME_TO_STATE[stage as ClientsStage];
+  return (Object.values(CLIENTS_STAGE_NAME_TO_STATE) as string[]).includes(stage) ? (stage as BillingState) : null;
+}
 
 /**
  * Stage identity = (pipeline, stageKey). "Payment Failed" and "Paused" exist as distinct identities in both
