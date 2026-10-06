@@ -1170,7 +1170,10 @@ model GhlIntent {
   dedupeKey    String    @unique
   status       String // pending | sent | failed | skipped_shadow
   attempts     Int       @default(0)
-  lastError    String?
+  lastError    String? // errors only; never written on success
+  /// HTTP status and first ~500 chars of GHL's response body from the most recent send attempt (null: never attempted / no response).
+  responseStatus Int?
+  responseBody   String?
   sentAt       DateTime?
   createdAt    DateTime  @default(now())
 
