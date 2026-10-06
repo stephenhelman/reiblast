@@ -119,15 +119,22 @@ export async function enqueuePlacementIntent(db: Db, p: PlacementInput): Promise
 }
 
 export type SendDeps = {
-  post?: (url: string, body: unknown) => Promise<{ ok: boolean; status: number }>;
+  post?: (url: string, body: unknown) => Promise<{ ok: boolean; status: number; body?: string }>;
   env?: Record<string, string | undefined>;
   /** Overrides the default 10s POST timeout (used by the inline, in-request sends). */
   timeoutMs?: number;
+  /** Pause between sends in sendPendingIntents (tests inject a fake). */
+  sleep?: (ms: number) => Promise<void>;
 };
 
-async function defaultPost(url: string, body: unknown, timeoutMs = SEND_TIMEOUT_MS): Promise<{ ok: boolean; status: number }> {
+export const RESPONSE_BODY_MAX = 500;
+/** Default pause between consecutive sends in sendPendingIntents, so back-to-back webhook hits never land in the same instant. */
+export const DEFAULT_SEND_DELAY_MS = 1500;
+
+async function defaultPost(url: string, body: unknown, timeoutMs = SEND_TIMEOUT_MS): Promise<{ ok: boolean; status: number; body?: string }> {
   const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
-  return { ok: res.ok, status: res.status };
+  const text = await res.text().catch(() => "");
+  return { ok: res.ok, status: res.status, body: text.slice(0, RESPONSE_BODY_MAX) };
 }
 
 /** Send one recorded intent. Only pending/failed rows under the attempt cap are sent; the outcome is written back either way. */
@@ -135,14 +142,19 @@ export async function sendIntent(db: Db, id: string, deps: SendDeps = {}): Promi
   const row = await db.ghlIntent.findUnique({ where: { id } });
   if (!row || (row.status !== "pending" && row.status !== "failed") || row.attempts >= MAX_INTENT_ATTEMPTS) return "skipped";
   const url = intentUrl(row.pipeline, deps.env);
+  let responseStatus: number | null = null;
+  let responseBody: string | null = null;
   try {
     if (!url) throw new Error(`no intent URL configured for pipeline ${row.pipeline}`);
     const r = await (deps.post ?? ((u, b) => defaultPost(u, b, deps.timeoutMs)))(url, row.payload);
+    responseStatus = r.status;
+    responseBody = r.body != null ? r.body.slice(0, RESPONSE_BODY_MAX) : null;
     if (!r.ok) throw new Error(`GHL intent workflow responded HTTP ${r.status}`);
-    await db.ghlIntent.update({ where: { id }, data: { status: "sent", sentAt: new Date(), lastError: null, attempts: { increment: 1 } } });
+    // lastError is for errors only: a successful send clears it and records the response instead.
+    await db.ghlIntent.update({ where: { id }, data: { status: "sent", sentAt: new Date(), lastError: null, responseStatus, responseBody, attempts: { increment: 1 } } });
     return "sent";
   } catch (err) {
-    await db.ghlIntent.update({ where: { id }, data: { status: "failed", attempts: { increment: 1 }, lastError: (err instanceof Error ? err.message : String(err)).slice(0, 500) } });
+    await db.ghlIntent.update({ where: { id }, data: { status: "failed", attempts: { increment: 1 }, responseStatus, responseBody, lastError: (err instanceof Error ? err.message : String(err)).slice(0, 500) } });
     return "failed";
   }
 }
@@ -152,9 +164,10 @@ export async function sendIntent(db: Db, id: string, deps: SendDeps = {}): Promi
  *  - engine intents (`live:` dedupeKeys): DUNNING_MODE=live — in shadow mode no engine intent can send;
  *  - onboarding intents (`onboarding:` keys): ONBOARDING_INTENTS=live, regardless of DUNNING_MODE;
  *  - Clients handoff intents (`handoff:` keys): CLIENT_HANDOFF=live, regardless of DUNNING_MODE.
+ * Rows go one at a time, oldest first, with a pause between them (opts.delayMs, else INTENT_SEND_DELAY_MS, else 1500ms).
  * Called by the replay job and opportunistically after each processed event.
  */
-export async function sendPendingIntents(db: Pick<PrismaClient, "ghlIntent">, opts: { limit?: number; onlyIds?: string[]; deps?: SendDeps } = {}): Promise<{ sent: number; failed: number }> {
+export async function sendPendingIntents(db: Pick<PrismaClient, "ghlIntent">, opts: { limit?: number; onlyIds?: string[]; deps?: SendDeps; delayMs?: number } = {}): Promise<{ sent: number; failed: number }> {
   const env = opts.deps?.env ?? process.env;
   const dunningLive = (env.DUNNING_MODE ?? "shadow") === "live";
   const keyFilter: Prisma.GhlIntentWhereInput[] = [];
@@ -173,7 +186,11 @@ export async function sendPendingIntents(db: Pick<PrismaClient, "ghlIntent">, op
     select: { id: true },
   });
   let sent = 0, failed = 0;
-  for (const r of rows) {
+  const envDelay = Number(env.INTENT_SEND_DELAY_MS);
+  const delayMs = opts.delayMs ?? (env.INTENT_SEND_DELAY_MS !== undefined && env.INTENT_SEND_DELAY_MS !== "" && Number.isFinite(envDelay) && envDelay >= 0 ? envDelay : DEFAULT_SEND_DELAY_MS);
+  const sleep = opts.deps?.sleep ?? ((ms: number) => new Promise<void>((res) => setTimeout(res, ms)));
+  for (const [i, r] of rows.entries()) {
+    if (i > 0 && delayMs > 0) await sleep(delayMs);
     const out = await sendIntent(db, r.id, opts.deps);
     if (out === "sent") sent++;
     else if (out === "failed") failed++;

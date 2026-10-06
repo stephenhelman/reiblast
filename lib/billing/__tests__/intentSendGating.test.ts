@@ -102,3 +102,37 @@ describe("enqueueAndSendOnboardingIntent (inline)", () => {
     expect((await enqueueAndSendOnboardingIntent(db, { account, stageKey: "new_client", env: { ONBOARDING_INTENTS: "live" } })).sent).toBe("error");
   });
 });
+
+describe("response trace + pacing", () => {
+  const env = { ...URLS, ONBOARDING_INTENTS: "live" };
+  it("success stores status + body and leaves lastError null (even if it held text before)", async () => {
+    const db = makeDb([{ ...row("o", "onboarding:A1:new_client"), lastError: "stale text" }]);
+    await sendPendingIntents(db, { deps: { env, post: async () => ({ ok: true, status: 200, body: '{"ok":1}' }) } });
+    expect(db.rows[0]).toMatchObject({ status: "sent", lastError: null, responseStatus: 200, responseBody: '{"ok":1}' });
+  });
+  it("non-2xx stores status + body and the error", async () => {
+    const db = makeDb([row("o", "onboarding:A1:new_client")]);
+    await sendPendingIntents(db, { deps: { env, post: async () => ({ ok: false, status: 429, body: "slow down" }) } });
+    expect(db.rows[0]).toMatchObject({ status: "failed", responseStatus: 429, responseBody: "slow down" });
+    expect(db.rows[0].lastError).toContain("429");
+  });
+  it("body is capped at 500 chars; network error leaves response columns null", async () => {
+    const db = makeDb([row("a", "onboarding:A1:new_client"), row("b", "onboarding:A2:new_client")]);
+    const posts = [async () => ({ ok: true, status: 200, body: "x".repeat(900) }), async () => { throw new Error("net"); }];
+    await sendPendingIntents(db, { delayMs: 0, deps: { env, post: () => posts.shift()!() } });
+    expect(db.rows[0].responseBody).toHaveLength(500);
+    expect(db.rows[1]).toMatchObject({ status: "failed", responseStatus: null, responseBody: null, lastError: "net" });
+  });
+  it("sends one at a time, oldest first, with the delay between (not after the last); env override and default", async () => {
+    const mk = () => makeDb([row("a", "onboarding:A1:new_client"), row("b", "onboarding:A2:new_client"), row("c", "onboarding:A3:new_client")]);
+    const run = async (extra: Record<string, string>, delayMs?: number) => {
+      const log: string[] = [];
+      let inflight = 0;
+      await sendPendingIntents(mk(), { delayMs, deps: { env: { ...env, ...extra }, sleep: async (ms) => { log.push(`sleep${ms}`); }, post: async () => { expect(++inflight).toBe(1); log.push("post"); inflight--; return { ok: true, status: 200 }; } } });
+      return log;
+    };
+    expect(await run({})).toEqual(["post", "sleep1500", "post", "sleep1500", "post"]);
+    expect(await run({ INTENT_SEND_DELAY_MS: "250" })).toEqual(["post", "sleep250", "post", "sleep250", "post"]);
+    expect(await run({}, 0)).toEqual(["post", "post", "post"]);
+  });
+});
