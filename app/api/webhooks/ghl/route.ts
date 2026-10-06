@@ -4,7 +4,7 @@ import { createHQContact, addTag } from "@/lib/ghl";
 import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 import { MEMBER_TAGS } from "@/lib/constants";
 import { ensureGhlAccount } from "@/lib/billing/state/dualWrite";
-import { enqueueOnboardingIntent } from "@/lib/billing/onboardingIntents";
+import { enqueueAndSendOnboardingIntent } from "@/lib/billing/onboardingIntents";
 
 export async function POST(req: NextRequest) {
   if (!verifyWebhook(req)) {
@@ -67,7 +67,7 @@ export async function POST(req: NextRequest) {
 
     if (isNewMember) {
       const acct = await prisma.ghlAccount.findUnique({ where: { userId: user.id }, select: { id: true, contactId: true } });
-      if (acct) await enqueueOnboardingIntent(prisma, { account: { id: acct.id, contactId: acct.contactId }, stageKey: "new_client" });
+      if (acct) await enqueueAndSendOnboardingIntent(prisma, { account: { id: acct.id, contactId: acct.contactId }, stageKey: "new_client" });
     }
 
     return NextResponse.json({ success: true });

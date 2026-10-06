@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { updateHQContact } from '@/lib/ghl'
 import { ONBOARDING_STAGES, SUPPORT_EMAIL } from '@/lib/constants'
 import { guardRegion } from '@/lib/geo'
-import { enqueueOnboardingIntent } from '@/lib/billing/onboardingIntents'
+import { enqueueAndSendOnboardingIntent } from '@/lib/billing/onboardingIntents'
 
 const REQUIRED_FIELDS = [
   'email', 'legalBusinessName', 'ein', 'businessType',
@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
     try {
       const acct = await prisma.ghlAccount.findUnique({ where: { userId: user.id }, select: { id: true, contactId: true } })
       if (acct) {
-        await enqueueOnboardingIntent(prisma, { account: { id: acct.id, contactId: acct.contactId }, stageKey: 'onboarding_form_submitted' })
+        await enqueueAndSendOnboardingIntent(prisma, { account: { id: acct.id, contactId: acct.contactId }, stageKey: 'onboarding_form_submitted' })
         console.log('[onboarding/submit] onboarding_form_submitted intent enqueued for', contactId)
       } else {
         console.error('[onboarding/submit] No GhlAccount row to enqueue intent for user', user.id)

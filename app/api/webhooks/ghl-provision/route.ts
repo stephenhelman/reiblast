@@ -11,7 +11,7 @@ import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 import { MEMBER_TAGS, ONBOARDING_STAGES } from "@/lib/constants";
 import { setGhlAccountLocation } from "@/lib/billing/state/dualWrite";
 import { progressRank } from "@/lib/billing/stages";
-import { enqueueOnboardingIntent } from "@/lib/billing/onboardingIntents";
+import { enqueueAndSendOnboardingIntent } from "@/lib/billing/onboardingIntents";
 
 export async function POST(req: NextRequest) {
   if (!verifyWebhook(req)) {
@@ -164,7 +164,7 @@ export async function POST(req: NextRequest) {
     // intent via the existing outbox. Only reached on full success above.
     const acct = await prisma.ghlAccount.findUnique({ where: { userId: user.id }, select: { id: true, contactId: true } });
     if (acct) {
-      await enqueueOnboardingIntent(prisma, { account: { id: acct.id, contactId: acct.contactId }, stageKey: "sub_account_provisioned" });
+      await enqueueAndSendOnboardingIntent(prisma, { account: { id: acct.id, contactId: acct.contactId }, stageKey: "sub_account_provisioned" });
     } else {
       console.error("[Provision] No GhlAccount row to enqueue sub_account_provisioned intent for user", user.id);
     }
