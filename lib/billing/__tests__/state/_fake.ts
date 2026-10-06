@@ -52,7 +52,7 @@ export function makeFake(accounts: FakeAccount[], ledger: Row[] = [], opts: { wr
         return row;
       },
       findUnique: async ({ where }: any) => intents.find((i) => (where.id ? i.id === where.id : i.dedupeKey === where.dedupeKey)) ?? null,
-      findMany: async ({ where, take }: any) => intents.filter((i) => where.status.in.includes(i.status) && i.attempts < where.attempts.lt && (!where.id || where.id.in.includes(i.id)) && (!where.dedupeKey?.startsWith || String(i.dedupeKey).startsWith(where.dedupeKey.startsWith))).slice(0, take ?? 999),
+      findMany: async ({ where, take }: any) => intents.filter((i) => where.status.in.includes(i.status) && i.attempts < where.attempts.lt && (!where.id || where.id.in.includes(i.id)) && (!where.dedupeKey?.startsWith || String(i.dedupeKey).startsWith(where.dedupeKey.startsWith)) && (!where.OR || where.OR.some((c: any) => String(i.dedupeKey).startsWith(c.dedupeKey.startsWith)))).slice(0, take ?? 999),
       update: async ({ where, data }: any) => {
         const row = intents.find((i) => i.id === where.id)!;
         for (const [k, v] of Object.entries(data)) row[k] = v && typeof v === "object" && "increment" in (v as any) ? (row[k] ?? 0) + (v as any).increment : v;

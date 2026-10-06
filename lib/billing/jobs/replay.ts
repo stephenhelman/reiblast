@@ -6,8 +6,9 @@ import type { JobFn } from "./types";
 
 /**
  * Replay GhlEvent rows that failed (any source: payment, stage_change, invoice): unprocessed, attempts < 5, received more than 5 minutes
- * ago. Also retries failed GHL intents (max 5 attempts) and failed live-mode side effects (saas_pause/saas_resume, with
- * backoff, max 5 attempts) — both no-ops unless DUNNING_MODE=live / a decision is actually in mode "live".
+ * ago. Also retries failed GHL intents (max 5 attempts, each family gated by its own switch: DUNNING_MODE / ONBOARDING_INTENTS /
+ * CLIENT_HANDOFF, see sendPendingIntents) and failed live-mode side effects (saas_pause/saas_resume, with backoff, max 5 attempts)
+ * — the latter a no-op unless a decision is actually in mode "live".
  */
 export const runReplay: JobFn = async (ctx) => {
   const tried = new Set<string>(Array.isArray(ctx.cursor?.tried) ? (ctx.cursor?.tried as string[]) : []);

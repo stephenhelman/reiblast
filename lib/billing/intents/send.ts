@@ -10,6 +10,8 @@ import type { BillingState, Decision, Intent } from "../state/types";
 export const MAX_INTENT_ATTEMPTS = 5;
 /** dedupeKey prefix of a real (CLIENT_HANDOFF=live) Clients handoff intent: `handoff:<ghlAccountId>`. */
 export const HANDOFF_DEDUPE_PREFIX = "handoff:";
+/** dedupeKey prefix of an onboarding-pipeline intent (lib/billing/onboardingIntents.ts): `onboarding:<ghlAccountId>:<stageKey>`. */
+export const ONBOARDING_DEDUPE_PREFIX = "onboarding:";
 const SEND_TIMEOUT_MS = 10_000;
 
 export type IntentBody = {
@@ -116,10 +118,15 @@ export async function enqueuePlacementIntent(db: Db, p: PlacementInput): Promise
   }
 }
 
-export type SendDeps = { post?: (url: string, body: unknown) => Promise<{ ok: boolean; status: number }>; env?: Record<string, string | undefined> };
+export type SendDeps = {
+  post?: (url: string, body: unknown) => Promise<{ ok: boolean; status: number }>;
+  env?: Record<string, string | undefined>;
+  /** Overrides the default 10s POST timeout (used by the inline, in-request sends). */
+  timeoutMs?: number;
+};
 
-async function defaultPost(url: string, body: unknown): Promise<{ ok: boolean; status: number }> {
-  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(SEND_TIMEOUT_MS) });
+async function defaultPost(url: string, body: unknown, timeoutMs = SEND_TIMEOUT_MS): Promise<{ ok: boolean; status: number }> {
+  const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: AbortSignal.timeout(timeoutMs) });
   return { ok: res.ok, status: res.status };
 }
 
@@ -130,7 +137,7 @@ export async function sendIntent(db: Db, id: string, deps: SendDeps = {}): Promi
   const url = intentUrl(row.pipeline, deps.env);
   try {
     if (!url) throw new Error(`no intent URL configured for pipeline ${row.pipeline}`);
-    const r = await (deps.post ?? defaultPost)(url, row.payload);
+    const r = await (deps.post ?? ((u, b) => defaultPost(u, b, deps.timeoutMs)))(url, row.payload);
     if (!r.ok) throw new Error(`GHL intent workflow responded HTTP ${r.status}`);
     await db.ghlIntent.update({ where: { id }, data: { status: "sent", sentAt: new Date(), lastError: null, attempts: { increment: 1 } } });
     return "sent";
@@ -141,20 +148,24 @@ export async function sendIntent(db: Db, id: string, deps: SendDeps = {}): Promi
 }
 
 /**
- * Send pending intents and retry failed ones (max 5 attempts each). Hard-gated: it does NOTHING unless DUNNING_MODE=live, so in
- * shadow mode no code path can send. Called by the replay job and opportunistically after each processed event.
+ * Send pending intents and retry failed ones (max 5 attempts each). Each family has its own switch:
+ *  - engine intents (`live:` dedupeKeys): DUNNING_MODE=live — in shadow mode no engine intent can send;
+ *  - onboarding intents (`onboarding:` keys): ONBOARDING_INTENTS=live, regardless of DUNNING_MODE;
+ *  - Clients handoff intents (`handoff:` keys): CLIENT_HANDOFF=live, regardless of DUNNING_MODE.
+ * Called by the replay job and opportunistically after each processed event.
  */
 export async function sendPendingIntents(db: Pick<PrismaClient, "ghlIntent">, opts: { limit?: number; onlyIds?: string[]; deps?: SendDeps } = {}): Promise<{ sent: number; failed: number }> {
   const env = opts.deps?.env ?? process.env;
   const dunningLive = (env.DUNNING_MODE ?? "shadow") === "live";
-  // The Clients handoff has its own switch: with DUNNING_MODE=shadow, only handoff rows (and only when CLIENT_HANDOFF=live) are retried.
-  const handoffLive = env.CLIENT_HANDOFF === "live";
-  if (!dunningLive && !handoffLive) return { sent: 0, failed: 0 };
+  const keyFilter: Prisma.GhlIntentWhereInput[] = [];
+  if (env.ONBOARDING_INTENTS === "live") keyFilter.push({ dedupeKey: { startsWith: ONBOARDING_DEDUPE_PREFIX } });
+  if (env.CLIENT_HANDOFF === "live") keyFilter.push({ dedupeKey: { startsWith: HANDOFF_DEDUPE_PREFIX } });
+  if (!dunningLive && keyFilter.length === 0) return { sent: 0, failed: 0 };
   const rows = await db.ghlIntent.findMany({
     where: {
       status: { in: ["pending", "failed"] },
       attempts: { lt: MAX_INTENT_ATTEMPTS },
-      ...(dunningLive ? {} : { dedupeKey: { startsWith: HANDOFF_DEDUPE_PREFIX } }),
+      ...(dunningLive ? {} : { OR: keyFilter }),
       ...(opts.onlyIds ? { id: { in: opts.onlyIds } } : {}),
     },
     orderBy: { createdAt: "asc" },
