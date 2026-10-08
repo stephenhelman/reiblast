@@ -101,6 +101,7 @@ vi.mock("@/lib/prisma", () => ({
 }));
 
 beforeEach(() => {
+  vi.clearAllMocks();
   fakePrisma.current = makeFakePrisma();
   ghlCalls.tags = [];
   ghlCalls.moveToStageCalls = [];
@@ -198,6 +199,49 @@ describe("POST /api/webhooks/ghl-provision — onboardingProgress no-op gate", (
     expect(json.noop).toBeUndefined();
     expect(json.success).toBe(true);
     expect(populateSubAccountCustomValues).toHaveBeenCalled();
+  });
+
+  it("still provisions when stage-changed already recorded onboardingProgress = Onboarding Form Confirmed (the bug)", async () => {
+    const { POST } = await import("@/app/api/webhooks/ghl-provision/route");
+    const { populateSubAccountCustomValues } = await import("@/lib/ghl");
+    const db = fakePrisma.current;
+    db.users.push({ id: "u1", email: "race@example.test", ghlLocationId: "LOCR", businessName: "Acme" });
+    db.ghlAccounts.push({ id: "a1", userId: "u1", contactId: "CONTACTR", onboardingProgress: "Onboarding Form Confirmed" });
+
+    const json = await (await POST(postJson({ email: "race@example.test", contact_id: "CONTACTR", full_name: "Race Person" }))).json();
+    expect(json.noop).toBeUndefined();
+    expect(json.success).toBe(true);
+    expect(populateSubAccountCustomValues).toHaveBeenCalled();
+    expect(db.ghlAccounts[0].provisionedAt).toBeInstanceOf(Date);
+  });
+
+  it("provisioning arriving first (progress still earlier) provisions, then a re-trigger after stage-changed is a no-op", async () => {
+    const { POST } = await import("@/app/api/webhooks/ghl-provision/route");
+    const { populateSubAccountCustomValues } = await import("@/lib/ghl");
+    const db = fakePrisma.current;
+    db.users.push({ id: "u1", email: "first@example.test", ghlLocationId: "LOCF", businessName: "Acme" });
+    db.ghlAccounts.push({ id: "a1", userId: "u1", contactId: "CONTACTF", onboardingProgress: "Onboarding Form Submitted" });
+    const req = () => postJson({ email: "first@example.test", contact_id: "CONTACTF", full_name: "First Person" });
+
+    expect((await (await POST(req())).json()).success).toBe(true);
+    expect(populateSubAccountCustomValues).toHaveBeenCalledTimes(1);
+
+    db.ghlAccounts[0].onboardingProgress = "Onboarding Form Confirmed"; // stage-changed lands afterwards
+    const again = await (await POST(req())).json();
+    expect(again.noop).toBe(true);
+    expect(populateSubAccountCustomValues).toHaveBeenCalledTimes(1);
+  });
+
+  it("no-ops when provisionedAt is set even if the card was dragged back to Onboarding Form Confirmed", async () => {
+    const { POST } = await import("@/app/api/webhooks/ghl-provision/route");
+    const { populateSubAccountCustomValues } = await import("@/lib/ghl");
+    const db = fakePrisma.current;
+    db.users.push({ id: "u1", email: "back@example.test", ghlLocationId: "LOCB", businessName: "Acme" });
+    db.ghlAccounts.push({ id: "a1", userId: "u1", contactId: "CONTACTB", onboardingProgress: "Onboarding Form Confirmed", provisionedAt: new Date() });
+
+    const json = await (await POST(postJson({ email: "back@example.test", contact_id: "CONTACTB", full_name: "Back Person" }))).json();
+    expect(json.noop).toBe(true);
+    expect(populateSubAccountCustomValues).not.toHaveBeenCalled();
   });
 
   it("proceeds normally when there is no GhlAccount row yet (never provisioned)", async () => {

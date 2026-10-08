@@ -49,14 +49,17 @@ export async function POST(req: NextRequest) {
 
   const ghlAccount = await prisma.ghlAccount.findUnique({
     where: { userId: user.id },
-    select: { id: true, contactId: true, onboardingProgress: true },
+    select: { id: true, contactId: true, onboardingProgress: true, provisionedAt: true },
   });
+  // Skip only on a real fact of prior provisioning: progress strictly beyond Form Confirmed, or the provisionedAt marker.
+  // Progress AT Form Confirmed is not evidence — the stage-changed webhook from this same card move records it first.
   const confirmedRank = progressRank("Onboarding Form Confirmed")!;
-  if (ghlAccount && ghlAccount.onboardingProgress && (progressRank(ghlAccount.onboardingProgress) ?? -1) >= confirmedRank) {
+  const progressPast = !!ghlAccount?.onboardingProgress && (progressRank(ghlAccount.onboardingProgress) ?? -1) > confirmedRank;
+  if (ghlAccount && (progressPast || ghlAccount.provisionedAt)) {
     console.log(
-      `[Provision] No-op: onboardingProgress=${ghlAccount.onboardingProgress} is already at/past "Onboarding Form Confirmed" for user ${user.id} — not re-provisioning`,
+      `[Provision] No-op: already provisioned (onboardingProgress=${ghlAccount.onboardingProgress}, provisionedAt=${ghlAccount.provisionedAt?.toISOString?.() ?? ghlAccount.provisionedAt ?? "null"}) for user ${user.id} — not re-provisioning`,
     );
-    return NextResponse.json({ success: true, noop: true, reason: "already provisioned past Onboarding Form Confirmed" });
+    return NextResponse.json({ success: true, noop: true, reason: "already provisioned" });
   }
 
   try {
@@ -168,6 +171,9 @@ export async function POST(req: NextRequest) {
     } else {
       console.error("[Provision] No GhlAccount row to enqueue sub_account_provisioned intent for user", user.id);
     }
+
+    // Marker set only here, after every step above succeeded; it is what makes a later re-trigger a no-op.
+    if (acct) await prisma.ghlAccount.update({ where: { id: acct.id }, data: { provisionedAt: new Date() } });
 
     console.log("[Provision] Complete:", locationId);
     return NextResponse.json({

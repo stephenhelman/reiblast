@@ -987,6 +987,8 @@ model GhlAccount {
   // Set when the member is handed off to the Clients pipeline (first reaches A2P Approved, or the backfill found an existing
   // Clients opportunity). Null = still in onboarding: the engine routes billing intents to the Onboarding pipeline.
   activeClientSince    DateTime?
+  // Set once, only after a fully successful ghl-provision run; makes later provision calls a no-op.
+  provisionedAt        DateTime?
   locationToken        String?
   locationTokenExpires DateTime?
   ledgerEntries        BillingLedgerEntry[]
