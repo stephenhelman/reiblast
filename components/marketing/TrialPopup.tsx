@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import Button from "@/components/shared/Button";
+import { CORE_PRICE, SETUP_FEE, TRIAL_LENGTH_DAYS } from "@/lib/pricing";
 
 const DISMISS_KEY = "trial-popup-dismissed";
 const TRIAL_MODAL_SEEN_KEY = "reiblast_trial_modal_seen";
@@ -74,13 +75,15 @@ export default function TrialPopup() {
           Try REIblast Free for a Week
         </h2>
         <p className="text-white/60 text-base mb-8 leading-relaxed">
-          Get full access to the pipeline, sequences, and contracts for 7
-          days. Just $57/mo after. Cancel anytime.
+          ${SETUP_FEE} one-time setup today — we handle the setup for you. Then
+          get full access to the pipeline, sequences, and contracts free for{" "}
+          {TRIAL_LENGTH_DAYS} days, and ${CORE_PRICE}/mo after. Cancel anytime.
+          Setup fee is non-refundable.
         </p>
 
         <Link href="/checkout" onClick={dismiss}>
           <Button variant="primary" size="lg" className="w-full">
-            Get Started Free →
+            Get Started →
           </Button>
         </Link>
       </div>

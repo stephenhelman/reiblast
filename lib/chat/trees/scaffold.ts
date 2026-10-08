@@ -60,7 +60,7 @@ function scaffoldBaseNodes(): Record<string, TreeNode> {
         'REIblast is an all-in-one text blasting system: SMS text blasting, deal analyzing, e-signing, and more to come.',
       ],
       options: [
-        { label: 'Start my free trial', next: SCAFFOLD_CAPTURE_ID },
+        { label: 'Get started', next: SCAFFOLD_CAPTURE_ID },
         { label: 'Back to menu', next: SCAFFOLD_MENU_ID },
       ],
     },

@@ -1,6 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import CostEstimatorButton from "@/components/marketing/CostEstimatorModal";
+import {
+  CORE_PRICE,
+  SETUP_FEE,
+  TRIAL_LENGTH_DAYS,
+  PHONE_PRICE,
+  A2P_SETUP,
+  A2P_MONTHLY_SOLE,
+  A2P_MONTHLY_LLC,
+} from "@/lib/pricing";
 
 export const metadata: Metadata = {
   title: "Pricing — REIblast",
@@ -82,14 +91,24 @@ export default function PricingPage() {
             </p>
 
             {/* Price */}
-            <div className="flex items-baseline gap-1 mb-1">
-              <span className="text-6xl font-bold text-white">$57</span>
-              <span className="text-xl text-white/50">/mo</span>
-            </div>
-            <p className="text-gold text-sm font-semibold mb-1">
-              1 week free trial
+            <p className="text-white text-sm font-semibold mb-3">
+              ${SETUP_FEE} one-time setup fee
+              <span className="text-white/50 font-normal">
+                {" "}
+                — account setup &amp; onboarding. We handle setup for you.
+              </span>
             </p>
-            <p className="text-white/40 text-sm mb-6">Cancel anytime</p>
+            <p className="text-gold text-sm font-semibold mb-1">
+              Then {TRIAL_LENGTH_DAYS} days free
+            </p>
+            <div className="flex items-baseline gap-1 mb-1">
+              <span className="text-6xl font-bold text-white">${CORE_PRICE}</span>
+              <span className="text-xl text-white/50">/mo after your trial</span>
+            </div>
+            <p className="text-white/40 text-sm mb-6">
+              Cancel anytime. Setup fee and subscription payments are
+              non-refundable.
+            </p>
 
             <div className="border-t border-white/10 my-5" />
 
@@ -128,7 +147,7 @@ export default function PricingPage() {
           <div className="grid md:grid-cols-2 gap-4">
             <div className="bg-surface border border-border-default rounded-xl p-6">
               <p className="text-gold font-semibold text-sm uppercase tracking-wider mb-4">
-                Included in your $57/mo
+                Included in your ${CORE_PRICE}/mo
               </p>
               <ul className="space-y-3">
                 {[
@@ -152,9 +171,9 @@ export default function PricingPage() {
               </p>
               <ul className="space-y-3">
                 {[
-                  "Phone number(s) — $1.265/number/month",
-                  "A2P registration — $23.50 one-time",
-                  "A2P monthly carrier fee — $2.10 (sole prop) / $10.50 (LLC/EIN)",
+                  `Phone number(s) — $${PHONE_PRICE}/number/month`,
+                  `A2P registration — $${A2P_SETUP.toFixed(2)} one-time`,
+                  `A2P monthly carrier fee — $${A2P_MONTHLY_SOLE.toFixed(2)} (sole prop) / $${A2P_MONTHLY_LLC.toFixed(2)} (LLC/EIN)`,
                   "Usage (texts/calls/emails) — see rates below",
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-3">
@@ -254,7 +273,7 @@ export default function PricingPage() {
           href="/checkout"
           className="inline-block bg-gold text-black font-bold text-lg px-10 py-4 rounded-xl hover:bg-gold-hover transition-colors"
         >
-          Get Started — $57/mo, 1 Week Free
+          Get Started — ${SETUP_FEE} Setup, {TRIAL_LENGTH_DAYS} Days Free, Then ${CORE_PRICE}/mo
         </Link>
       </section>
     </div>

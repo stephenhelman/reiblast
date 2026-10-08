@@ -74,6 +74,17 @@ export default function TermsPage() {
         changes take effect at your next renewal.
       </P>
       <P>
+        <Strong>Setup fee and free trial.</Strong> New accounts pay a one-time
+        setup fee at signup and then receive a free trial before the monthly
+        subscription begins. If you cancel before the trial ends, you will not
+        be charged the subscription. The setup fee and subscription payments
+        are non-refundable as described in our{" "}
+        <PolicyLink href="/refund-policy">
+          Refund and Cancellation Policy
+        </PolicyLink>
+        .
+      </P>
+      <P>
         <Strong>Billing cycle.</Strong> Subscriptions bill monthly in advance on
         the date you subscribe and automatically renew each month until
         cancelled. By subscribing, you authorize us and our payment processors

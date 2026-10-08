@@ -19,7 +19,7 @@ export default function AriSpecialOffer({ formUrl }: { formUrl?: string }) {
         open={open}
         onClose={() => setOpen(false)}
         formUrl={formUrl}
-        formName="30 Day Trial"
+        formName="14 Day Trial"
         formHeight={635}
       />
     </>

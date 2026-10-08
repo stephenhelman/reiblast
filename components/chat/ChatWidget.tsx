@@ -62,6 +62,7 @@ function ctaLabelFor(href: string): string {
   if (href.startsWith('/faq')) return 'Read our FAQ →';
   if (href.startsWith('/features')) return 'See our features →';
   if (href.startsWith('/checkout')) return 'Get started →';
+  if (href.startsWith('/refund-policy')) return 'Read our refund policy →';
   return 'Learn more →';
 }
 

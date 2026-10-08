@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { CORE_PRICE, SETUP_FEE, TRIAL_LENGTH_DAYS } from "@/lib/pricing";
 import {
   H2,
   Hr,
@@ -15,7 +16,7 @@ import {
 export const metadata: Metadata = {
   title: "Refund and Cancellation Policy — REIblast",
   description:
-    "How to cancel your REIblast subscription, the three day refund window for new subscribers, and which charges are non-refundable.",
+    "How to cancel your REIblast subscription, the free trial, and which charges are non-refundable.",
   robots: { index: true, follow: true },
 };
 
@@ -23,7 +24,7 @@ export default function RefundPolicyPage() {
   return (
     <LegalPage
       title="Refund and Cancellation Policy"
-      lastUpdated="August 5, 2026"
+      lastUpdated="October 7, 2026"
     >
       <P>
         This policy explains how to cancel your REIblast subscription and when
@@ -72,22 +73,17 @@ export default function RefundPolicyPage() {
         days and are not refunded for them.
       </P>
 
-      <H2>Three day refund window for new subscribers</H2>
+      <H2>The {TRIAL_LENGTH_DAYS}-day free trial</H2>
       <P>
-        If you cancel within <Strong>three (3) calendar days</Strong> of your
-        initial subscription purchase, you may request a full refund of that
-        first subscription payment.
+        Your {TRIAL_LENGTH_DAYS}-day free trial is your risk-free evaluation
+        period. If you cancel before the trial ends, you will not be charged
+        the ${CORE_PRICE}/mo subscription. The one-time ${SETUP_FEE} setup fee
+        is charged when you sign up, before the trial begins, and is not
+        refunded on cancellation (see below).
       </P>
       <P>
-        To request it, email <Mail address="support@reiblast.app" /> from your
-        account email within the three day window and state that you are
-        requesting a refund under the three day policy. We will process approved
-        refunds within five business days to the original payment method.
-      </P>
-      <P>
-        This applies only to your first subscription payment on a new account.
-        It does not apply to renewals, to accounts that have been cancelled and
-        resubscribed, or to any of the charges listed as non-refundable below.
+        There is no additional refund period after the trial. Once the first
+        subscription payment is charged, it is final.
       </P>
 
       <H2>What is not refundable</H2>
@@ -105,8 +101,8 @@ export default function RefundPolicyPage() {
         sending plans.
       </P>
       <P>
-        <Strong>Subscription payments after the three day window.</Strong>{" "}
-        Including renewals and partial periods.
+        <Strong>Subscription payments.</Strong> Once charged, including
+        renewals and partial periods.
       </P>
       <P>
         <Strong>A2P registration and carrier compliance fees.</Strong> These are
@@ -119,8 +115,10 @@ export default function RefundPolicyPage() {
         by our telecom providers for the full period.
       </P>
       <P>
-        <Strong>One-time setup and done-for-you service fees.</Strong> Once the
-        work has been performed.
+        <Strong>The ${SETUP_FEE} setup fee and other one-time setup and
+        done-for-you service fees.</Strong> Account provisioning and
+        configuration work begins immediately upon signup, so these fees are
+        non-refundable once you have signed up.
       </P>
 
       <H2>Accounts suspended or terminated for policy violations</H2>

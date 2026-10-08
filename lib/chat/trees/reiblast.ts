@@ -1,4 +1,13 @@
-import { TEXT_RATE, DAILY_CAP_SOLE, DAILY_CAP_LLC, RAMP_RUNGS } from '@/lib/pricing';
+import {
+  CORE_PRICE,
+  SETUP_FEE,
+  PHONE_PRICE,
+  TRIAL_LENGTH_DAYS,
+  TEXT_RATE,
+  DAILY_CAP_SOLE,
+  DAILY_CAP_LLC,
+  RAMP_RUNGS,
+} from '@/lib/pricing';
 import type { TreeJson, TreeJsonNode, TreeJsonOption } from './compile';
 
 /**
@@ -71,14 +80,24 @@ const nodes: TreeJsonNode[] = [
     options: [
       { label: 'Monthly cost of the service', next: 'costs_monthly' },
       { label: 'Cost to send texts', next: 'texting_limits' },
+      { label: 'Refunds & cancellation', next: 'refund_policy' },
       { label: 'Back to menu', next: '@menu' },
     ],
   },
   {
     id: 'costs_monthly',
     say: [
-      "$57/month membership. Phone number(s) are $1.265/mo each. That's the recurring service cost.",
+      `$${SETUP_FEE} one-time setup today — we handle the setup for you.`,
+      `Then your ${TRIAL_LENGTH_DAYS}-day trial is free, and membership is $${CORE_PRICE}/mo. Phone number(s) are $${PHONE_PRICE}/mo each.`,
       FAQ_BILLING_CTA,
+    ],
+    options: [{ label: 'Back to menu', next: '@menu' }],
+  },
+  {
+    id: 'refund_policy',
+    say: [
+      `The ${TRIAL_LENGTH_DAYS}-day free trial is your risk-free window to decide. After that, the setup fee and subscription are non-refundable.`,
+      'Full details → /refund-policy',
     ],
     options: [{ label: 'Back to menu', next: '@menu' }],
   },
@@ -155,7 +174,7 @@ const nodes: TreeJsonNode[] = [
   },
   {
     id: 'how_join',
-    say: ['Sign up today and get a free 7-day trial → /checkout'],
+    say: [`$${SETUP_FEE} one-time setup today, then ${TRIAL_LENGTH_DAYS} days free, then $${CORE_PRICE}/mo → /checkout`],
     options: [{ label: 'Back to menu', next: '@menu' }],
   },
   ...soleLeaves,
