@@ -4,6 +4,8 @@ import { useState } from "react";
 import Link from "next/link";
 import {
   CORE_PRICE,
+  SETUP_FEE,
+  TRIAL_LENGTH_DAYS,
   PHONE_PRICE,
   A2P_SETUP,
   A2P_MONTHLY_SOLE,
@@ -23,7 +25,40 @@ const BILLING_FAQS = [
         The REIblast platform: CRM, pipeline, SMS sequences, contracts and
         e-signature, deal analyzer, lead cleaner, and support. It does not
         include telecom costs (phone numbers, A2P, or message/call usage),
-        which are billed separately as pass-through.
+        which are billed separately as pass-through. The one-time $
+        {SETUP_FEE} setup fee is separate from your membership.
+      </>
+    ),
+  },
+  {
+    q: `What's the $${SETUP_FEE} setup fee?`,
+    a: (
+      <>
+        A one-time fee to fully provision and configure your account. We
+        handle the setup for you, including compliance registration and
+        automation configuration, so you&apos;re ready to send on day one.
+        It&apos;s charged today when you sign up, before your{" "}
+        {TRIAL_LENGTH_DAYS}-day free trial begins. It&apos;s separate from the
+        pass-through telecom costs below.
+      </>
+    ),
+  },
+  {
+    q: "What's your refund policy?",
+    a: (
+      <>
+        Your {TRIAL_LENGTH_DAYS}-day free trial is your risk-free window:
+        cancel before it ends and you won&apos;t be charged the $
+        {CORE_PRICE}/mo subscription. The ${SETUP_FEE} setup fee is non-refundable because
+        the setup work starts immediately, and subscription payments are
+        non-refundable once charged. See our{" "}
+        <Link
+          href="/refund-policy"
+          className="text-gold hover:text-gold-hover underline underline-offset-4 transition-colors"
+        >
+          Refund and Cancellation Policy
+        </Link>
+        .
       </>
     ),
   },
@@ -33,7 +68,8 @@ const BILLING_FAQS = [
       <>
         Phone number(s) at ${PHONE_PRICE}/number/month, a one-time A2P
         registration fee of ${A2P_SETUP.toFixed(2)}, an A2P monthly carrier
-        fee (${A2P_MONTHLY_SOLE} for sole proprietors / ${A2P_MONTHLY_LLC} for
+        fee (${A2P_MONTHLY_SOLE.toFixed(2)} for sole proprietors / $
+        {A2P_MONTHLY_LLC.toFixed(2)} for
         LLC/EIN), and usage (texts, calls, emails) at the posted rates. These
         are billed from your wallet balance.
       </>
@@ -90,9 +126,9 @@ const A2P_FAQS = [
         You can start as a sole proprietor without an EIN, but it changes
         your limits and fees: sole proprietors are capped at{" "}
         {DAILY_CAP_SOLE.toLocaleString("en-US")} segments/day on a single
-        phone number with a ${A2P_MONTHLY_SOLE}/mo A2P fee, while an LLC/EIN
+        phone number with a ${A2P_MONTHLY_SOLE.toFixed(2)}/mo A2P fee, while an LLC/EIN
         allows up to {DAILY_CAP_LLC.toLocaleString("en-US")} segments/day,
-        unlimited phone numbers, and a ${A2P_MONTHLY_LLC}/mo A2P fee.
+        unlimited phone numbers, and a ${A2P_MONTHLY_LLC.toFixed(2)}/mo A2P fee.
       </>
     ),
   },

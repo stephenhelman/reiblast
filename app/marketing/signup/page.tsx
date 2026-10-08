@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { CORE_PRICE, SETUP_FEE, TRIAL_LENGTH_DAYS } from "@/lib/pricing";
 import { LogoStacked } from "@/components/shared/Logo";
 
 export const metadata: Metadata = {
@@ -62,7 +63,7 @@ export default function SignupPage() {
             href={paymentLink}
             className="block w-full bg-gold text-black font-bold text-lg py-4 rounded-xl hover:bg-gold-hover transition-colors"
           >
-            Start My Free Week — $57/mo After
+            Get Started — ${SETUP_FEE} Setup, {TRIAL_LENGTH_DAYS} Days Free, Then ${CORE_PRICE}/mo
           </a>
 
           <p className="text-white/30 text-xs mt-4">

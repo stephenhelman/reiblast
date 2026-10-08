@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CORE_PRICE, SETUP_FEE, TRIAL_LENGTH_DAYS } from "@/lib/pricing";
 import { LogoStacked } from "../shared/Logo";
 
 export default function Hero() {
@@ -43,7 +44,7 @@ export default function Hero() {
             className="bg-gold text-black font-bold text-lg px-8 py-4 rounded-xl hover:bg-gold-hover transition-colors"
             style={{ fontWeight: 700 }}
           >
-            Get Started — $57/mo
+            Get Started — ${SETUP_FEE} Setup, {TRIAL_LENGTH_DAYS} Days Free, Then ${CORE_PRICE}/mo
           </Link>
           <Link
             href="/features"
@@ -54,7 +55,7 @@ export default function Hero() {
         </div>
 
         <p className="mt-8 text-sm" style={{ color: "#888888" }}>
-          No contracts. Cancel anytime.
+          No contracts. Cancel anytime. Setup fee is non-refundable.
         </p>
       </div>
     </section>

@@ -33,7 +33,7 @@ export const ALLOWED_COUNTRIES = ["US"] as const;
  */
 export const GATED_PREFIXES = [
   "/checkout", // primary checkout page + embedded order form
-  "/ari-special", // promo-gated checkout (30-day trial form)
+  "/ari-special", // promo-gated checkout (14-day trial form)
   "/signup", // funnel entry, links straight to the payment link
   "/onboarding", // covers /onboarding and /onboarding/success
 ] as const;

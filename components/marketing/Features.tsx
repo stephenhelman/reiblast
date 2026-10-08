@@ -15,7 +15,7 @@ const FEATURES = [
     icon: "⚡",
     title: "Pre-Built Pipeline",
     description:
-      "A full CRM pipeline configured for wholesaling out of the box. No setup required.",
+      "A full CRM pipeline configured for wholesaling out of the box. We handle the setup so you don't have to.",
   },
   {
     icon: "📱",

@@ -14,3 +14,8 @@ export const DAILY_CAP_LLC = 6000;
 export const SEND_DAYS = 22;
 export const RAMP_RUNGS = [500, 750, 1000, 1500, 2000, 3500, 5000];
 export const TRIAL_DAYS = 5;
+
+/** One-time REIblast account setup fee (separate from the A2P pass-through fees). */
+export const SETUP_FEE = 97;
+/** Length of the free trial shown in copy. Not the estimator's TRIAL_DAYS. */
+export const TRIAL_LENGTH_DAYS = 7;

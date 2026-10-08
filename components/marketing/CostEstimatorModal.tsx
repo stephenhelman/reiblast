@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   CORE_PRICE,
+  SETUP_FEE,
   PHONE_PRICE,
   A2P_SETUP,
   A2P_MONTHLY_SOLE,
@@ -114,6 +115,7 @@ function CostEstimatorModal({
       label: "Month 1",
       texts: month1Texts,
       textCost: round2(month1Texts * TEXT_RATE),
+      setupFee: SETUP_FEE,
       a2pSetup: A2P_SETUP,
       a2pMonthlyFee: 0,
       tooltip: (
@@ -129,12 +131,13 @@ function CostEstimatorModal({
       label: "Month 2",
       texts: flatMonthTexts,
       textCost: round2(flatMonthTexts * TEXT_RATE),
+      setupFee: 0,
       a2pSetup: 0,
       a2pMonthlyFee: a2pMonthly,
       tooltip: (
         <>
           {formatNumber(target)} texts/day × 22 sending days (Mon–Fri) ={" "}
-          {formatNumber(flatMonthTexts)} texts, at $0.0091 per text.
+          {formatNumber(flatMonthTexts)} texts, at ${TEXT_RATE} per text.
         </>
       ),
     },
@@ -142,12 +145,13 @@ function CostEstimatorModal({
       label: "Month 3",
       texts: flatMonthTexts,
       textCost: round2(flatMonthTexts * TEXT_RATE),
+      setupFee: 0,
       a2pSetup: 0,
       a2pMonthlyFee: a2pMonthly,
       tooltip: (
         <>
           {formatNumber(target)} texts/day × 22 sending days (Mon–Fri) ={" "}
-          {formatNumber(flatMonthTexts)} texts, at $0.0091 per text.
+          {formatNumber(flatMonthTexts)} texts, at ${TEXT_RATE} per text.
         </>
       ),
     },
@@ -155,7 +159,12 @@ function CostEstimatorModal({
 
   const monthTotals = months.map((m) =>
     round2(
-      CORE_PRICE + round2(phoneCost) + m.a2pMonthlyFee + m.a2pSetup + m.textCost
+      CORE_PRICE +
+        round2(phoneCost) +
+        m.a2pMonthlyFee +
+        m.setupFee +
+        m.a2pSetup +
+        m.textCost
     )
   );
   const grandTotal = round2(monthTotals.reduce((a, b) => a + b, 0));
@@ -322,7 +331,7 @@ function CostEstimatorModal({
               {formatMoney(dailyTextCost)}
             </p>
             <p className="text-white/40 text-sm mb-5">
-              {formatNumber(target)} texts/day × $0.0091
+              {formatNumber(target)} texts/day × ${TEXT_RATE}
             </p>
 
             <div className="border-t border-white/10 pt-4">
@@ -330,7 +339,7 @@ function CostEstimatorModal({
                 Your fixed monthly costs: {formatMoney(fixedMonthly)}
               </p>
               <p className="text-white/30 text-xs mt-1">
-                Core $57 + {effectiveNumbers} number
+                Core {formatMoney(CORE_PRICE)} + {effectiveNumbers} number
                 {effectiveNumbers === 1 ? "" : "s"} (
                 {formatMoney(effectiveNumbers * PHONE_PRICE)}) + A2P monthly (
                 {formatMoney(a2pMonthly)}) — not prorated into the daily
@@ -380,6 +389,14 @@ function CostEstimatorModal({
                   ))}
                 </tr>
                 <tr className="border-t border-white/10">
+                  <td className="py-2.5">Setup fee (one-time)</td>
+                  {months.map((m) => (
+                    <td key={m.label} className="text-right py-2.5">
+                      {m.setupFee ? formatMoney(m.setupFee) : "—"}
+                    </td>
+                  ))}
+                </tr>
+                <tr className="border-t border-white/10">
                   <td className="py-2.5">A2P setup</td>
                   {months.map((m) => (
                     <td key={m.label} className="text-right py-2.5">
@@ -418,6 +435,14 @@ function CostEstimatorModal({
               </span>
             </div>
           </div>
+        )}
+
+        {tab === "monthly" && (
+          <p className="text-white/40 text-xs text-center mt-4">
+            One-time charges, Month 1 only: the {formatMoney(SETUP_FEE)} setup
+            fee (due today, before your free trial) and the{" "}
+            {formatMoney(A2P_SETUP)} A2P registration fee.
+          </p>
         )}
 
         <p className="text-white/30 text-xs text-center mt-6">

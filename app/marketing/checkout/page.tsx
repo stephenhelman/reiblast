@@ -4,6 +4,7 @@ import { useState } from "react";
 import { LogoFull } from "@/components/shared/Logo";
 import CostEstimatorButton from "@/components/marketing/CostEstimatorModal";
 import CheckoutModal from "@/components/marketing/CheckoutModal";
+import { CORE_PRICE, SETUP_FEE, TRIAL_LENGTH_DAYS } from "@/lib/pricing";
 
 const CORE_FEATURES = [
   "Pre-built wholesale pipeline",
@@ -77,13 +78,14 @@ export default function CheckoutPage() {
                       Your complete wholesale operating system.
                     </p>
                     <p className="text-gold font-semibold mt-2">
-                      $57
+                      ${CORE_PRICE}
                       <span className="text-white/40 font-normal text-sm">
                         /mo
                       </span>
                     </p>
                     <p className="text-gold/80 text-sm font-medium mt-1">
-                      1 week free, then $57/mo
+                      ${SETUP_FEE} one-time setup today, {TRIAL_LENGTH_DAYS} days free,
+                      then ${CORE_PRICE}/mo
                     </p>
                   </div>
                   <CheckCircle />
@@ -136,8 +138,20 @@ export default function CheckoutPage() {
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <span className="text-white/70 text-sm">REIblast Core</span>
-                  <span className="text-white text-sm font-medium">$57/mo</span>
+                  <span className="text-white/70 text-sm">
+                    One-time setup
+                  </span>
+                  <span className="text-white text-sm font-medium">
+                    ${SETUP_FEE}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between">
+                  <span className="text-white/70 text-sm">
+                    REIblast Core ({TRIAL_LENGTH_DAYS} days free)
+                  </span>
+                  <span className="text-white text-sm font-medium">
+                    ${CORE_PRICE}/mo
+                  </span>
                 </div>
               </div>
 
@@ -146,20 +160,22 @@ export default function CheckoutPage() {
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-white/50 text-xs uppercase tracking-wide">
-                    Due today
+                    Due today (one-time setup)
                   </span>
-                  <span className="text-white font-bold">$0</span>
+                  <span className="text-white font-bold">${SETUP_FEE}</span>
                 </div>
                 <div className="flex items-center justify-between">
                   <span className="text-white/50 text-xs uppercase tracking-wide">
-                    Then monthly
+                    After {TRIAL_LENGTH_DAYS}-day free trial
                   </span>
-                  <span className="text-white font-bold">$57/mo</span>
+                  <span className="text-white font-bold">${CORE_PRICE}/mo</span>
                 </div>
               </div>
               <p className="text-gold text-xs text-center mt-3 font-medium">
-                1 week free. Cancel before your trial ends and you won&apos;t
-                be charged.
+                We handle setup for you: ${SETUP_FEE} today. Then{" "}
+                {TRIAL_LENGTH_DAYS} days free. Cancel before your trial ends and
+                you won&apos;t be charged the subscription. The setup fee and
+                subscription payments are non-refundable.
               </p>
 
               <button
@@ -171,6 +187,10 @@ export default function CheckoutPage() {
 
               <CheckoutModal open={checkoutOpen} onClose={() => setCheckoutOpen(false)} />
 
+              <p className="text-white/50 text-xs text-center mt-3">
+                Your card is charged ${SETUP_FEE} for setup when you submit the
+                form.
+              </p>
               <p className="text-white/30 text-xs text-center mt-3">
                 🔒 Secure checkout via Authorize.net
               </p>

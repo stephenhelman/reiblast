@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { CORE_PRICE, SETUP_FEE, TRIAL_LENGTH_DAYS } from "@/lib/pricing";
 import Hero from "@/components/marketing/Hero";
 import TrialPopup from "@/components/marketing/TrialPopup";
 
@@ -99,7 +100,7 @@ export default function HomePage() {
             href="/checkout"
             className="inline-block bg-gold text-black font-bold text-lg px-10 py-4 rounded-xl hover:bg-gold-hover transition-colors"
           >
-            Get Started — $57/mo
+            Get Started — ${SETUP_FEE} Setup, {TRIAL_LENGTH_DAYS} Days Free, Then ${CORE_PRICE}/mo
           </Link>
           <div className="mt-4">
             <Link
