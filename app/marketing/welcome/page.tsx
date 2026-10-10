@@ -19,6 +19,10 @@ const HQ_BOOKING_EMBED_SRC =
 const discoveryRedirectUrl = `${MARKETING_URL}/discovery`;
 const bookingSrc = `${HQ_BOOKING_EMBED_SRC}?redirect_url=${encodeURIComponent(discoveryRedirectUrl)}`;
 
+// Click-to-text. `?&body=` is the form that prefills on both iOS and Android.
+const SMS_DISPLAY = "(915) 800-8266";
+const SMS_HREF = `sms:+19158008266?&body=${encodeURIComponent("Hi Stephen, I just finished onboarding —")}`;
+
 // Pre-auth, marketing-host, mobile-first (leads hit this from an email/text
 // link on a phone) — the opposite of the tools app's desktop-only gate.
 // Watch-then-book — NOT a success confirmation. Onboarding-submit flows
@@ -97,6 +101,32 @@ export default function WelcomePage() {
         </p>
 
         <BookingModal bookingSrc={bookingSrc} />
+      </div>
+
+      {/* Click-to-text — secondary nudge (outline, not solid gold) so the booking CTA stays the page's one dominant action. Warms the SMS channel after the texting consent given on the onboarding form. */}
+      <div className="w-full max-w-[880px] bg-surface border border-border-default rounded-[20px] p-5 sm:p-10 flex flex-col items-center">
+        <p className="text-gold text-xs font-bold uppercase tracking-widest text-center mb-2">
+          Stay In The Loop
+        </p>
+        <h2 className="text-white text-xl sm:text-2xl font-bold text-center mb-2">
+          Send Us a Quick Text
+        </h2>
+        <p className="text-gray-400 text-sm text-center mb-6">
+          Save our number and send us a quick text so you never miss an account
+          update or deal alert.
+        </p>
+
+        {/* Same classes as Button variant="outline" size="lg" — Button renders a <button>, so it can't carry an href. */}
+        <a
+          href={SMS_HREF}
+          className="inline-flex items-center justify-center gap-2 w-full sm:w-auto px-8 py-4 text-lg rounded-xl border border-gold text-gold bg-transparent hover:bg-gold/10 font-semibold transition-colors duration-150"
+        >
+          Text Us Now
+        </a>
+        <p className="text-gray-400 text-sm text-center mt-4">
+          Text us at{" "}
+          <span className="text-white font-semibold">{SMS_DISPLAY}</span>
+        </p>
       </div>
     </div>
   );
