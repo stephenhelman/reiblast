@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { updateHQContact } from '@/lib/ghl'
 import { ONBOARDING_STAGES, SUPPORT_EMAIL } from '@/lib/constants'
-import { guardRegion } from '@/lib/geo'
+import { guardRegion, normalizeBusinessCountry } from '@/lib/geo'
 import { enqueueAndSendOnboardingIntent } from '@/lib/billing/onboardingIntents'
 
 const REQUIRED_FIELDS = [
@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
         businessCity: body.businessCity as string,
         businessState: body.businessState as string,
         businessZip: body.businessZip as string,
+        businessCountry: normalizeBusinessCountry(body.businessCountry),
         businessPhone: body.businessPhone as string,
         businessEmail: body.businessEmail as string,
         websiteUrl: (body.websiteUrl as string) || null,

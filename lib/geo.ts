@@ -24,6 +24,35 @@ import { SUPPORT_EMAIL } from "@/lib/constants";
  */
 export const ALLOWED_COUNTRIES = ["US", "CA"] as const;
 
+export type BusinessCountry = (typeof ALLOWED_COUNTRIES)[number];
+
+/** Normalise a stored/submitted country to a supported one; unknown/null → "US". */
+export function normalizeBusinessCountry(value: unknown): BusinessCountry {
+  return value === "CA" ? "CA" : "US";
+}
+
+/** Default GHL location timezone per country/region (IANA names). */
+const CA_PROVINCE_TIMEZONES: Record<string, string> = {
+  BC: "America/Vancouver",
+  YT: "America/Whitehorse",
+  AB: "America/Edmonton",
+  NT: "America/Yellowknife",
+  SK: "America/Regina",
+  MB: "America/Winnipeg",
+  NU: "America/Rankin_Inlet",
+  ON: "America/Toronto",
+  QC: "America/Toronto",
+  NB: "America/Moncton",
+  NS: "America/Halifax",
+  PE: "America/Halifax",
+  NL: "America/St_Johns",
+};
+
+export function defaultTimezone(country: BusinessCountry, state?: string): string {
+  if (country === "CA") return CA_PROVINCE_TIMEZONES[(state || "").toUpperCase()] || "America/Toronto";
+  return "US/Central";
+}
+
 /**
  * Route prefixes that are geo-gated: the checkout and onboarding entry points only.
  *

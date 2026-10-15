@@ -136,6 +136,7 @@ export async function POST(req: NextRequest) {
       city,
       state,
       zip,
+      country: user.businessCountry || "US",
       email: user.businessEmail || normalizedEmail,
       phone: user.businessPhone || "",
       authorizedRepFirstName: firstName || "",

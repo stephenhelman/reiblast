@@ -32,6 +32,7 @@ model User {
   businessCity        String?
   businessState       String?
   businessZip         String?
+  businessCountry     String? // ISO-2 ("US" | "CA"); null on pre-Canada rows, treat as "US".
   businessPhone       String? // Member's self-entered business phone from onboarding — NOT the A2P number.
   businessEmail       String?
   a2pPhone            String? // KYC-assigned A2P sending number, written by the custom-values webhook; null = not yet provisioned. This is the field the tools /enter gate reads.
