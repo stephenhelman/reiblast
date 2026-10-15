@@ -3,7 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { guardRegion } from '@/lib/geo'
 
 export async function GET(req: NextRequest) {
-  // US-only funnel gate — mirrors the middleware page gate so the endpoint
+  // US/Canada funnel gate — mirrors the middleware page gate so the endpoint
   // behind the form can't be called directly from a blocked region.
   const blocked = guardRegion(req)
   if (blocked) return blocked

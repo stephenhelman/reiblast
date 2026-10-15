@@ -3,14 +3,15 @@ import type { NextRequest } from "next/server";
 import { SUPPORT_EMAIL } from "@/lib/constants";
 
 /**
- * US-only gating for the paid funnel.
+ * US + Canada gating for the paid funnel.
  *
- * KNOWN LIMITATION: this is IP geolocation. It stops casual non-US traffic, not
- * a US VPN or a proxied connection — anyone with a US exit node reads as US here.
- * That is accepted: the real backstop is downstream, at the a2pPhone / A2P
- * provisioning step, which requires a genuine US business identity (EIN, US
- * address, US phone) before any sub-account can send SMS. This middleware gate is
- * the cheap first filter, not the compliance control.
+ * KNOWN LIMITATION: this is IP geolocation. It stops casual traffic from other
+ * countries, not a VPN or a proxied connection — anyone with a US/CA exit node
+ * reads as allowed here. That is accepted: the real backstop is downstream, at
+ * the a2pPhone / A2P provisioning step, which requires a genuine North American
+ * business identity (tax ID, address, phone) before any sub-account can send
+ * SMS. This middleware gate is the cheap first filter, not the compliance
+ * control.
  */
 
 /**
@@ -21,10 +22,10 @@ import { SUPPORT_EMAIL } from "@/lib/constants";
  * jurisdiction and the +1 numbering plan. If Puerto Rico et al. should be able to
  * buy, add those codes here — nothing else needs to change.
  */
-export const ALLOWED_COUNTRIES = ["US"] as const;
+export const ALLOWED_COUNTRIES = ["US", "CA"] as const;
 
 /**
- * Route prefixes that are US-gated: the checkout and onboarding entry points only.
+ * Route prefixes that are geo-gated: the checkout and onboarding entry points only.
  *
  * Everything else on the marketing site (pricing, features, FAQ, legal, contact,
  * /login for existing members who may be travelling) stays globally viewable.
@@ -33,7 +34,7 @@ export const ALLOWED_COUNTRIES = ["US"] as const;
  */
 export const GATED_PREFIXES = [
   "/checkout", // primary checkout page + embedded order form
-  "/ari-special", // promo-gated checkout (14-day trial form)
+  "/ari-special", // promo-code checkout (14/30-day trial forms)
   "/signup", // funnel entry, links straight to the payment link
   "/onboarding", // covers /onboarding and /onboarding/success
 ] as const;

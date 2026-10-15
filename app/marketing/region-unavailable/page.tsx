@@ -36,7 +36,7 @@ export default function RegionUnavailablePage() {
         </h1>
 
         <p className="text-gray-400 text-base mb-8" style={{ lineHeight: 1.75 }}>
-          Signups are currently limited to the United States. If you believe this
+          Signups are currently limited to the United States and Canada. If you believe this
           is an error, or you&apos;d like more information, get in touch and
           we&apos;ll take a look.
         </p>

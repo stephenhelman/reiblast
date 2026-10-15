@@ -108,7 +108,7 @@ export async function middleware(request: NextRequest) {
 
   // Marketing site — all other hostnames
 
-  // US-only gate on the paid funnel. Scoped to the checkout/onboarding entry
+  // US/Canada gate on the paid funnel. Scoped to the checkout/onboarding entry
   // points in GATED_PREFIXES; the rest of the marketing site stays globally
   // viewable. This runs at the edge before the rewrite, so a gated route is
   // unreachable by direct URL for a blocked visitor — not merely hidden in the UI.
