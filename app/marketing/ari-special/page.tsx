@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { LogoFull } from "@/components/shared/Logo";
+import { resolveAriPromo } from "@/lib/ariPromo";
 import AriSpecialOffer from "./AriSpecialOffer";
 
 export const metadata: Metadata = {
@@ -7,28 +8,13 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-const ARI_CHECKOUT_LINK = process.env.NEXT_PUBLIC_ARI_CHECKOUT_LINK;
-
-function NotFound() {
-  // Deliberately generic — doesn't hint that a promo-gated page exists here.
-  return (
-    <div className="min-h-screen bg-black flex items-center justify-center px-6">
-      <p className="text-white/40 text-sm">Page not found.</p>
-    </div>
-  );
-}
-
 export default function AriSpecialPage({
   searchParams,
 }: {
   searchParams: { promo?: string };
 }) {
   const promo = searchParams.promo || "";
-  const expected = process.env.ARI_PROMO_CODE;
-
-  if (!expected || promo !== expected) {
-    return <NotFound />;
-  }
+  const initialTier = resolveAriPromo(promo);
 
   return (
     <div className="min-h-screen bg-black px-6 pt-32 pb-12">
@@ -44,10 +30,10 @@ export default function AriSpecialPage({
           Welcome to the special discount!
         </h1>
         <p className="text-white/60 text-base mb-10 leading-relaxed">
-          Click below to claim your special offer.
+          Click below and enter your promo code to claim your special offer.
         </p>
 
-        <AriSpecialOffer formUrl={ARI_CHECKOUT_LINK} />
+        <AriSpecialOffer initialTier={initialTier} initialCode={promo} />
       </div>
     </div>
   );

@@ -23,7 +23,7 @@ function maskName(firstName: string, lastName: string): string {
 }
 
 export async function GET(req: NextRequest) {
-  // US-only funnel gate — this feeds the social-proof ticker on the gated
+  // US/Canada funnel gate — this feeds the social-proof ticker on the gated
   // /onboarding page, so it follows the same policy as the rest of the flow.
   const blocked = guardRegion(req)
   if (blocked) return blocked
