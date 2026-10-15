@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { ONBOARDING_STAGE_IDS } from "@/lib/constants";
+import { normalizeBusinessCountry, defaultTimezone } from "@/lib/geo";
 
 const GHL_BASE_URL = "https://services.leadconnectorhq.com";
 
@@ -378,6 +379,7 @@ export async function provisionSubAccount(
   businessCity?: string,
   businessState?: string,
   businessZip?: string,
+  businessCountry?: string,
 ): Promise<{ locationId: string; userId: string; tempPassword: string }> {
   const firstName = name.split(" ")[0];
   const lastName = name.split(" ").slice(1).join(" ") || "User";
@@ -406,9 +408,9 @@ export async function provisionSubAccount(
       address: businessAddress || "123 Placeholder St",
       city: businessCity || "Austin",
       state: businessState || "TX",
-      country: "US",
+      country: normalizeBusinessCountry(businessCountry),
       postalCode: businessZip || "78701",
-      timezone: "US/Central",
+      timezone: defaultTimezone(normalizeBusinessCountry(businessCountry), businessState),
       prospectInfo: { firstName, lastName, email },
       snapshotId: process.env.GHL_SNAPSHOT_ID,
     };
@@ -639,6 +641,7 @@ export async function updateSubAccountProfile(
     city: string
     state: string
     zip: string
+    country?: string
     email: string
     phone: string
     authorizedRepFirstName: string
@@ -655,8 +658,8 @@ export async function updateSubAccountProfile(
       city: profile.city,
       state: profile.state,
       postalCode: profile.zip,
-      country: "US",
-      timezone: "US/Central",
+      country: normalizeBusinessCountry(profile.country),
+      timezone: defaultTimezone(normalizeBusinessCountry(profile.country), profile.state),
       prospectInfo: {
         firstName: profile.authorizedRepFirstName,
         lastName: profile.authorizedRepLastName,

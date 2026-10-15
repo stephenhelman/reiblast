@@ -14,6 +14,12 @@ const US_STATES = [
   'TX','UT','VT','VA','WA','WV','WI','WY',
 ]
 
+const CA_PROVINCES = [
+  'AB','BC','MB','NB','NL','NS','NT','NU','ON','PE','QC','SK','YT',
+]
+
+type Country = 'US' | 'CA'
+
 const BUSINESS_TYPES = ['LLC', 'Corporation', 'Sole Proprietorship', 'Partnership']
 
 const LOADING_MESSAGES = [
@@ -56,6 +62,7 @@ interface Step1Fields {
   businessCity: string
   businessState: string
   businessZip: string
+  businessCountry: Country
   businessPhone: string
   businessEmail: string
   websiteUrl: string
@@ -483,6 +490,7 @@ function OnboardingContent() {
     businessCity: '',
     businessState: 'TX',
     businessZip: '',
+    businessCountry: 'US',
     businessPhone: '',
     businessEmail: '',
     websiteUrl: '',
@@ -545,6 +553,15 @@ function OnboardingContent() {
     }, 2000)
     return () => clearInterval(interval)
   }, [loading])
+
+  function setCountry(e: React.ChangeEvent<HTMLSelectElement>) {
+    const businessCountry = e.target.value as Country
+    setFields((prev) => ({
+      ...prev,
+      businessCountry,
+      businessState: businessCountry === 'CA' ? CA_PROVINCES[0] : US_STATES[0],
+    }))
+  }
 
   function setField(key: keyof Step1Fields) {
     return (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
@@ -783,20 +800,31 @@ function OnboardingContent() {
               </select>
             </div>
             <Input label="Business Address" type="text" required placeholder="123 Main St" value={fields.businessAddress} onChange={setField('businessAddress')} />
+            <div className="flex flex-col gap-1">
+              <label className="text-sm font-medium text-white/80">Country</label>
+              <select
+                value={fields.businessCountry}
+                onChange={setCountry}
+                className="bg-[#1C1C1C] text-white rounded-lg border border-[#2A2A2A] focus:border-gold px-4 py-3 outline-none transition-colors"
+              >
+                <option value="US">United States</option>
+                <option value="CA">Canada</option>
+              </select>
+            </div>
             <div className="grid grid-cols-2 gap-4">
               <Input label="City" type="text" required value={fields.businessCity} onChange={setField('businessCity')} />
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-medium text-white/80">State</label>
+                <label className="text-sm font-medium text-white/80">{fields.businessCountry === 'CA' ? 'Province' : 'State'}</label>
                 <select
                   value={fields.businessState}
                   onChange={setField('businessState')}
                   className="bg-[#1C1C1C] text-white rounded-lg border border-[#2A2A2A] focus:border-gold px-4 py-3 outline-none transition-colors"
                 >
-                  {US_STATES.map((s) => <option key={s}>{s}</option>)}
+                  {(fields.businessCountry === 'CA' ? CA_PROVINCES : US_STATES).map((s) => <option key={s}>{s}</option>)}
                 </select>
               </div>
             </div>
-            <Input label="Zip Code" type="text" required value={fields.businessZip} onChange={setField('businessZip')} />
+            <Input label={fields.businessCountry === 'CA' ? 'Postal Code' : 'Zip Code'} type="text" required placeholder={fields.businessCountry === 'CA' ? 'A1A 1A1' : undefined} value={fields.businessZip} onChange={setField('businessZip')} />
             <Input label="Business Phone" type="tel" required value={fields.businessPhone} onChange={setField('businessPhone')} />
             <Input label="Business Email" type="email" required value={fields.businessEmail} onChange={setField('businessEmail')} />
             <Input label="Website URL" type="url" placeholder="Leave blank if you don't have one yet" value={fields.websiteUrl} onChange={setField('websiteUrl')} />
