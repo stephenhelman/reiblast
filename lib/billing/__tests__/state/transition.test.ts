@@ -355,14 +355,12 @@ describe("pause_confirmed (legacy; the 15-minute debounce was removed)", () => {
 describe("subscription events (nightly sweep)", () => {
   const cov = new Date("2026-11-21T07:00:00Z");
   const canceled = (duringTrial: boolean): DunningEvent => ({ kind: "subscription_canceled", duringTrial });
-  it("canceled / expired → churned with an immediate saas_pause, from every live state (billing stopped)", () => {
+  it("canceled → churned with an immediate saas_pause, from every live state (billing stopped)", () => {
     for (const state of ["trial", "active", "payment_failed", "paused", "inactive", null] as (BillingState | null)[]) {
-      for (const e of [canceled(false), { kind: "subscription_expired" } as DunningEvent]) {
-        const d = decide(snap({ state, strikes: 1, pauseReason: state === "paused" ? "non_payment" : null }), e, ctx());
-        expect(d).toMatchObject({ nextState: "churned", pauseReason: null, coreFailureOpen: false });
-        expect(effects(d)).toEqual(["saas_pause"]);
-        expect(stages(d)).toEqual(["churned"]);
-      }
+      const d = decide(snap({ state, strikes: 1, pauseReason: state === "paused" ? "non_payment" : null }), canceled(false), ctx());
+      expect(d).toMatchObject({ nextState: "churned", pauseReason: null, coreFailureOpen: false });
+      expect(effects(d)).toEqual(["saas_pause"]);
+      expect(stages(d)).toEqual(["churned"]);
     }
   });
   it("already churned: no change, no second pause", () => {
@@ -371,12 +369,12 @@ describe("subscription events (nightly sweep)", () => {
     expect(d.reason).toBe("already churned");
   });
   it("covered (now < coreCoveredUntil): churn is DEFERRED and recorded, nothing else", () => {
-    for (const e of [canceled(false), { kind: "subscription_expired" } as DunningEvent]) {
+    for (const [e, re] of [[canceled(false), /churn deferred: covered until 2026-11-21/], [{ kind: "subscription_expired" } as DunningEvent, /expiry deferred: covered until 2026-11-21/]] as const) {
       const d = decide(snap(), e, ctx({ coveredUntil: cov }));
       expect(d.noop).toBe(true);
       expect(d.nextState).toBe("active");
       expect(d.sideEffects).toEqual([]);
-      expect(d.reason).toMatch(/churn deferred: covered until 2026-11-21/);
+      expect(d.reason).toMatch(re);
     }
   });
   it("…once coverage ends the same event churns", () => {

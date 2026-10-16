@@ -1,5 +1,6 @@
-import type { Prisma, PrismaClient } from "@prisma/client";
+import type { BillingState, PauseReason, Prisma, PrismaClient } from "@prisma/client";
 import { denverDayOf } from "./reports/denver";
+import { EXPIRED_SUB_KEY } from "./stages";
 import { enqueuePlacementIntent, HANDOFF_DEDUPE_PREFIX, sendIntent, type SendDeps } from "./intents/send";
 
 /**
@@ -31,6 +32,10 @@ export type HandoffResult =
 
 type Db = Pick<PrismaClient, "ghlAccount" | "ghlIntent" | "ghlEvent">;
 
+/** The Clients intent stage a handoff places the card in. payment_failed because the subscription expired is the "Expired Sub" stage, as the engine itself would place it. */
+export const handoffStageFor = (a: { billingState: BillingState; pauseReason: PauseReason | null }): string =>
+  a.billingState === "payment_failed" && a.pauseReason === "subscription_expired" ? EXPIRED_SUB_KEY : a.billingState;
+
 export async function handoffToClients(db: Db, ghlAccountId: string, opts: { env?: Record<string, string | undefined>; now?: Date; send?: SendDeps } = {}): Promise<HandoffResult> {
   const env = opts.env ?? process.env;
   const a = await db.ghlAccount.findUnique({
@@ -47,11 +52,12 @@ export async function handoffToClients(db: Db, ghlAccountId: string, opts: { env
   }
 
   const fields = { pause_reason: a.pauseReason, trial_offer: a.trialOffer, trial_end_date: a.trialEndsAt ? denverDayOf(a.trialEndsAt) : null };
-  const base = { account: { id: a.id, contactId: a.contactId }, pipeline: "active_client" as const, stage: a.billingState, fields };
+  const stage = handoffStageFor({ billingState: a.billingState, pauseReason: a.pauseReason });
+  const base = { account: { id: a.id, contactId: a.contactId }, pipeline: "active_client" as const, stage, fields };
 
   if (clientHandoffMode(env) !== "live") {
     const r = await enqueuePlacementIntent(db, { ...base, dedupeKey: `handoff-shadow:${a.id}`, mode: "shadow", sendable: false });
-    return { status: "shadow", stage: a.billingState, intentId: r.id };
+    return { status: "shadow", stage, intentId: r.id };
   }
 
   // Record the intent first (idempotent on its dedupeKey), then claim the handoff atomically so two deliveries can't both send it.
@@ -60,5 +66,5 @@ export async function handoffToClients(db: Db, ghlAccountId: string, opts: { env
   const claimed = await db.ghlAccount.updateMany({ where: { id: a.id, activeClientSince: null }, data: { activeClientSince: opts.now ?? new Date() } });
   if (claimed.count === 0) return { status: "already_handed_off" };
   const sent = await sendIntent(db, r.id, { ...opts.send, env });
-  return { status: "handed_off", stage: a.billingState, intentId: r.id, sent };
+  return { status: "handed_off", stage, intentId: r.id, sent };
 }

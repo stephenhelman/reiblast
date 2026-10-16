@@ -48,7 +48,7 @@ describe("B10 — pipeline routing", () => {
     const refresh = decide(snap({ state: "trial" }), { kind: "trial_auth_succeeded" }, ctx({ routing: ONB("New Client"), subscription: { name: "14 Day Trial", trialEndsAt: null } }));
     expect(refresh.intents).toEqual([]);
     expect(decide(snap(), { kind: "command", stage: "inactive" }, ctx({ routing: ONB("New Client") })).intents).toEqual([]);
-    expect(decide(snap(), { kind: "subscription_expired" }, ctx({ routing: ONB("New Client") })).intents).toEqual([]);
+    expect(decide(snap(), { kind: "subscription_canceled", duringTrial: false }, ctx({ routing: ONB("New Client") })).intents).toEqual([]);
   });
   it("the same decision for handed-off vs onboarding differs only in intents (state, strikes, effects unchanged)", () => {
     const a = decide(snap(), wFail, ctx({ walletBalance: neg, routing: HANDED }));

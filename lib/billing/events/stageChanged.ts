@@ -2,7 +2,7 @@ import type { Prisma, PrismaClient } from "@prisma/client";
 import { applyDunning, dunningMode, type ApplyDeps } from "../state/apply";
 import type { BillingState, DunningEvent } from "../state/types";
 import { handoffToClients, HANDOFF_TRIGGER_STAGE } from "../clientHandoff";
-import { billingStateForClientsStage, isForwardProgress, isKnownOnboardingStage } from "../stages";
+import { billingStateForClientsStage, EXPIRED_SUB_KEY, isExpiredSubStage, isForwardProgress, isKnownOnboardingStage } from "../stages";
 import { customDataField } from "./payloadFields";
 
 /**
@@ -16,7 +16,7 @@ import { customDataField } from "./payloadFields";
  * same name so a manual/curl test posting flat JSON still works. "stage" is the opportunity's new stage NAME (not an
  * id) — for the onboarding pipeline it must be one of lib/billing/stages.ts ONBOARDING_STAGE_NAMES; for
  * active_client, either an exact Clients stage NAME (lib/billing/stages.ts CLIENTS_STAGES: "Trial", "Active Member", "Payment Failed",
- * "Paused", "Inactive", "Churned" — what the workflows actually send) or an exact lowercase BillingState key (BILLING_STAGES below). Matching is
+ * "Expired Sub", "Paused", "Inactive", "Churned" — what the workflows actually send) or an exact lowercase BillingState key (BILLING_STAGES below). Matching is
  * exact (no case folding or trimming beyond the payload parse); anything else is recorded, never guessed. A legacy "paused_confirm" is still
  * accepted and ignored by the engine.
  */
@@ -24,6 +24,9 @@ export const BILLING_STAGES: BillingState[] = ["trial", "active", "payment_faile
 export const PAUSE_CONFIRM_STAGE = "paused_confirm";
 /** A repeat of the same (contact, pipeline, stage) within this window is a duplicate delivery. */
 export const DUPLICATE_WINDOW_MS = 60_000;
+
+/** Onboarding side-stage NAMES that are billing commands (same meaning as the Clients stages of that name). */
+const ONBOARDING_SIDE_COMMANDS: Record<string, BillingState | undefined> = { Paused: "paused", "Payment Failed": "payment_failed" };
 
 export type StagePayload = { contactId: string; pipeline: "active_client" | "onboarding"; stage: string };
 
@@ -49,12 +52,13 @@ export function billingStateForStage(stage: string): BillingState | null {
 /** active_client stage → engine event: a Clients stage name or BillingState key is a command (named by its key); the legacy "paused_confirm" parses to a no-op event; anything else is ignored. */
 export function eventForStage(stage: string): DunningEvent | null {
   if (stage === PAUSE_CONFIRM_STAGE) return { kind: "pause_confirmed" };
+  if (isExpiredSubStage(stage)) return { kind: "command", stage: EXPIRED_SUB_KEY };
   const state = billingStateForStage(stage);
   return state ? { kind: "command", stage: state } : null;
 }
 
 /** Stage identity for duplicate detection: "Paused" and "paused" are the same move. */
-const canonicalStage = (pipeline: string, stage: string): string => (pipeline === "active_client" ? (billingStateForStage(stage) ?? stage) : stage);
+const canonicalStage = (pipeline: string, stage: string): string => (pipeline === "active_client" ? (isExpiredSubStage(stage) ? EXPIRED_SUB_KEY : (billingStateForStage(stage) ?? stage)) : stage);
 
 export type ProcessResult = "processed" | "failed" | "already_processed" | "not_found";
 
@@ -119,6 +123,13 @@ export async function processStageChanged(eventId: string, opts: { db: PrismaCli
       if (stage === HANDOFF_TRIGGER_STAGE && !account.activeClientSince) {
         const h = await handoffToClients(db, account.id, { env: opts.deps?.env, send: opts.deps?.send });
         if (h.status === "no_billing_state") note = "handoff: null billingState — no Clients intent, listed for review (client_handoff_review)";
+      }
+      // A manual move to the Onboarding side stages Paused / Payment Failed is an engine command for a member still in onboarding, exactly
+      // like the Clients equivalents. It never touches onboardingProgress (above); a move to a progress stage stays progress-only.
+      // Handed-off members are driven from the Clients pipeline, so their Onboarding card moves are not commands.
+      const sideCommand = ONBOARDING_SIDE_COMMANDS[stage];
+      if (sideCommand && !account.activeClientSince) {
+        await applyDunning(db, { ghlAccountId: account.id, trigger: `command:${sideCommand}:${event.id}`, event: { kind: "command", stage: sideCommand }, eventAt: event.receivedAt }, { mode: dunningMode(opts.deps?.env), deps: opts.deps });
       }
       await done(note);
       return "processed";

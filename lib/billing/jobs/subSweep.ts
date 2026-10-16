@@ -5,6 +5,7 @@ import { listSubscriptionsPage, type SubRow } from "../subscriptions";
 import { applyDunning, dunningMode } from "../state/apply";
 import { loadProjection } from "../state/projection";
 import { churnTrigger, hasOtherLiveSubscription, transitionEvents, trialEndedTrigger, trialEndedWithoutRelationshipEnd } from "../state/sweepRules";
+import { bestSubscription, seedStartingState, startingStateForSubscription } from "../state/seedStart";
 import { decide } from "../state/transition";
 import type { DunningEvent, SubscriptionInfo } from "../state/types";
 import type { JobFn } from "./types";
@@ -23,7 +24,7 @@ import type { JobFn } from "./types";
  */
 const PAGE = 100;
 
-type Phase = "list" | "events" | "settle" | "trial" | "invoices";
+type Phase = "list" | "events" | "seed" | "settle" | "trial" | "invoices";
 /** Everything phase 1 read, so the later phases (and a dry-run / seed, which write no state) all work from one consistent listing. */
 type Seen = { id: string; contactId: string; status: string; prev: string | null; name: string | null; trialEndsAt: string | null; cancelledAt: string | null; updatedAt: string | null };
 type Cursor = { phase: Phase; offset: number; invOffset: number; evIdx: number; seed: boolean; acc: Record<string, number>; sample: string[]; seen: Seen[] };
@@ -109,6 +110,24 @@ export const runSubSweep: JobFn = async (ctx) => {
         const trigger = ch.suffix === "trialing" ? `sub:${s.id}:trialing` : churnTrigger(s.id, ch.suffix, { duringTrial: ch.event.kind === "subscription_canceled" && ch.event.duringTrial, coveredUntil: covered, now: ctx.now });
         await fire(s.contactId, ch.event, trigger, { name: s.name, trialEndsAt: s.trialEndsAt ? new Date(s.trialEndsAt) : null });
       }
+    }
+    st.phase = "seed";
+  }
+
+  // ── phase 2b: starting state for members still on a NULL billingState (shadow never writes the account otherwise) ──
+  // Seeding only: fills a null state from the best live subscription; never overwrites a state, emits no event and no intent.
+  if (st.phase === "seed") {
+    const byContact = new Map<string, Seen[]>();
+    for (const x of st.seen) byContact.set(x.contactId, [...(byContact.get(x.contactId) ?? []), x]);
+    for (const [contactId, subs] of byContact) {
+      if (ctx.shouldYield()) return yieldNow();
+      const acct = await db.ghlAccount.findFirst({ where: { contactId, accountType: "member", billingState: null }, select: { id: true } });
+      if (!acct) continue;
+      const best = bestSubscription(subs);
+      const start = best ? startingStateForSubscription({ status: best.status, name: best.name, trialEndsAt: best.trialEndsAt ? new Date(best.trialEndsAt) : null }) : null;
+      if (!start) { bump("seedSkipped"); note(`${last4(contactId)} left unseeded: ${best ? `subscription ${best.status}` : "no live subscription"}`); continue; }
+      if (!ctx.apply) { bump(`wouldSeed:${start.billingState}`); continue; }
+      if (await seedStartingState(db, acct.id, start)) { bump(`seeded:${start.billingState}`); note(`${last4(contactId)} seeded ${start.billingState}`); }
     }
     st.phase = "settle";
   }

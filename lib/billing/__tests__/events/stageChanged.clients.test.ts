@@ -24,7 +24,7 @@ beforeEach(() => {
 
 describe("Clients stage mapping (pure)", () => {
   it("covers every CLIENTS_STAGES name exactly once", () => {
-    expect(NAME_TO_KEY.map(([n]) => n)).toEqual([...CLIENTS_STAGES]);
+    expect([...NAME_TO_KEY.map(([n]) => n), "Expired Sub"].sort()).toEqual([...CLIENTS_STAGES].sort()); // Expired Sub is covered by the expired_sub tests below
   });
   it.each(NAME_TO_KEY)("name %s → key %s, and the key itself is accepted", (name, key) => {
     expect(billingStateForClientsStage(name)).toBe(key);

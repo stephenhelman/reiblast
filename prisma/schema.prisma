@@ -940,6 +940,7 @@ enum PauseReason {
   expired_invoice
   voluntary
   manual_killswitch
+  subscription_expired
 }
 
 enum BillingClass {

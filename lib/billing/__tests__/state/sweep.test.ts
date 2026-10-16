@@ -188,7 +188,7 @@ describe("sub_sweep job", () => {
     expect(db.decisions.some((d: any) => d.ghlAccountId === "A5")).toBe(false);
   });
 
-  it("expired → churned; unpaid / paused / incomplete_expired and plain active never emit", async () => {
+  it("expired → payment_failed (subscription_expired), NOT churned; unpaid / paused / incomplete_expired and plain active never emit", async () => {
     const db = makeFake(accounts(), ledger());
     setSubs(baseSubs());
     await run(db);
@@ -196,7 +196,7 @@ describe("sub_sweep job", () => {
     await run(db);
     expect(db.decisions.filter((d: any) => d.ghlAccountId === "A6")).toHaveLength(0); // unpaid → paused: no event
     const e = db.decisions.find((d: any) => d.ghlAccountId === "A5");
-    expect(e).toMatchObject({ trigger: "sub:S5a:expired", toState: "churned" });
+    expect(e).toMatchObject({ trigger: "sub:S5a:expired", toState: "payment_failed", pauseReason: "subscription_expired", coreFailureOpen: true });
   });
 
   it("TRIAL EXPIRY: > trial end + 2 days with no paid core since the trial began → payment_failed (core failure open); a converted trial is left alone; runs once", async () => {
@@ -284,3 +284,52 @@ describe("sub_sweep job", () => {
     expect(db.intents.every((i: any) => i.status === "skipped_shadow")).toBe(true);
   });
 });
+
+describe("sub_sweep: starting-state seeding for null-state members (shadow mode)", () => {
+  const nullAccounts = () => [
+    member({ id: "N1", contactId: "CN1", billingState: null, locationId: "LN1" }),
+    member({ id: "N2", contactId: "CN2", billingState: null, locationId: "LN2" }),
+    member({ id: "N3", contactId: "CN3", billingState: null, locationId: "LN3" }),
+    member({ id: "N4", contactId: "CN4", billingState: "paused", pauseReason: "manual_killswitch", locationId: "LN4" }),
+    member({ id: "N5", contactId: "CN5", billingState: null, locationId: "LN5" }),
+  ];
+  const nullSubs = () => [
+    { subscriptionId: "SN1", contactId: "CN1", status: "trialing", name: "14 Day Trial", trialEnd: "2026-10-20T00:00:00Z" },
+    { subscriptionId: "SN2", contactId: "CN2", status: "active" },
+    { subscriptionId: "SN3", contactId: "CN3", status: "unpaid" },
+    { subscriptionId: "SN4", contactId: "CN4", status: "active" },
+    { subscriptionId: "SN5", contactId: "CN5", status: "paused" },
+  ];
+  it("--apply seeds trial (offer + end), active and payment_failed for null states; never overwrites; leaves paused subs unseeded; emits no event or intent", async () => {
+    const db = makeFake(nullAccounts());
+    setSubs(nullSubs());
+    const r = await run(db); // first run: seed run, still seeds account states
+    const get = (id: string) => db.ghlAccount.findUnique({ where: { id } });
+    expect(await get("N1")).toMatchObject({ billingState: "trial", trialOffer: "14 Day Trial", trialEndsAt: new Date("2026-10-20T00:00:00Z") });
+    expect(await get("N2")).toMatchObject({ billingState: "active" });
+    expect(await get("N3")).toMatchObject({ billingState: "payment_failed" });
+    expect(await get("N4")).toMatchObject({ billingState: "paused", pauseReason: "manual_killswitch" }); // untouched
+    expect((await get("N5")).billingState).toBeNull();
+    expect(db.decisions).toHaveLength(0);
+    expect(db.intents).toHaveLength(0);
+    expect(r.summary as any).toMatchObject({ "seeded:trial": 1, "seeded:active": 1, "seeded:payment_failed": 1, seedSkipped: 1 });
+  });
+  it("dry-run writes nothing and reports wouldSeed", async () => {
+    const db = makeFake(nullAccounts());
+    setSubs(nullSubs());
+    const r = await run(db, { apply: false });
+    expect((await db.ghlAccount.findUnique({ where: { id: "N1" } })).billingState).toBeNull();
+    expect(r.summary as any).toMatchObject({ "wouldSeed:trial": 1, "wouldSeed:active": 1 });
+  });
+  it("an expired subscription on a null-state account becomes payment_failed / subscription_expired through the event path", async () => {
+    const acct = member({ id: "N1", contactId: "CN1", billingState: null });
+    const db = makeFake([acct]);
+    setSubs([{ subscriptionId: "SN1", contactId: "CN1", status: "active" }]);
+    await run(db); // first run seeds GhlSubscriptionState (and the account: active)
+    acct.billingState = null; // …pretend it is still unseeded when the expiry is seen
+    setSubs([{ subscriptionId: "SN1", contactId: "CN1", status: "expired" }]);
+    await run(db);
+    expect(await db.ghlAccount.findUnique({ where: { id: "N1" } })).toMatchObject({ billingState: "payment_failed", pauseReason: "subscription_expired" });
+  });
+});
+

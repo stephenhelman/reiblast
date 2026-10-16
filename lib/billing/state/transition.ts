@@ -1,4 +1,5 @@
 import { keyForProgressStage } from "../onboardingStages";
+import { EXPIRED_SUB_KEY } from "../stages";
 import { isNeg } from "../reports/money";
 import { STRIKE_LIMIT, TRIAL_OFFER_RE, type BillingState, type Context, type Decision, type DunningEvent, type Intent, type Snapshot } from "./types";
 
@@ -43,7 +44,7 @@ const cleanBase = (s: Snapshot): Decision => ({
 
 const noop = (s: Snapshot, reason: string): Decision => ({ ...cleanBase(s), reason });
 
-const intent = (stage: BillingState, d: Pick<Decision, "warningCount" | "pauseReason" | "trialOffer" | "trialEndsAt" | "trialChanged">, extra: Record<string, unknown> = {}): Extract<Intent, { pipeline: "active_client" }> => ({
+const intent = (stage: BillingState | typeof EXPIRED_SUB_KEY, d: Pick<Decision, "warningCount" | "pauseReason" | "trialOffer" | "trialEndsAt" | "trialChanged">, extra: Record<string, unknown> = {}): Extract<Intent, { pipeline: "active_client" }> => ({
   pipeline: "active_client",
   stage,
   fields: { warningCount: d.warningCount, pauseReason: d.pauseReason, ...(d.trialChanged ? { trialOffer: d.trialOffer, trialEndsAt: d.trialEndsAt?.toISOString() ?? null } : {}), ...extra },
@@ -58,7 +59,11 @@ function moveTo(s: Snapshot, d: Decision, to: BillingState): Decision {
 const covered = (ctx: Context): boolean => !!ctx.coveredUntil && ctx.now.getTime() < ctx.coveredUntil.getTime();
 const isNoopResult = (s: Snapshot, d: Decision): boolean =>
   d.nextState === s.state && d.pauseReason === s.pauseReason && d.warningCount === s.strikes && d.coreFailureOpen === s.coreFailureOpen && !d.trialChanged && d.sideEffects.length === 0 && d.intents.length === 0;
-const finish = (s: Snapshot, d: Decision): Decision => ({ ...d, noop: isNoopResult(s, d) });
+/** subscription_expired is a payment_failed-only reason: leaving payment_failed (cure, pause, churn…) drops it. */
+const finish = (s: Snapshot, d: Decision): Decision => {
+  const fixed = d.pauseReason === "subscription_expired" && d.nextState !== "payment_failed" ? { ...d, pauseReason: null } : d;
+  return { ...fixed, noop: isNoopResult(s, fixed) };
+};
 
 /** Does deciding this event need a wallet balance? (Only the caller reads it, and only when needed.) */
 export function needsBalance(s: Snapshot, e: DunningEvent): boolean {
@@ -88,7 +93,8 @@ export function routeIntents(s: Snapshot, d: Decision, ctx: Context): Decision {
   let note = "";
   for (const i of d.intents) {
     if (i.pipeline !== "active_client" || i.kind === "fields") continue; // contact-field refreshes ride the Clients workflow only
-    if (i.stage === "payment_failed" || i.stage === "paused") intents.push({ pipeline: "onboarding", stage: i.stage, fields: i.fields });
+    if (i.stage === "payment_failed" || i.stage === EXPIRED_SUB_KEY) intents.push({ pipeline: "onboarding", stage: "payment_failed", fields: i.fields }); // an expired subscription uses the Onboarding "Payment Failed" stage
+    else if (i.stage === "paused") intents.push({ pipeline: "onboarding", stage: i.stage, fields: i.fields });
     else if ((i.stage === "active" || i.stage === "trial") && leavingBillingSideStage) {
       const key = keyForProgressStage(ctx.routing.onboardingProgress);
       if (key) intents.push({ pipeline: "onboarding", stage: key, fields: i.fields });
@@ -101,7 +107,8 @@ export function routeIntents(s: Snapshot, d: Decision, ctx: Context): Decision {
 function decideCore(s: Snapshot, e: DunningEvent, ctx: Context): Decision {
   if (e.kind === "command") return decideCommand(s, e.stage);
   if (e.kind === "pause_confirmed") return decidePauseConfirmed(s);
-  if (e.kind === "subscription_canceled" || e.kind === "subscription_expired") return decideSubscriptionEnd(s, e, ctx);
+  if (e.kind === "subscription_expired") return decideSubscriptionExpired(s, ctx);
+  if (e.kind === "subscription_canceled") return decideSubscriptionEnd(s, e, ctx);
   if (e.kind === "trial_ended_unconverted") return decideTrialEnded(s, ctx);
   const st = s.state;
 
@@ -214,13 +221,32 @@ function decidePauseConfirmed(s: Snapshot): Decision {
 }
 
 /** canceled / expired subscription → churned. Deferred while covered — except a cancel DURING the trial, which churns immediately. */
-function decideSubscriptionEnd(s: Snapshot, e: Extract<DunningEvent, { kind: "subscription_canceled" | "subscription_expired" }>, ctx: Context): Decision {
+function decideSubscriptionEnd(s: Snapshot, e: Extract<DunningEvent, { kind: "subscription_canceled" }>, ctx: Context): Decision {
   if (s.state === "churned") return noop(s, "already churned");
-  const duringTrial = e.kind === "subscription_canceled" && e.duringTrial;
-  if (!duringTrial && covered(ctx)) return noop(s, `churn deferred: covered until ${(ctx.coveredUntil as Date).toISOString().slice(0, 10)} (${e.kind === "subscription_canceled" ? "subscription canceled" : "subscription expired"})`);
-  const what = duringTrial ? "trial canceled before it ended" : e.kind === "subscription_canceled" ? "subscription canceled" : "subscription expired";
+  const duringTrial = e.duringTrial;
+  if (!duringTrial && covered(ctx)) return noop(s, `churn deferred: covered until ${(ctx.coveredUntil as Date).toISOString().slice(0, 10)} (subscription canceled)`);
+  const what = duringTrial ? "trial canceled before it ended" : "subscription canceled";
   const d: Decision = { ...cleanBase(s), pauseReason: null, coreFailureOpen: false, sideEffects: [{ type: "saas_pause" }], reason: `${what} → churned, pause location, billing stopped` };
   return finish(s, moveTo(s, d, "churned"));
+}
+
+/**
+ * An EXPIRED subscription (GHL failed to charge/invoice, the member did not leave) is a billing failure, not a departure: → payment_failed
+ * with reason subscription_expired and a core failure open (so only a core payment cures it), shown as the Clients "Expired Sub" stage.
+ * Deferred while covered, like any core failure. Only a canceled subscription churns.
+ */
+function decideSubscriptionExpired(s: Snapshot, ctx: Context): Decision {
+  if (s.state === "churned" || s.state === "inactive") return noop(s, `state excludes action (${s.state})`);
+  if (covered(ctx)) return noop(s, `expiry deferred: covered until ${(ctx.coveredUntil as Date).toISOString().slice(0, 10)} (subscription expired)`);
+  if (s.state === "paused") return finish(s, { ...cleanBase(s), coreFailureOpen: true, reason: `subscription expired recorded; already paused (${s.pauseReason ?? "no reason recorded"})` });
+  if (s.state === "payment_failed" && s.pauseReason === "subscription_expired") return noop(s, "subscription expired: already payment_failed (subscription_expired)");
+  return finish(s, expiredSubDecision(s, "subscription expired → payment_failed (subscription_expired), not churned"));
+}
+
+/** payment_failed + reason subscription_expired, core failure open, with the Expired Sub stage intent. No pause, no side effects. */
+function expiredSubDecision(s: Snapshot, reason: string): Decision {
+  const d: Decision = { ...cleanBase(s), nextState: "payment_failed", pauseReason: "subscription_expired", coreFailureOpen: true, reason };
+  return { ...d, intents: [intent(EXPIRED_SUB_KEY, d)] };
 }
 
 /** A trial ended (+2 days) with no paid core subscription: a core failure (payment_failed), unless covered. Only from trial. */
@@ -231,7 +257,12 @@ function decideTrialEnded(s: Snapshot, ctx: Context): Decision {
   return finish(s, moveTo(s, d, "payment_failed"));
 }
 
-function decideCommand(s: Snapshot, stage: BillingState): Decision {
+function decideCommand(s: Snapshot, stage: BillingState | typeof EXPIRED_SUB_KEY): Decision {
+  if (stage === EXPIRED_SUB_KEY) {
+    // A manual move to "Expired Sub" means payment_failed / subscription_expired: no pause, no side effects. Already there = confirmation.
+    if (s.state === "payment_failed" && s.pauseReason === "subscription_expired") return noop(s, "command expired_sub: already payment_failed (subscription_expired) — confirmation, no change");
+    return finish(s, expiredSubDecision(s, "command expired_sub → payment_failed (subscription_expired), no pause"));
+  }
   const same = s.state === stage;
   switch (stage) {
     case "paused": {

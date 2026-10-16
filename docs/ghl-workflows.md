@@ -4,7 +4,7 @@ These are the GHL workflows the server depends on. **None of them is needed whil
 decisions) — except A1, which the **Clients handoff** needs as soon as `CLIENT_HANDOFF=live`. Build them (disabled) ahead of cutover; see `docs/cutover.md` for the order. Contract rule 2: server → GHL is *intent only*,
 through inbound-webhook workflows; GHL → server is *report-then-interpret* (docs/ghl-server-contract.md).
 
-Stage keys equal `BillingState` values: `trial`, `active`, `payment_failed`, `paused`, `inactive`, `churned`.
+Stage keys equal `BillingState` values: `trial`, `active`, `payment_failed`, `paused`, `inactive`, `churned` — plus the Clients-only key `expired_sub` (a `payment_failed` account whose subscription expired).
 
 ## A. Server → GHL: intent receivers
 
@@ -24,6 +24,7 @@ update it** — the handoff is the first time the contact appears in Clients. Th
    | `trial` | Trial |
    | `active` | Active Member |
    | `payment_failed` | Payment Failed |
+   | `expired_sub` | Expired Sub |
    | `paused` | Paused |
    | `inactive` | Inactive |
    | `churned` | Churned |
@@ -55,7 +56,7 @@ silently does nothing:
 | `a2p_pending` | A2P Pending |
 | `a2p_approved` | A2P Approved |
 | `blocker_detected` | Blocker Detected |
-| `payment_failed` | Payment Failed (side stage) |
+| `payment_failed` | Payment Failed (side stage; also used for an expired subscription) |
 | `paused` | Paused (side stage) |
 
 (Use your actual stage names; the *keys* are what the server sends — same convention as the Active Client table in A1.) These are a
@@ -89,13 +90,15 @@ standard webhook action, with these added under **customData**:
 - `customData.pipeline` ← the **literal string** `active_client` (hardcoded in this workflow, not a merge field —
   this is what tells the server which pipeline's workflow a given event came from)
 - `customData.stage` ← `{{opportunity.pipeline_stage_name}}` (the exact stage **name**: `Trial`, `Active Member`, `Payment Failed`, `Paused`,
-  `Inactive`, `Churned`) **or** the lowercase key (table in A1). The server accepts both, matched exactly (no case folding); any other value is
+  `Expired Sub`, `Inactive`, `Churned`) **or** the lowercase key (table in A1). `Expired Sub` is a command meaning payment_failed with reason `subscription_expired` (no pause, no side effects). The server accepts both, matched exactly (no case folding); any other value is
   recorded as `stage_change_unmapped` and never guessed
 - `customData.secret` ← only if the header isn't usable on this action (see above)
 
 A manual move by staff is a *command*; an engine move arriving back is a *confirmation*.
 
 ### B2. "Stage changed — Onboarding"  → `POST /api/webhooks/ghl/stage-changed`
+A manual move to the **Paused** or **Payment Failed** side stage is an engine command for a member still in onboarding (Paused = `manual_killswitch` pause), exactly like the Clients stages of that name; it never changes `onboardingProgress`. Moves to progress stages are progress-only.
+
 **Also the trigger for the Clients handoff:** when this reports `A2P Approved`, the server (if `CLIENT_HANDOFF=live`) sends one A1 intent.
 Trigger: *Pipeline Stage Changed* (pipeline = Onboarding). Same standard-webhook-plus-customData shape as B1:
 `customData.contactId` ← `{{contact.id}}`, `customData.pipeline` ← the literal `onboarding`, `customData.stage` ←

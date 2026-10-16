@@ -91,7 +91,13 @@ export function makeFake(accounts: FakeAccount[], ledger: Row[] = [], opts: { wr
       findMany: async ({ where }: any) => accounts.filter((a) => matches(a, where)),
       // read-only unless the test opts in (live mode): a shadow run that tried to write state would throw a TypeError here
       ...(opts.writable ? { update: async ({ where, data }: any) => { writes.push(`ghlAccount.update ${JSON.stringify(data)}`); Object.assign(accounts.find((a) => a.id === where.id)!, data); } } : {}),
-      ...(opts.writable ? { updateMany: async ({ where, data }: any) => { const hit = accounts.filter((x) => matches(x, where)); for (const x of hit) { writes.push(`ghlAccount.updateMany ${JSON.stringify(data)}`); Object.assign(x, data); } return { count: hit.length }; } } : {}),
+      // updateMany is always present but, unless writable, ONLY accepts the shadow starting-state seed (where billingState IS NULL; never overwrites)
+      updateMany: async ({ where, data }: any) => {
+        if (!opts.writable && where.billingState !== null) throw new TypeError("shadow may only seed a NULL billingState");
+        const hit = accounts.filter((x) => matches(x, where));
+        for (const x of hit) { writes.push(`ghlAccount.updateMany ${JSON.stringify(data)}`); Object.assign(x, data); }
+        return { count: hit.length };
+      },
     },
     ...(opts.writable ? { user: { updateMany: async ({ where, data }: any) => { writes.push(`user.updateMany ${JSON.stringify(data)}`); const u = users.find((x) => x.id === where.id); if (u && (!where.status || where.status.in.includes(u.status))) Object.assign(u, data); return { count: u ? 1 : 0 }; } } } : {}),
     billingLedgerEntry: {

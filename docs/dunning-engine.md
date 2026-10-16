@@ -18,9 +18,11 @@ stage keys equal `BillingState` values).
 | core subscription **succeeded** | clears the core failure. trial / `payment_failed` → active (stays `payment_failed` while wallet strikes remain); paused `expired_invoice`/`non_payment` → active + `saas_resume`, strikes reset. `manual_killswitch`/`voluntary` pauses are not resumed |
 | `trial_auth` succeeded | null/trial → **trial**, `trialOffer` only if the subscription name matches `/\d+\s*Day Trial/i`, `trialEndsAt` from the subscription. Any other state: "ignored (state X)" |
 | any payment event on **inactive** / **churned** | recorded as "state excludes action" — never struck, never auto-resumed |
+| command `expired_sub` (Clients stage "Expired Sub") | payment_failed + `subscription_expired`, no pause, no side effects; already there = confirmation |
 | command `paused` / `inactive` / `churned` / `active` | `manual_killswitch` pause + `saas_pause` / `voluntary` pause + `saas_pause` / churned + `saas_pause` / resume + strikes reset. If the state **already matches**, it is a **confirmation**: no intent; `inactive`/`churned`/`active` re-assert their effect idempotently; `paused` re-sends nothing (its own decision already carried the pause and its retries) |
 | `pause_confirmed` (legacy `paused_confirm` stage) | **removed as a step**: still parsed, but always a no-op ("no confirmation step"). Nothing depends on it |
-| sweep: subscription canceled / expired | → churned + `saas_pause` (deferred while covered; a cancel during the trial churns at once); nothing if the contact has another live subscription |
+| sweep: subscription **canceled** | → churned + `saas_pause` (deferred while covered; a cancel during the trial churns at once); nothing if the contact has another live subscription |
+| sweep: subscription **expired** | → `payment_failed` with `pauseReason` **`subscription_expired`**, core failure open, no pause, Clients intent **`expired_sub`** ("Expired Sub"); onboarding members get Onboarding Payment Failed. Deferred while covered; paused/inactive/churned are not moved. A succeeded core payment cures it to active (reason cleared); a wallet recharge does not. Does not churn |
 | sweep: trial ended unconverted | trial → `payment_failed`, core failure open (coverage protects) |
 | sweep: subscription trialing | null/trial → trial with offer and end date |
 
@@ -180,6 +182,20 @@ The 15-minute `paused_confirm` requirement is gone — see *Pausing* above. The 
 - A payment event never moves an **inactive** or **churned** account ("state excludes action").
 - A **manual_killswitch** pause (and a voluntary one) is never auto-resumed by a payment: core success and a recharge with balance ≥ 0 both leave it paused, with no `saas_resume`.
 - **trial_ended_unconverted** → `payment_failed` with a core failure open (only from trial; coverage still protects).
+
+## Soak-gap fixes
+
+- **Starting-state seeding in shadow** (`state/seedStart.ts`). Shadow never writes `GhlAccount` — except that a member whose `billingState` is **null** gets its starting
+  state written (trial with `trialOffer`/`trialEndsAt`, active, or payment_failed) when `applyDunning` handles `trial_auth`, `subscription_trialing`, a core
+  success/failure, `trial_ended_unconverted` or `subscription_expired`, and when `sub_sweep` (phase "seed") finds a null-state member whose best live subscription is
+  trialing / active / unpaid. Conditional on `billingState IS NULL`, so a non-null state is never overwritten; no side effects, no intents. Paused / canceled /
+  expired / incomplete_expired subscriptions are left unseeded by the sweep pass (the event path or the seed script decides those).
+- **Handoff catch-up** (`scripts/billing/handoff-catchup.ts`). Members who reached A2P Approved with a null state are the `client_handoff_review` events. After seeding,
+  the script (dry-run default) lists who would be handed off and into which Clients stage; `--apply` (needs `CLIENT_HANDOFF=live`) runs the ordinary idempotent handoff
+  for the seeded ones. A payment_failed/`subscription_expired` member is placed in Expired Sub.
+- **Onboarding side-stage moves.** A manual move to Onboarding "Paused" / "Payment Failed" is a command for a member without `activeClientSince`, exactly like the
+  Clients stages (Paused = `manual_killswitch` pause); `onboardingProgress` is never touched. A "Payment Failed" command is recorded like the Clients one (the engine
+  has no rule for it, so the decision is a no-op).
 
 ## Not built yet
 

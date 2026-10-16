@@ -1,5 +1,6 @@
 import type { BillingState, PauseReason } from "@prisma/client";
 import type { OnboardingStageKey } from "../onboardingStages";
+import type { EXPIRED_SUB_KEY } from "../stages";
 
 export type { BillingState, PauseReason };
 
@@ -22,7 +23,7 @@ export type DunningEvent =
   /** An unpaid core recovery invoice went past due / was voided (invoice webhook, and the nightly sweep as a backstop). */
   | { kind: "invoice_expired"; invoiceId?: string }
   /** Stage-change webhook: a manual pipeline move, or the echo of a move the engine sent. */
-  | { kind: "command"; stage: BillingState }
+  | { kind: "command"; stage: BillingState | typeof EXPIRED_SUB_KEY }
   /** Legacy "paused_confirm" (the removed 15-minute debounce). Still parsed, but decides nothing: the pause is part of the paused decision itself. */
   | { kind: "pause_confirmed" }
   /** Nightly subscription sweep (no ledger event exists for these). */
@@ -55,7 +56,8 @@ export type SideEffect = { type: "saas_pause" | "saas_resume"; /** true = re-ass
 /** A GHL pipeline move. `stage` equals a BillingState value (docs/ghl-server-contract.md). */
 export type Intent = {
   pipeline: "active_client";
-  stage: BillingState;
+  /** A BillingState, or "expired_sub": payment_failed with reason subscription_expired (Clients stage "Expired Sub"). */
+  stage: BillingState | typeof EXPIRED_SUB_KEY;
   fields: Record<string, unknown>;
   /** "stage" (default) moves the opportunity; "fields" only refreshes contact fields (stage = the current stage). */
   kind?: "stage" | "fields";

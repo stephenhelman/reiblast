@@ -1,4 +1,4 @@
-import { billingStateForClientsStage, isKnownOnboardingStage } from "../stages";
+import { billingStateForClientsStage, isExpiredSubStage, isKnownOnboardingStage } from "../stages";
 
 /**
  * Pure logic behind scripts/billing/soak-report.ts (the shadow-period soak report). No db access here: the script reads rows and hands
@@ -186,7 +186,7 @@ export type StageVerdict = "known" | "unknown";
 /** Whether the stage-changed handler (lib/billing/events/stageChanged.ts) recognizes a stage string: onboarding names; Clients names or lowercase keys (+ legacy "paused_confirm"). */
 export function classifyStageName(pipeline: string, stage: string): StageVerdict {
   if (pipeline === "onboarding") return isKnownOnboardingStage(stage) ? "known" : "unknown";
-  if (pipeline === "active_client") return stage === "paused_confirm" || billingStateForClientsStage(stage) ? "known" : "unknown";
+  if (pipeline === "active_client") return stage === "paused_confirm" || isExpiredSubStage(stage) || billingStateForClientsStage(stage) ? "known" : "unknown";
   return "unknown";
 }
 

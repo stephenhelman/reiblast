@@ -5,6 +5,7 @@ import { readBalance } from "./balance";
 import { eventFromLedger } from "./events";
 import { loadProjection, seedFromAccount, type Projection } from "./projection";
 import { fetchSubscription } from "./subscription";
+import { seedStartingState, SEEDING_EVENTS } from "./seedStart";
 import { decide, needsBalance, needsSubscription } from "./transition";
 import type { BalanceReading, BillingState, Context, Decision, DunningEvent, SubscriptionInfo } from "./types";
 
@@ -122,7 +123,7 @@ export async function applyDunning(db: Db, input: ApplyInput, opts: { mode?: Mod
 
   const account = await db.ghlAccount.findUnique({
     where: { id: input.ghlAccountId },
-    select: { id: true, accountType: true, contactId: true, locationId: true, coreCoveredUntil: true, trialOffer: true, trialEndsAt: true, userId: true, activeClientSince: true, onboardingProgress: true },
+    select: { id: true, accountType: true, contactId: true, locationId: true, coreCoveredUntil: true, trialOffer: true, trialEndsAt: true, userId: true, activeClientSince: true, onboardingProgress: true, billingState: true },
   });
   if (!account) return { status: "skipped", why: "account not found" };
   if (account.accountType !== "member") return { status: "skipped", why: "not a member account" };
@@ -184,6 +185,15 @@ export async function applyDunning(db: Db, input: ApplyInput, opts: { mode?: Mod
         const userStatus = userStatusFor(decision.nextState);
         await tx.user.updateMany({ where: { id: account.userId }, data: { warningCount: decision.warningCount } });
         if (userStatus) await tx.user.updateMany({ where: { id: account.userId, status: { in: [...MANAGED_USER_STATUSES] } }, data: { status: userStatus } });
+      }
+      // Shadow never writes the account — except to give a member with NO billing state its starting state (conditional on still-null, so a
+      // non-null state is never overwritten). Seeding only: no side effects, no extra intents. Live already wrote the account above.
+      if (mode === "shadow" && account.billingState === null && SEEDING_EVENTS.includes(input.event.kind) && decision.nextState) {
+        await seedStartingState(tx as unknown as PrismaClient, input.ghlAccountId, {
+          billingState: decision.nextState,
+          pauseReason: decision.pauseReason,
+          ...(decision.trialChanged ? { trialOffer: decision.trialOffer, trialEndsAt: decision.trialEndsAt } : {}),
+        });
       }
       if (mode === "shadow" || mode === "live") {
         intentIds = await enqueueIntents(tx, { account, trigger: input.trigger, mode, decision, sendable: live });
