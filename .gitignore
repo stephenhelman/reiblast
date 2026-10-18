@@ -46,3 +46,8 @@ next-env.d.ts
 
 reiblast_audit_marketing.md
 scripts/billing-pull
+# kurv probe output (contains customer emails)
+scripts/kurv-probe/output/
+
+# billing audit output (customer PII)
+scripts/billing-audit/output/
