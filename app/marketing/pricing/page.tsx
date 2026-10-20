@@ -29,10 +29,15 @@ const CORE_FEATURES = [
 ];
 
 const USAGE_RATES = [
-  { icon: "📞", label: "Outbound Calls", rate: "$0.0154", unit: "per minute" },
-  { icon: "📲", label: "Inbound Calls", rate: "$0.0094", unit: "per minute" },
-  { icon: "💬", label: "Outbound Texts", rate: "$0.0091", unit: "per segment" },
-  { icon: "✉️", label: "Emails", rate: "$0.0007", unit: "per email" },
+  { icon: "📞", label: "Outbound Calls", rate: "$0.028", unit: "per minute" },
+  { icon: "📲", label: "Inbound Calls", rate: "$0.017", unit: "per minute" },
+  {
+    icon: "💬",
+    label: "Outbound Texts",
+    rate: "$0.0166",
+    unit: "per segment",
+  },
+  { icon: "✉️", label: "Emails", rate: "$0.00135", unit: "per email" },
 ];
 
 function Checkmark() {
@@ -102,8 +107,12 @@ export default function PricingPage() {
               Then {TRIAL_LENGTH_DAYS} days free
             </p>
             <div className="flex items-baseline gap-1 mb-1">
-              <span className="text-6xl font-bold text-white">${CORE_PRICE}</span>
-              <span className="text-xl text-white/50">/mo after your trial</span>
+              <span className="text-6xl font-bold text-white">
+                ${CORE_PRICE}
+              </span>
+              <span className="text-xl text-white/50">
+                /mo after your trial
+              </span>
             </div>
             <p className="text-white/40 text-sm mb-6">
               Cancel anytime. Setup fee and subscription payments are
@@ -141,8 +150,8 @@ export default function PricingPage() {
         <div className="max-w-3xl mx-auto">
           <SectionLabel>WHAT&apos;S INCLUDED</SectionLabel>
           <p className="text-white/50 text-center mb-10">
-            Know exactly what&apos;s covered by your subscription and what&apos;s
-            billed separately.
+            Know exactly what&apos;s covered by your subscription and
+            what&apos;s billed separately.
           </p>
           <div className="grid md:grid-cols-2 gap-4">
             <div className="bg-surface border border-border-default rounded-xl p-6">
@@ -273,7 +282,8 @@ export default function PricingPage() {
           href="/checkout"
           className="inline-block bg-gold text-black font-bold text-lg px-10 py-4 rounded-xl hover:bg-gold-hover transition-colors"
         >
-          Get Started — ${SETUP_FEE} Setup, {TRIAL_LENGTH_DAYS} Days Free, Then ${CORE_PRICE}/mo
+          Get Started — ${SETUP_FEE} Setup, {TRIAL_LENGTH_DAYS} Days Free, Then
+          ${CORE_PRICE}/mo
         </Link>
       </section>
     </div>
