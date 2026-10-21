@@ -83,6 +83,8 @@ const base = (): Record<string, Row[]> => ({
     { id: "B2", ghlTransactionId: "TXN2", ghlAccountId: null, contactId: C, status: "succeeded", amount: 0 },
     { id: "B3", ghlTransactionId: "TXN3", ghlAccountId: "A2", contactId: "OTHERCONTACT9", status: "succeeded", amount: 99 },
   ],
+  discordLink: [{ id: "DL1", ghlAccountId: "A1", discordUserId: "111" }, { id: "DL2", ghlAccountId: "A2", discordUserId: "222" }],
+  discordVerifyAttempt: [{ id: "DV1", ghlAccountId: "A1", discordUserId: "111" }, { id: "DV2", ghlAccountId: null, discordUserId: "111" }, { id: "DV3", ghlAccountId: "A2", discordUserId: "222" }],
   ghlSubscriptionState: [{ id: "SS1", subscriptionId: "SUB1", contactId: C }, { id: "SS2", subscriptionId: "SUB2", contactId: "OTHERCONTACT9" }],
   ghlEvent: [
     { id: "E1", externalId: C, payload: { stage: "x" } },
@@ -102,7 +104,7 @@ describe("planRemoval — dry-run counts every dependent row, across tables with
     const want: Record<string, number> = {
       CreditHold: 1, ApiCall: 2, LedgerEntry: 1, ToolUse: 1, MemberAction: 1, CartLine: 1, Cart: 1, Subscription: 1, Wallet: 1, Transaction: 1,
       Deal: 1, LandDeal: 1, GhlToken: 1, WalletBalanceSnapshot: 2, UsageRollup: 2, WalletTransaction: 1, DunningDecision: 1, GhlIntent: 1,
-      BillingLedgerEntry: 2, GhlSubscriptionState: 1, [EVENT_TABLE]: 3, GhlAccount: 1, User: 1,
+      BillingLedgerEntry: 2, DiscordLink: 1, DiscordVerifyAttempt: 1, GhlSubscriptionState: 1, [EVENT_TABLE]: 3, GhlAccount: 1, User: 1,
     };
     for (const [t, n] of Object.entries(want)) expect(count(p, t), t).toBe(n);
     expect(p.total).toBe(Object.values(want).reduce((a, b) => a + b, 0));

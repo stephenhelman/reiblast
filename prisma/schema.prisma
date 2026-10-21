@@ -993,8 +993,33 @@ model GhlAccount {
   locationToken        String?
   locationTokenExpires DateTime?
   ledgerEntries        BillingLedgerEntry[]
+  discordLink          DiscordLink?
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
+}
+
+// REIblast Discord bot: one Discord account per member, one member per Discord account. Keyed to GhlAccount.id (locationId is
+// null before provisioning). Unlink and revoke DELETE the row, so the plain unique constraints mean "currently linked".
+model DiscordLink {
+  id            String     @id @default(cuid())
+  ghlAccountId  String     @unique
+  ghlAccount    GhlAccount @relation(fields: [ghlAccountId], references: [id])
+  discordUserId String     @unique
+  linkedAt      DateTime   @default(now())
+}
+
+// Event log for DB-backed rate limiting of the Discord verify endpoints (serverless: no in-memory limiter). One row per
+// attempt; limits are "count rows in the window". ghlAccountId is deliberately NOT a foreign key: attempts for an
+// unresolved lookup have none, and a log row must never block anything. Registered in lib/admin/removeMembers.ts by ghlAccountId.
+model DiscordVerifyAttempt {
+  id            String   @id @default(cuid())
+  kind          String // "start" | "confirm"
+  discordUserId String
+  ghlAccountId  String?
+  createdAt     DateTime @default(now())
+
+  @@index([discordUserId, kind, createdAt])
+  @@index([ghlAccountId, kind, createdAt])
 }
 
 model BillingLedgerEntry {
