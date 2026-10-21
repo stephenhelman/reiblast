@@ -1,4 +1,5 @@
 import { runBalances } from "./balances";
+import { runDiscordOutbox } from "./discordOutbox";
 import { runReplay } from "./replay";
 import { runSubSweep } from "./subSweep";
 import { runTxSweep } from "./txSweep";
@@ -11,4 +12,5 @@ export const JOBS: Record<JobName, JobFn> = {
   wallet_usage: runWalletUsage,
   balances: runBalances,
   sub_sweep: runSubSweep,
+  discord_outbox: runDiscordOutbox,
 };

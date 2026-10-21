@@ -132,12 +132,14 @@ export async function deliverRevoke(outboxId: string, deps: RevokeDeps = {}): Pr
     if (verdict.kind === "done") {
       await finish({ status: "done", attempts, lastReason: verdict.reason, completedAt: now });
       outcome = "done";
+    } else if (attempts >= MAX_EFFECT_ATTEMPTS) {
+      // Also for config errors: the job re-arms config_error rows once the env is present, and each re-arm is an attempt, so a
+      // still-broken config ends here instead of looping forever.
+      await finish({ status: "exhausted", attempts, lastReason: verdict.reason });
+      outcome = "exhausted";
     } else if (verdict.kind === "config_error") {
       await finish({ status: "config_error", attempts, lastReason: verdict.reason });
       outcome = "config_error";
-    } else if (attempts >= MAX_EFFECT_ATTEMPTS) {
-      await finish({ status: "exhausted", attempts, lastReason: verdict.reason });
-      outcome = "exhausted";
     } else {
       await finish({ attempts, lastReason: verdict.reason, nextAttemptAt: new Date(now.getTime() + backoffMs(attempts)) });
       outcome = "retry";
