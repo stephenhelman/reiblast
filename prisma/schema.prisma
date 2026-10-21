@@ -1022,6 +1022,23 @@ model DiscordVerifyAttempt {
   @@index([ghlAccountId, kind, createdAt])
 }
 
+// Pending/finished "remove this Discord ID's role" requests to the bot (docs/revoke-contract.md). Written in the same transaction
+// that deletes the DiscordLink, retried by the discord_outbox job. Deliberately NOT a foreign key to GhlAccount or User and NOT
+// in lib/admin/removeMembers.ts: it must outlive a member removal. One row per Discord ID (unique + upsert = dedupe).
+model DiscordRevokeOutbox {
+  id            String    @id @default(cuid())
+  discordUserId String    @unique
+  source        String // "pause_webhook" | "member_removal" | "dunning_engine"
+  status        String    @default("pending") // pending | done | superseded | exhausted | config_error
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastReason    String? // bot reason code or fixed local code, never free text
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
+
+  @@index([status, nextAttemptAt])
+}
+
 model BillingLedgerEntry {
   id                String       @id @default(cuid())
   ghlTransactionId  String       @unique
