@@ -14,6 +14,13 @@ export type Reason =
   | "unknown_job"
   | "in_flight"
   | "continuation_cap"
+  | "code_sent" // Discord verify-start: a code was texted to the member's phone on file
+  | "linked" // Discord verify: this Discord account is (now) linked to the member
+  | "already_linked" // the member, or this Discord account, is already linked to a different counterpart
+  | "not_eligible" // covers "no such account" too — the bot must not be able to tell the two apart
+  | "rate_limited"
+  | "bad_request" // body is valid JSON but fails validation (bad Discord id, missing/both identifiers, malformed value)
+  | "delivery_failed" // eligible, but the phone lookup or the SMS send failed
   | "server_misconfigured" // a required env var is unset — deterministic, known cause
   | "internal_error"; // anything else unexpected (a thrown exception) — cause is not known/deterministic
 

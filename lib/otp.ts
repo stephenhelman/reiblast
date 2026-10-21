@@ -1,3 +1,4 @@
+import { randomInt } from "crypto";
 import { prisma } from "@/lib/prisma";
 import { updateHQContact } from "@/lib/ghl";
 
@@ -5,7 +6,7 @@ const OTP_EXPIRY_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 3;
 const GHL_BASE_URL = "https://services.leadconnectorhq.com";
 
-export type OtpFlow = "onboarding" | "tools";
+export type OtpFlow = "onboarding" | "tools" | "discord";
 
 function hqHeaders() {
   return {
@@ -87,6 +88,34 @@ async function deliverViaToolsSms(
   return { success: true };
 }
 
+// Same Conversations API path as tools. Never logs the response body (it can echo contact details) or the code.
+async function deliverViaDiscordSms(
+  code: string,
+  { contactId }: Omit<MintOtpParams, "userId" | "phone" | "visibilityField" | "flow">,
+): Promise<MintOtpResult> {
+  try {
+    const res = await fetch(`${GHL_BASE_URL}/conversations/messages`, {
+      method: "POST",
+      headers: hqHeaders(),
+      body: JSON.stringify({
+        type: "SMS",
+        contactId,
+        message: `Your REIblast Discord verification code is ${code}. It expires in 10 minutes. REIblast staff will never ask for this code. If you didn't request it, ignore this message.`,
+        status: "delivered",
+      }),
+    });
+    if (!res.ok) {
+      console.error("[otp] Conversations API send failed (discord):", res.status);
+      return { success: false, reason: "delivery_failed" };
+    }
+  } catch {
+    console.error("[otp] Conversations API send threw (discord)");
+    return { success: false, reason: "delivery_failed" };
+  }
+
+  return { success: true };
+}
+
 async function deliverOtp(
   code: string,
   { contactId, phone, visibilityField, flow }: Omit<MintOtpParams, "userId">,
@@ -94,7 +123,9 @@ async function deliverOtp(
   const result =
     flow === "onboarding"
       ? await deliverViaOnboardingWebhook(code, { contactId, phone })
-      : await deliverViaToolsSms(code, { contactId });
+      : flow === "discord"
+        ? await deliverViaDiscordSms(code, { contactId })
+        : await deliverViaToolsSms(code, { contactId });
 
   if (!result.success) {
     return result;
@@ -124,7 +155,7 @@ async function markSent(userId: string): Promise<void> {
 export async function mintOtp(params: MintOtpParams): Promise<MintOtpResult> {
   const { userId, contactId, phone, visibilityField, flow } = params;
 
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const code = randomInt(100000, 1000000).toString();
   const otpExpiry = new Date(Date.now() + OTP_EXPIRY_MS);
 
   await prisma.user.update({
