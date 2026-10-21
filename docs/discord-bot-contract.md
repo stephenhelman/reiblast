@@ -1,7 +1,7 @@
 # REIblast Discord bot ↔ server contract — verification (step 1)
 
-Server side of the Verify flow: two endpoints the bot calls to link a Discord account to a REIblast member. (Unlink, revoke and the
-keep list are later steps and are not in this document.)
+Server side of the Verify flow: two endpoints the bot calls to link a Discord account to a REIblast member, plus the unlink endpoint
+(below). (Revoke is in `docs/revoke-contract.md`; the keep list is a later step.)
 
 ## Common to both endpoints
 
@@ -76,7 +76,25 @@ Request — the same identifier as the start call, plus the code:
 A code only works for the Discord account and member it was sent for, and only for a code sent by the Discord start call. Codes from
 other REIblast flows (tools, onboarding) are rejected.
 
-## Errors (both endpoints)
+## `POST /api/discord/unlink`
+
+Same URL host, auth header (`x-reiblast-discord-secret`), body rules and always-200 behavior as the verify endpoints.
+
+```json
+{ "discordUserId": "123456789012345678" }
+```
+
+`discordUserId` is the Discord snowflake as a **string** (15–25 digits); anything else is `bad_request`. Other keys are ignored.
+
+| `result` | `reason` | Meaning | Bot action |
+|---|---|---|---|
+| `unlinked` | `unlinked` | The link existed and is deleted. | Remove the role yourself. |
+| `not_linked` | `not_linked` | No link for this Discord account (already unlinked, or never linked). | Same — treat as done; safe to repeat. |
+
+Unlink is **idempotent**. The server queues no revoke: the bot removes the role itself once this answers, so the server never calls
+`/revoke` for an unlink. Afterwards the member can verify again, and the Discord account can link to a member again. The errors below apply.
+
+## Errors (all endpoints)
 
 `{ "result": "error", "reason": "..." }`
 
@@ -102,7 +120,9 @@ other REIblast flows (tools, onboarding) are rejected.
 | `invalid_code` | `refused` | confirm |
 | `code_expired` | `refused` | confirm |
 | `code_locked` | `refused` | confirm |
-| `bad_request`, `bad_json`, `auth_missing`, `auth_failed`, `server_misconfigured`, `internal_error` | `error` | both |
+| `unlinked` | `unlinked` | unlink |
+| `not_linked` | `not_linked` | unlink |
+| `bad_request`, `bad_json`, `auth_missing`, `auth_failed`, `server_misconfigured`, `internal_error` | `error` | all |
 
 ## Bot UX rules
 

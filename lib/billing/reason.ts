@@ -18,6 +18,8 @@ export type Reason =
   | "linked" // Discord verify: this Discord account is (now) linked to the member
   | "already_linked" // the member, or this Discord account, is already linked to a different counterpart
   | "not_eligible" // covers "no such account" too — the bot must not be able to tell the two apart
+  | "unlinked" // Discord unlink: the link was deleted
+  | "not_linked" // Discord unlink: no link existed for this Discord account (idempotent repeat)
   | "revoked" // Discord bot revoke: role removed
   | "not_in_guild" // Discord bot revoke: member is not in the guild, nothing to do
   | "not_holding_role" // Discord bot revoke: member is in the guild but did not hold the role
