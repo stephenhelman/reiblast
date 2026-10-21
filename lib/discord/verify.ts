@@ -1,11 +1,13 @@
 import { TOOLS_OTP_SEND_COOLDOWN_MS } from "@/lib/constants";
-import type { MintOtpParams, MintOtpResult } from "@/lib/otp";
+import type { MintOtpParams, MintOtpResult, VerifyOtpParams, VerifyOtpResult } from "@/lib/otp";
 import type { Reason } from "@/lib/billing/reason";
 
 /** Rate limits for verify-start, counted from DiscordVerifyAttempt rows in the window. */
 export const START_WINDOW_MS = 60 * 60 * 1000;
 export const MAX_STARTS_PER_DISCORD_ID = 5;
 export const MAX_STARTS_PER_MEMBER = 3;
+/** How long a code minted by verify-start can be confirmed — mirrors OTP_EXPIRY_MS in lib/otp.ts (10 minutes). */
+export const OTP_BINDING_WINDOW_MS = 10 * 60 * 1000;
 
 /** User.status values that mean "completed the onboarding form and not suspended/inactive". Anything else fails closed. */
 export const ELIGIBLE_STATUSES: readonly string[] = ["onboarding_complete", "provisioning", "active"];
@@ -54,7 +56,7 @@ export function isEligible(a: AccountWithUser | null): a is AccountWithUser {
 export type VerifyDb = {
   ghlAccount: { findMany(args: any): Promise<AccountWithUser[]> };
   discordLink: { findFirst(args: any): Promise<{ ghlAccountId: string; discordUserId: string } | null> };
-  discordVerifyAttempt: { create(args: any): Promise<unknown>; count(args: any): Promise<number> };
+  discordVerifyAttempt: { create(args: any): Promise<unknown>; count(args: any): Promise<number>; findFirst(args: any): Promise<{ createdAt: Date } | null> };
 };
 
 export type VerifyStartDeps = {
@@ -129,5 +131,103 @@ export async function handleVerifyStart(deps: VerifyStartDeps, { discordUserId, 
   const sent = await deps.mintOtp({ userId: account.user.id, contactId: account.contactId, phone: "", flow: "discord" });
   if (!sent.success) return refused("delivery_failed");
 
+  // Marks "THIS Discord id + member just had a code sent by the Discord flow". verify-confirm requires it, so a code minted by the
+  // tools or onboarding flow can't be redeemed here. Written after the mint on purpose: it must not be older than User.otpLastSentAt.
+  await db.discordVerifyAttempt.create({ data: { kind: "sent", discordUserId, ghlAccountId: account.id, createdAt: (deps.now ?? (() => new Date()))() } });
+
   return { result: "code_sent", reason: "code_sent", phoneLast4 };
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// verify-confirm
+// ---------------------------------------------------------------------------------------------------------------------
+
+export const MAX_CONFIRMS_PER_DISCORD_ID = 10;
+
+export type ParsedConfirm = ParsedStart & { code: string };
+
+/** verify-start's body plus a 6-digit `code`. Anything else (including a code that can't possibly be right) is a bad_request. */
+export function parseConfirm(body: Record<string, unknown>): ParsedConfirm | null {
+  const id = parseIdentity(body);
+  const code = typeof body.code === "string" ? body.code.trim() : "";
+  return id && /^\d{6}$/.test(code) ? { ...id, code } : null;
+}
+
+type LinkRow = { ghlAccountId: string; discordUserId: string };
+export type ConfirmDb = VerifyDb & {
+  discordLink: VerifyDb["discordLink"] & { create(args: any): Promise<LinkRow> };
+  $transaction<T>(fn: (tx: Pick<ConfirmDb, "discordLink">) => Promise<T>): Promise<T>;
+};
+
+export type VerifyConfirmDeps = {
+  db: ConfirmDb;
+  verifyOtp: (p: VerifyOtpParams) => Promise<VerifyOtpResult>;
+  now?: () => Date;
+};
+
+export type VerifyConfirmResponse =
+  | { result: "linked"; reason: "linked" }
+  | { result: "refused"; reason: "invalid_code"; attemptsRemaining?: number } // attemptsRemaining present only for a wrong code; absent when no matching start exists
+  | { result: "refused"; reason: Extract<Reason, "already_linked" | "not_eligible" | "rate_limited" | "code_expired" | "code_locked"> };
+
+const refusedC = (reason: Extract<VerifyConfirmResponse, { result: "refused" }>["reason"]): VerifyConfirmResponse => ({ result: "refused", reason } as VerifyConfirmResponse);
+const LINKED: VerifyConfirmResponse = { result: "linked", reason: "linked" };
+
+const isUniqueViolation = (e: unknown) => typeof e === "object" && e !== null && (e as { code?: unknown }).code === "P2002";
+const isFkViolation = (e: unknown) => typeof e === "object" && e !== null && (e as { code?: unknown }).code === "P2003";
+
+/**
+ * verify-confirm. Same shape as handleVerifyStart: resolve, record the attempt (kind "confirm") before any early return, Discord-id
+ * limit, THEN eligibility (re-run now — status may have changed since start), then the existing-link check (which makes a repeat
+ * confirm for the same pair idempotent without needing a live code), then the code, then the link create.
+ */
+export async function handleVerifyConfirm(deps: VerifyConfirmDeps, { discordUserId, identifier, code }: ParsedConfirm): Promise<VerifyConfirmResponse> {
+  const { db } = deps;
+  const now = (deps.now ?? (() => new Date()))();
+  const since = new Date(now.getTime() - START_WINDOW_MS);
+
+  const account = await resolveAccount(db, identifier);
+
+  await db.discordVerifyAttempt.create({ data: { kind: "confirm", discordUserId, ghlAccountId: account?.id ?? null, createdAt: now } });
+
+  const byDiscord = await db.discordVerifyAttempt.count({ where: { kind: "confirm", discordUserId, createdAt: { gte: since } } });
+  if (byDiscord > MAX_CONFIRMS_PER_DISCORD_ID) return refusedC("rate_limited");
+
+  if (!isEligible(account)) return refusedC("not_eligible");
+
+  const existing = await db.discordLink.findFirst({ where: { OR: [{ ghlAccountId: account.id }, { discordUserId }] } });
+  if (existing) return existing.ghlAccountId === account.id && existing.discordUserId === discordUserId ? LINKED : refusedC("already_linked");
+
+  // Bind to our own start: the code in the User's single OTP slot must be the one verify-start minted for THIS Discord id + member.
+  // Otherwise (no recent send, a send for someone else, or a tools/onboarding mint since) answer invalid_code WITHOUT calling
+  // verifyOtp, so nothing is consumed and no attempt is counted against the member's real code.
+  const sentRow = await db.discordVerifyAttempt.findFirst({
+    where: { kind: "sent", discordUserId, ghlAccountId: account.id, createdAt: { gte: new Date(now.getTime() - OTP_BINDING_WINDOW_MS) } },
+    orderBy: { createdAt: "desc" },
+  });
+  const last = account.user.otpLastSentAt;
+  if (!sentRow || (last && last.getTime() > sentRow.createdAt.getTime())) return { result: "refused", reason: "invalid_code" };
+
+  const otp = await deps.verifyOtp({ userId: account.user.id, code });
+  if (otp.status === "expired") return refusedC("code_expired");
+  if (otp.status === "locked_out") return refusedC("code_locked");
+  if (otp.status === "wrong") return { result: "refused", reason: "invalid_code", attemptsRemaining: otp.attemptsRemaining };
+
+  // Code accepted (and consumed). Create the link atomically; both unique constraints are the final arbiter in a race.
+  try {
+    return await db.$transaction(async (tx) => {
+      const clash = await tx.discordLink.findFirst({ where: { OR: [{ ghlAccountId: account.id }, { discordUserId }] } });
+      if (clash) return clash.ghlAccountId === account.id && clash.discordUserId === discordUserId ? LINKED : refusedC("already_linked");
+      await tx.discordLink.create({ data: { ghlAccountId: account.id, discordUserId } });
+      return LINKED;
+    });
+  } catch (e) {
+    if (isUniqueViolation(e)) {
+      // Lost a race between the check and the insert. Re-read to tell "same pair, someone beat us to it" from a real conflict.
+      const winner = await db.discordLink.findFirst({ where: { OR: [{ ghlAccountId: account.id }, { discordUserId }] } });
+      return winner && winner.ghlAccountId === account.id && winner.discordUserId === discordUserId ? LINKED : refusedC("already_linked");
+    }
+    if (isFkViolation(e)) return refusedC("not_eligible"); // the account was deleted between the check and the insert
+    throw e;
+  }
 }

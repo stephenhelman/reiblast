@@ -32,6 +32,7 @@ function fakeDb(accounts: Acct[], links: Row[] = [], attempts: Row[] = []) {
     discordVerifyAttempt: {
       create: async ({ data }: Row) => void attempts.push({ ...data }),
       count: async ({ where }: Row) => attempts.filter((a) => eq(a, where)).length,
+      findFirst: async ({ where }: Row) => attempts.filter((a) => eq(a, where)).sort((x, y) => y.createdAt - x.createdAt)[0] ?? null,
     },
   };
   return { db: db as unknown as VerifyDb, links, attempts };
@@ -125,6 +126,26 @@ describe("code_sent path", () => {
     expect(t.fetchPhoneLast4).toHaveBeenCalledWith("CONTACT1abcd");
     expect(t.mintOtp).toHaveBeenCalledWith({ userId: "U1", contactId: "CONTACT1abcd", phone: "", flow: "discord" });
     expect(JSON.stringify(out)).not.toMatch(/example\.test|CONTACT1/);
+  });
+  it("a successful send leaves a kind=sent marker for this Discord id + member (what verify-confirm binds to); no other outcome does", async () => {
+    const ok = setup([acct()]);
+    await handleVerifyStart(ok.deps, byEmail());
+    expect(ok.attempts.map((a) => a.kind)).toEqual(["start", "sent"]);
+    expect(ok.attempts[1]).toMatchObject({ discordUserId: D1, ghlAccountId: "A1" });
+    const failures = [
+      setup([acct({ status: "suspended" })]),
+      setup([acct()], [{ ghlAccountId: "A1", discordUserId: D2 }]),
+      setup([acct()], [], [], { fetchPhoneLast4: vi.fn(async () => null) }),
+      setup([acct()], [], [], { mintOtp: vi.fn(async () => ({ success: false as const, reason: "delivery_failed" as const })) }),
+    ];
+    for (const f of failures) {
+      await handleVerifyStart(f.deps, byEmail());
+      expect(f.attempts.map((a) => a.kind)).toEqual(["start"]);
+    }
+  });
+  it("sent markers never count toward the start limits", async () => {
+    const markers = Array.from({ length: 20 }, () => ({ kind: "sent", discordUserId: D1, ghlAccountId: "A1", createdAt: new Date(NOW.getTime() - 60_000) }));
+    expect((await handleVerifyStart(setup([acct()], [], markers).deps, byEmail())).result).toBe("code_sent");
   });
   it("a failed phone lookup or SMS send is delivery_failed, and no SMS is sent when the lookup fails", async () => {
     const noPhone = setup([acct()], [], [], { fetchPhoneLast4: vi.fn(async () => null) });

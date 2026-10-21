@@ -53,7 +53,7 @@ describe("POST /api/discord/verify/start", () => {
     expect(r.status).toBe(200);
     expect(await r.json()).toEqual({ result: "code_sent", reason: "code_sent", phoneLast4: "4321" });
     expect(mintOtp).toHaveBeenCalledWith(expect.objectContaining({ flow: "discord", contactId: "CONTACT1abcd" }));
-    expect(attempts).toHaveLength(1);
+    expect(attempts.map((a) => a.kind)).toEqual(["start", "sent"]);
   });
 
   it("an unexpected exception is 200 internal_error with no detail in the body", async () => {

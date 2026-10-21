@@ -19,6 +19,9 @@ export type Reason =
   | "already_linked" // the member, or this Discord account, is already linked to a different counterpart
   | "not_eligible" // covers "no such account" too — the bot must not be able to tell the two apart
   | "rate_limited"
+  | "invalid_code" // Discord verify-confirm: wrong code (attemptsRemaining accompanies it)
+  | "code_expired" // no live code (expired, never sent, or already used)
+  | "code_locked" // too many wrong attempts on the current code
   | "bad_request" // body is valid JSON but fails validation (bad Discord id, missing/both identifiers, malformed value)
   | "delivery_failed" // eligible, but the phone lookup or the SMS send failed
   | "server_misconfigured" // a required env var is unset — deterministic, known cause
