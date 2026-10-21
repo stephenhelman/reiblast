@@ -1,4 +1,5 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
+import { deliverRevoke, queueRevokeInTx, type RevokeDb, type RevokeTx } from "@/lib/discord/revoke";
 
 /**
  * Member removal: find the User + GhlAccount for a GHL contact, count EVERY dependent row across all tables, and (only on request)
@@ -134,14 +135,20 @@ export async function planRemoval(db: Db, contactId: string): Promise<Plan> {
 /**
  * Delete everything a plan counted, children first, inside the caller's transaction (`tx`). Throws — so the caller's transaction rolls
  * back — on any schema reference the registry does not know, or if rows remain after the deletes.
+ *
+ * A member's DiscordLink is deleted FIRST, together with a DiscordRevokeOutbox row (docs/revoke-contract.md), on the same `tx`, so the
+ * revoke request commits or rolls back with the removal. The outbox is deliberately NOT in SPECS: it has no FK and must outlive the
+ * member. `outboxIds` are for the caller to deliver AFTER the transaction commits — never before.
  */
-export async function executeRemoval(tx: Db, ctx: Ctx): Promise<{ table: string; deleted: number }[]> {
+export async function executeRemoval(tx: Db, ctx: Ctx): Promise<{ rows: { table: string; deleted: number }[]; outboxIds: string[] }> {
   const unknown = unexpectedReferences();
   if (unknown.length) throw new Error(`schema has unhandled references to User/GhlAccount: ${unknown.join(", ")}`);
+  const queued = ctx.accountId ? await queueRevokeInTx(tx as unknown as RevokeTx, ctx.accountId, "member_removal", new Date()) : null;
+  const alreadyDeleted: Record<string, number> = { DiscordLink: queued?.linksDeleted ?? 0 }; // rows the revoke step removed before the loop
   const out: { table: string; deleted: number }[] = [];
   for (const s of SPECS) {
     const where = s.where(ctx);
-    out.push({ table: s.table, deleted: where ? (await tx[s.delegate].deleteMany({ where })).count : 0 });
+    out.push({ table: s.table, deleted: (alreadyDeleted[s.table] ?? 0) + (where ? (await tx[s.delegate].deleteMany({ where })).count : 0) });
   }
   const ids = await eventIds(tx, ctx);
   out.push({ table: EVENT_TABLE, deleted: ids.length ? (await tx.ghlEvent.deleteMany({ where: { id: { in: ids } } })).count : 0 });
@@ -155,5 +162,43 @@ export async function executeRemoval(tx: Db, ctx: Ctx): Promise<{ table: string;
   }
   if ((await eventIds(tx, ctx)).length > 0) throw new Error("GhlEvent rows remain after deletion — aborting");
   if (out[out.length - 1].deleted !== 1) throw new Error("User row was not deleted — aborting");
-  return out;
+  return { rows: out, outboxIds: queued?.outboxId ? [queued.outboxId] : [] };
+}
+
+export type RemovalResult = {
+  removed: { contactId: string; rows: { table: string; deleted: number }[] }[];
+  /** Outcome of each post-commit Discord revoke delivery, counted by outcome ("done", "retry", "error", …). */
+  revoke: { queued: number; outcomes: Record<string, number> };
+};
+
+/**
+ * Remove every plan's member in ONE transaction, then — only after it has committed — deliver each queued Discord revoke (10s timeout
+ * each, inside deliverRevoke). A delivery failure never fails or undoes the removal: the outbox row stays and the discord_outbox job
+ * retries it. A rollback (any throw above) leaves no outbox row and delivers nothing.
+ */
+export async function removeMembers(
+  db: Pick<PrismaClient, "$transaction"> & Record<string, any>,
+  ctxs: Ctx[],
+  deps: { deliver?: (outboxId: string) => Promise<string> } = {},
+): Promise<RemovalResult> {
+  const { removed, outboxIds } = await db.$transaction(
+    async (tx: any) => {
+      const removed: RemovalResult["removed"] = [];
+      const outboxIds: string[] = [];
+      for (const ctx of ctxs) {
+        const r = await executeRemoval(tx, ctx);
+        removed.push({ contactId: ctx.contactId, rows: r.rows });
+        outboxIds.push(...r.outboxIds);
+      }
+      return { removed, outboxIds };
+    },
+    { timeout: 120_000, maxWait: 30_000 },
+  );
+  const deliver = deps.deliver ?? ((id: string) => deliverRevoke(id, { db: db as unknown as RevokeDb }));
+  const outcomes: Record<string, number> = {};
+  for (const id of outboxIds) {
+    const outcome = await deliver(id).catch(() => "error");
+    outcomes[outcome] = (outcomes[outcome] ?? 0) + 1;
+  }
+  return { removed, revoke: { queued: outboxIds.length, outcomes } };
 }

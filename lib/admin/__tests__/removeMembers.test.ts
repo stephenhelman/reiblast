@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
-import { describe, expect, it } from "vitest";
-import { EVENT_TABLE, executeRemoval, planRemoval, SPECS, unexpectedReferences } from "../removeMembers";
+import { describe, expect, it, vi } from "vitest";
+import { EVENT_TABLE, executeRemoval, planRemoval, removeMembers, SPECS, unexpectedReferences } from "../removeMembers";
 
 type Row = Record<string, any>;
 
@@ -11,6 +11,8 @@ function match(row: Row, where: Row = {}): boolean {
     const v = row[k] ?? null;
     if (c !== null && typeof c === "object") {
       if ("in" in c) return c.in.includes(v);
+      if ("not" in c) return v !== c.not;
+      if ("lte" in c) return v !== null && v <= c.lte;
       if ("gt" in c) return v !== null && Number(v) > Number(c.gt);
     }
     return v === c;
@@ -26,6 +28,23 @@ function fakeDb(seed: Record<string, Row[]>, opts: { failOnDelete?: string } = {
     count: async ({ where }: Row) => tables[name].filter((r) => match(r, where)).length,
     findMany: async ({ where }: Row = {}) => tables[name].filter((r) => match(r, where)),
     findUnique: async ({ where }: Row) => tables[name].find((r) => match(r, where)) ?? null,
+    delete: async ({ where }: Row) => {
+      const i = tables[name].findIndex((r) => match(r, where));
+      if (i < 0) throw new Error(`${name}: record to delete not found`);
+      return tables[name].splice(i, 1)[0];
+    },
+    upsert: async ({ where, create }: Row) => {
+      const found = tables[name].find((r) => match(r, where));
+      if (found) return { id: found.id };
+      const r = { id: `${name}${tables[name].length + 1}`, status: "pending", attempts: 0, lastReason: null, completedAt: null, ...create };
+      tables[name].push(r);
+      return { id: r.id };
+    },
+    updateMany: async ({ where, data }: Row) => {
+      const hit = tables[name].filter((r) => match(r, where));
+      hit.forEach((r) => Object.assign(r, data));
+      return { count: hit.length };
+    },
     deleteMany: async ({ where }: Row) => {
       if (opts.failOnDelete === name) throw new Error(`FK violation on ${name}`);
       const keep = tables[name].filter((r) => !match(r, where));
@@ -155,7 +174,7 @@ describe("executeRemoval — deletes dependents, then GhlAccount, then User, and
   it("removes exactly the member's rows; the other member's rows are untouched", async () => {
     const db = fakeDb(base());
     const p: any = await planRemoval(db, C);
-    const deleted = await db.$transaction((tx: any) => executeRemoval(tx, p.ctx));
+    const { rows: deleted } = await db.$transaction((tx: any) => executeRemoval(tx, p.ctx));
     const byTable = Object.fromEntries(deleted.map((d: any) => [d.table, d.deleted]));
     expect(byTable.User).toBe(1);
     expect(byTable.GhlAccount).toBe(1);
@@ -220,5 +239,126 @@ describe("unexpectedReferences — the registry covers the real schema", () => {
   it("every registry delegate exists on the Prisma client", () => {
     const models = new Set(Prisma.dmmf.datamodel.models.map((m) => m.name[0].toLowerCase() + m.name.slice(1)));
     for (const s of SPECS) expect(models.has(s.delegate), s.delegate).toBe(true);
+  });
+});
+
+describe("member removal + Discord revoke", () => {
+  const outbox = (db: any) => db.tables.discordRevokeOutbox as Row[];
+
+  it("a member with a DiscordLink: the link is deleted and an outbox row queued in the same transaction; delivery runs only after commit", async () => {
+    const db = fakeDb(base());
+    const p: any = await planRemoval(db, C);
+    const events: string[] = [];
+    const commit = db.$transaction;
+    db.$transaction = async (fn: any) => { const r = await commit(fn); events.push("commit"); return r; };
+    const deliver = async (id: string) => { events.push(`deliver:${outbox(db).find((o) => o.id === id)?.discordUserId}`); return "done"; };
+    const res = await removeMembers(db, [p.ctx], { deliver });
+    expect(events).toEqual(["commit", "deliver:111"]); // never before the commit
+    expect(outbox(db)).toHaveLength(1);
+    expect(outbox(db)[0]).toMatchObject({ discordUserId: "111", source: "member_removal", status: "pending" });
+    expect(db.tables.discordLink.map((r: Row) => r.id)).toEqual(["DL2"]);
+    expect(res.revoke).toEqual({ queued: 1, outcomes: { done: 1 } });
+    expect(res.removed[0].rows.find((r) => r.table === "DiscordLink")?.deleted).toBe(1); // planned == deleted still holds
+  });
+
+  it("the outbox row survives the removal (no FK, not in SPECS) and unexpectedReferences stays clean", async () => {
+    expect(SPECS.map((s) => s.table)).not.toContain("DiscordRevokeOutbox");
+    expect(unexpectedReferences()).toEqual([]);
+    const db = fakeDb(base());
+    const p: any = await planRemoval(db, C);
+    await removeMembers(db, [p.ctx], { deliver: async () => "done" });
+    expect(db.tables.user.map((r: Row) => r.id)).toEqual(["U2"]);
+    expect(outbox(db)).toHaveLength(1);
+  });
+
+  it("a member without a DiscordLink: no outbox row, nothing delivered", async () => {
+    const seed = base();
+    seed.discordLink = seed.discordLink.filter((l) => l.ghlAccountId !== "A1");
+    const db = fakeDb(seed);
+    const p: any = await planRemoval(db, C);
+    const deliver = async () => "done";
+    const res = await removeMembers(db, [p.ctx], { deliver: vi.fn(deliver) });
+    expect(outbox(db)).toHaveLength(0);
+    expect(res.revoke).toEqual({ queued: 0, outcomes: {} });
+  });
+
+  it("a User with no GhlAccount: no outbox, removal still works", async () => {
+    const seed = base();
+    seed.ghlAccount = seed.ghlAccount.filter((a) => a.id !== "A1");
+    const db = fakeDb(seed);
+    const p: any = await planRemoval(db, C);
+    await removeMembers(db, [p.ctx], { deliver: async () => "done" });
+    expect(outbox(db)).toHaveLength(0);
+  });
+
+  it("rollback: a failure after the revoke step leaves NO outbox row, the link in place, and nothing delivered", async () => {
+    const db = fakeDb(base(), { failOnDelete: "ghlAccount" });
+    const before = JSON.stringify(db.tables);
+    const p: any = await planRemoval(db, C);
+    const deliver = vi.fn(async () => "done");
+    await expect(removeMembers(db, [p.ctx], { deliver })).rejects.toThrow(/FK violation/);
+    expect(JSON.stringify(db.tables)).toBe(before);
+    expect(outbox(db)).toHaveLength(0);
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("multi-member removal: one transaction, one outbox row per linked member, all delivered after commit", async () => {
+    const db = fakeDb(base());
+    // second removable member
+    db.tables.user.push({ id: "U3", email: "c@x.test", role: "user", ghlContactId: "CONTACT3abcd", ghlLocationId: "LOC_THREE" });
+    db.tables.ghlAccount.push({ id: "A3", userId: "U3", contactId: "CONTACT3abcd", locationId: "LOC_THREE", accountType: "member" });
+    db.tables.discordLink.push({ id: "DL3", ghlAccountId: "A3", discordUserId: "333" });
+    const p1: any = await planRemoval(db, C);
+    const p2: any = await planRemoval(db, "CONTACT3abcd");
+    let txCount = 0;
+    const tx = db.$transaction;
+    db.$transaction = async (fn: any) => (txCount++, tx(fn));
+    const res = await removeMembers(db, [p1.ctx, p2.ctx], { deliver: async () => "done" });
+    expect(txCount).toBe(1);
+    expect(outbox(db).map((o) => o.discordUserId).sort()).toEqual(["111", "333"]);
+    expect(res.revoke).toEqual({ queued: 2, outcomes: { done: 2 } });
+    expect(db.tables.user.map((r: Row) => r.id)).toEqual(["U2"]);
+  });
+
+  it("multi-member rollback: member 2 failing rolls back member 1's outbox row too", async () => {
+    const db = fakeDb(base());
+    db.tables.user.push({ id: "U3", email: "c@x.test", role: "user", ghlContactId: "CONTACT3abcd", ghlLocationId: "LOC_THREE" });
+    db.tables.ghlAccount.push({ id: "A3", userId: "U3", contactId: "CONTACT3abcd", locationId: "LOC_THREE", accountType: "member" });
+    const p1: any = await planRemoval(db, C);
+    const p2: any = await planRemoval(db, "CONTACT3abcd");
+    const orig = db.user.deleteMany;
+    db.user.deleteMany = async (a: Row) => { if (a.where.id === "U3") throw new Error("FK violation on user"); return orig(a); };
+    const deliver = vi.fn(async () => "done");
+    await expect(removeMembers(db, [p1.ctx, p2.ctx], { deliver })).rejects.toThrow(/FK violation/);
+    expect(outbox(db)).toHaveLength(0);
+    expect(deliver).not.toHaveBeenCalled();
+  });
+
+  it("delivery failure after commit (a throw, or a non-done outcome) does not fail the removal; the outbox row stays for the job", async () => {
+    for (const deliver of [async () => { throw new Error("bot down"); }, async () => "retry"]) {
+      const db = fakeDb(base());
+      const p: any = await planRemoval(db, C);
+      const res = await removeMembers(db, [p.ctx], { deliver });
+      expect(db.tables.user.map((r: Row) => r.id)).toEqual(["U2"]);
+      expect(outbox(db)).toHaveLength(1);
+      expect(outbox(db)[0].status).toBe("pending");
+      expect(res.revoke.queued).toBe(1);
+      expect(res.revoke.outcomes.done).toBeUndefined();
+    }
+  });
+
+  it("the real deliverRevoke path: with the bot mocked, the queued row is marked done after commit", async () => {
+    const db = fakeDb(base());
+    const p: any = await planRemoval(db, C);
+    process.env.DISCORD_BOT_URL = "https://bot.example.test";
+    process.env.DISCORD_BOT_OUTBOUND_SECRET = "s3cret";
+    const fetchMock = vi.fn(async (..._a: any[]) => ({ json: async () => ({ result: "ok", reason: "revoked" }) }) as unknown as Response);
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await removeMembers(db, [p.ctx]);
+    vi.unstubAllGlobals();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({ discordUserId: "111" });
+    expect(res.revoke.outcomes).toEqual({ done: 1 });
+    expect(outbox(db)[0].status).toBe("done");
   });
 });

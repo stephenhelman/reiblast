@@ -37,6 +37,25 @@ export type RevokeDeps = { db?: RevokeDb; fetch?: typeof fetch; now?: () => Date
 
 const resolveDb = async (deps: RevokeDeps): Promise<RevokeDb> => deps.db ?? ((await getBillingDb()) as RevokeDb);
 
+/** The transactional core, usable inside a caller's own transaction (member removal): delete the link, queue the revoke. */
+export type RevokeTx = Pick<PrismaClient, "discordLink" | "discordRevokeOutbox">;
+export async function queueRevokeInTx(tx: RevokeTx, accountId: string, source: RevokeSource, now: Date): Promise<{ outboxId: string | null; linksDeleted: number }> {
+  const link = await tx.discordLink.findUnique({ where: { ghlAccountId: accountId }, select: { discordUserId: true } });
+  if (!link) return { outboxId: null, linksDeleted: 0 };
+  await tx.discordLink.delete({ where: { ghlAccountId: accountId } });
+  const row = await tx.discordRevokeOutbox.upsert({
+    where: { discordUserId: link.discordUserId },
+    create: { discordUserId: link.discordUserId, source, nextAttemptAt: now },
+    update: {},
+    select: { id: true },
+  });
+  await tx.discordRevokeOutbox.updateMany({
+    where: { id: row.id, status: { not: "pending" } },
+    data: { status: "pending", attempts: 0, nextAttemptAt: now, lastReason: null, completedAt: null, source },
+  });
+  return { outboxId: row.id, linksDeleted: 1 };
+}
+
 /**
  * Delete the account's DiscordLink and queue the revoke, atomically. No link → no-op (null). A pending outbox row for the same Discord id
  * is left untouched (attempts/backoff preserved); a finished one is reset to pending with attempts 0.
@@ -45,22 +64,8 @@ const resolveDb = async (deps: RevokeDeps): Promise<RevokeDb> => deps.db ?? ((aw
 export async function revokeDiscordForAccount(accountId: string, source: RevokeSource, deps: RevokeDeps = {}): Promise<{ outboxId: string } | null> {
   const db = await resolveDb(deps);
   const now = (deps.now ?? (() => new Date()))();
-  return db.$transaction(async (tx) => {
-    const link = await tx.discordLink.findUnique({ where: { ghlAccountId: accountId }, select: { discordUserId: true } });
-    if (!link) return null;
-    await tx.discordLink.delete({ where: { ghlAccountId: accountId } });
-    const row = await tx.discordRevokeOutbox.upsert({
-      where: { discordUserId: link.discordUserId },
-      create: { discordUserId: link.discordUserId, source, nextAttemptAt: now },
-      update: {},
-      select: { id: true },
-    });
-    await tx.discordRevokeOutbox.updateMany({
-      where: { id: row.id, status: { not: "pending" } },
-      data: { status: "pending", attempts: 0, nextAttemptAt: now, lastReason: null, completedAt: null, source },
-    });
-    return { outboxId: row.id };
-  });
+  const r = await db.$transaction((tx) => queueRevokeInTx(tx, accountId, source, now));
+  return r.outboxId ? { outboxId: r.outboxId } : null;
 }
 
 type Verdict = { kind: "done" | "retry" | "config_error"; reason: RevokeReason };
