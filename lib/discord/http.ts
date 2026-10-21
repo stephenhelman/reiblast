@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
-import { checkSecret, missingEnvVars, logInternalError, type Reason } from "@/lib/billing/reason";
+import { checkSecret, missingEnvVars, type Reason } from "@/lib/billing/reason";
 
 /**
  * Shared shell for the bot-facing Discord endpoints: secret check (timing-safe, header x-reiblast-discord-secret vs
  * DISCORD_BOT_INBOUND_SECRET), JSON-object body, always HTTP 200 with a reason. Logs reason codes only — never emails, phone
- * numbers, codes, Discord ids or secrets. `run` receives the parsed body and returns the response payload (or null → bad_request).
+ * numbers, codes, Discord ids or secrets. An unexpected exception logs its class and Prisma code only: err.message and the stack are
+ * never logged, because a database error's message can embed the query arguments (a Discord id, an email).
+ * `run` receives the parsed body and returns the response payload (or null → bad_request).
  */
 export async function runDiscordEndpoint(
   req: NextRequest,
@@ -37,7 +39,8 @@ export async function runDiscordEndpoint(
     const out = await run(body);
     return out ? reply(out) : error("bad_request");
   } catch (err) {
-    logInternalError(label, err);
+    const e = err as { name?: unknown; code?: unknown } | null;
+    console.error(`[${label}] internal error reason=internal_error name=${typeof e?.name === "string" ? e.name : "unknown"} code=${typeof e?.code === "string" ? e.code : "-"}`);
     return error("internal_error");
   }
 }
