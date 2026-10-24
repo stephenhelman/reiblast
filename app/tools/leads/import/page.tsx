@@ -472,9 +472,15 @@ function DealMachineTab({ locationId }: { locationId: string }) {
   const [importResult, setImportResult] = useState<{ added: number; skipped: number; failed: number } | null>(null)
   const [page, setPage] = useState(0)
   const [tooltipOpen, setTooltipOpen] = useState(false)
+  const [payloadError, setPayloadError] = useState('')
 
   function handleFormat() {
     const formatted = formatDealMachineData(rawText)
+    if (formatted.payloadError) {
+      setPayloadError(formatted.payloadError)
+      return
+    }
+    setPayloadError('')
     setResult(formatted)
     setSelected(new Set(formatted.contacts.map((_, i) => i)))
     setPage(0)
@@ -554,6 +560,9 @@ function DealMachineTab({ locationId }: { locationId: string }) {
         <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12, marginTop: 4 }}>
           {rawText.length} characters
         </p>
+        {payloadError && (
+          <p style={{ color: '#ef4444', fontSize: 13, marginTop: 8 }}>{payloadError}</p>
+        )}
         <button
           onClick={handleFormat}
           disabled={!rawText.trim()}
@@ -579,11 +588,39 @@ function DealMachineTab({ locationId }: { locationId: string }) {
   return (
     <div className="px-6 py-8 max-w-7xl mx-auto">
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 24 }}>
-        <StatCard label="Lines Processed" value={result.stats.totalLines} color="rgba(255,255,255,0.5)" />
-        <StatCard label="Contacts Parsed" value={result.stats.parsed} color={GOLD} />
-        <StatCard label="Junk Lines Skipped" value={result.stats.skipped} color="rgba(255,255,255,0.5)" />
-      </div>
+      {result.flagged ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 24 }}>
+          <StatCard label="Properties Received" value={result.stats.totalLines} color="rgba(255,255,255,0.5)" />
+          <StatCard label="Ready to Export" value={result.stats.parsed} color={GOLD} />
+          <StatCard label="APN Rows Excluded" value={result.excludedApn ?? 0} color="rgba(255,255,255,0.5)" />
+          <StatCard label="Duplicates Removed" value={result.duplicatesRemoved ?? 0} color="rgba(255,255,255,0.5)" />
+          <StatCard label="Needs Review" value={result.flagged.length} color={result.flagged.length ? '#ef4444' : 'rgba(255,255,255,0.5)'} />
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 24 }}>
+          <StatCard label="Lines Processed" value={result.stats.totalLines} color="rgba(255,255,255,0.5)" />
+          <StatCard label="Contacts Parsed" value={result.stats.parsed} color={GOLD} />
+          <StatCard label="Junk Lines Skipped" value={result.stats.skipped} color="rgba(255,255,255,0.5)" />
+        </div>
+      )}
+
+      {result.flagged && result.flagged.length > 0 && (
+        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 12, padding: '16px 20px', marginBottom: 20 }}>
+          <p style={{ color: '#ef4444', fontWeight: 600, fontSize: 14, marginBottom: 8 }}>
+            {result.flagged.length} row{result.flagged.length === 1 ? '' : 's'} could not be processed and {result.flagged.length === 1 ? 'is' : 'are'} not in the CSV
+          </p>
+          <ul style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, margin: 0, paddingLeft: 18 }}>
+            {result.flagged.slice(0, 50).map((f, i) => (
+              <li key={i}>
+                {[f.id, f.line1, f.line2].filter((v) => v !== undefined && v !== '').map(String).join(' · ') || '(empty row)'} — {f.reason}
+              </li>
+            ))}
+          </ul>
+          {result.flagged.length > 50 && (
+            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginTop: 6 }}>…and {result.flagged.length - 50} more</p>
+          )}
+        </div>
+      )}
 
       {importResult && (
         <div style={{

@@ -560,6 +560,13 @@ export interface DealMachineContact {
   zip: string
 }
 
+export interface PayloadFlaggedRow {
+  id?: unknown
+  line1?: unknown
+  line2?: unknown
+  reason: string
+}
+
 export interface DealMachineResult {
   contacts: DealMachineContact[]
   stats: {
@@ -567,9 +574,152 @@ export interface DealMachineResult {
     parsed: number
     skipped: number
   }
+  // Set only by the REISCRUB:v1 payload path.
+  excludedApn?: number
+  duplicatesRemoved?: number
+  flagged?: PayloadFlaggedRow[]
+  // Whole-payload failure (bad version, invalid JSON, over a size cap). No contacts when set.
+  payloadError?: string
+}
+
+export const PAYLOAD_HEADER_V1 = 'REISCRUB:v1:dealmachine'
+export const PAYLOAD_MAX_CHARS = 2_000_000
+export const PAYLOAD_MAX_ROWS = 10_000
+export const PAYLOAD_MAX_FIELD_CHARS = 500
+
+const payloadLine2Re = /^(.+),\s*([A-Z]{2})\s+(\d{5})(?:-\d{4})?$/i
+
+function payloadFail(message: string): DealMachineResult {
+  return {
+    contacts: [],
+    stats: { totalLines: 0, parsed: 0, skipped: 0 },
+    payloadError: message,
+  }
+}
+
+// Dedupe key for the payload path only: lowercased street with . and , stripped and
+// whitespace collapsed, plus 5-digit zip. Deliberately separate from normalizeAddress.
+function payloadDedupeKey(line1: string, zip: string): string {
+  const street = line1.toLowerCase().replace(/[.,]/g, '').replace(/\s+/g, ' ').trim()
+  return `${street}|${zip}`
+}
+
+function describeRaw(v: unknown): unknown {
+  if (v === undefined || typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean' || v === null) return v
+  try {
+    return JSON.stringify(v).slice(0, PAYLOAD_MAX_FIELD_CHARS)
+  } catch {
+    return String(v)
+  }
+}
+
+function parsePayloadV1(rawText: string, headerLine: string): DealMachineResult {
+  if (headerLine !== PAYLOAD_HEADER_V1) {
+    return payloadFail(
+      `Unsupported REIscrub payload version "${headerLine.slice(0, 60)}". Update the extension or paste the addresses manually.`
+    )
+  }
+  if (rawText.length > PAYLOAD_MAX_CHARS) {
+    return payloadFail(
+      `Payload is too large (${rawText.length.toLocaleString()} characters; the limit is ${PAYLOAD_MAX_CHARS.toLocaleString()}). Export fewer properties at a time.`
+    )
+  }
+
+  const body = rawText.slice(rawText.indexOf(headerLine) + headerLine.length)
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    return payloadFail('Payload JSON is invalid. Re-copy it from the extension and paste again.')
+  }
+  if (!Array.isArray(parsed)) {
+    return payloadFail('Payload JSON must be an array of properties.')
+  }
+  if (parsed.length > PAYLOAD_MAX_ROWS) {
+    return payloadFail(
+      `Payload has too many rows (${parsed.length.toLocaleString()}; the limit is ${PAYLOAD_MAX_ROWS.toLocaleString()}). Export fewer properties at a time.`
+    )
+  }
+
+  const contacts: DealMachineContact[] = []
+  const flagged: PayloadFlaggedRow[] = []
+  const seen = new Set<string>()
+  let excludedApn = 0
+  let duplicatesRemoved = 0
+
+  for (const row of parsed as unknown[]) {
+    const obj = row !== null && typeof row === 'object' && !Array.isArray(row) ? (row as Record<string, unknown>) : null
+    if (!obj) {
+      flagged.push({ line1: describeRaw(row), reason: 'Row is not an object' })
+      continue
+    }
+    const flag = (reason: string) =>
+      flagged.push({ id: describeRaw(obj.id), line1: describeRaw(obj.line1), line2: describeRaw(obj.line2), reason })
+
+    if (typeof obj.id !== 'number' || !Number.isFinite(obj.id)) {
+      flag('Missing or invalid id')
+      continue
+    }
+    if (typeof obj.line1 !== 'string' || !obj.line1.trim()) {
+      flag('Missing or invalid line1')
+      continue
+    }
+    if (typeof obj.line2 !== 'string' || !obj.line2.trim()) {
+      flag('Missing or invalid line2')
+      continue
+    }
+    const line1 = obj.line1.trim()
+    const line2 = obj.line2.trim()
+
+    if (/^APN:/i.test(line1)) {
+      excludedApn++
+      continue
+    }
+    if (line1.length > PAYLOAD_MAX_FIELD_CHARS || line2.length > PAYLOAD_MAX_FIELD_CHARS) {
+      flag(`line1 or line2 is longer than ${PAYLOAD_MAX_FIELD_CHARS} characters`)
+      continue
+    }
+    const m = line2.match(payloadLine2Re)
+    if (!m) {
+      flag('Could not parse city, state and zip from line2')
+      continue
+    }
+
+    const zip = m[3]
+    const key = payloadDedupeKey(line1, zip)
+    if (seen.has(key)) {
+      duplicatesRemoved++
+      continue
+    }
+    seen.add(key)
+    contacts.push({
+      address: lc(line1.replace(/\s+/g, ' ')),
+      city: lc(m[1].trim()),
+      state: m[2].toLowerCase(),
+      zip,
+    })
+  }
+
+  return {
+    contacts,
+    stats: {
+      totalLines: parsed.length,
+      parsed: contacts.length,
+      skipped: excludedApn + duplicatesRemoved + flagged.length,
+    },
+    excludedApn,
+    duplicatesRemoved,
+    flagged,
+  }
 }
 
 export function formatDealMachineData(rawText: string): DealMachineResult {
+  // Versioned payload from the companion extension: header line + JSON array.
+  const headerLine = rawText.replace(/^\uFEFF/, '').trimStart().split(/\r?\n/, 1)[0].trim()
+  if (/^REISCRUB:/i.test(headerLine)) {
+    return parsePayloadV1(rawText.replace(/^\uFEFF/, ''), headerLine)
+  }
+
   const helperRe = /(view\s*lead|start\s*mail)/i
   const cityLineRe = /^\s*([^,]+),\s*([A-Za-z]{2})\s+(\d{5}(?:-\d{4})?)\s*$/
 
@@ -609,6 +759,7 @@ export function formatDealMachineData(rawText: string): DealMachineResult {
 }
 
 export function downloadCSV(data: Record<string, string>[], filename: string): void {
+  if (data.length === 0) return
   const headers = Object.keys(data[0])
   const rows = data.map((row) =>
     headers
