@@ -14,6 +14,22 @@ export type Reason =
   | "unknown_job"
   | "in_flight"
   | "continuation_cap"
+  | "code_sent" // Discord verify-start: a code was texted to the member's phone on file
+  | "linked" // Discord verify: this Discord account is (now) linked to the member
+  | "already_linked" // the member, or this Discord account, is already linked to a different counterpart
+  | "not_eligible" // covers "no such account" too — the bot must not be able to tell the two apart
+  | "unlinked" // Discord unlink: the link was deleted
+  | "not_linked" // Discord unlink: no link existed for this Discord account (idempotent repeat)
+  | "revoked" // Discord bot revoke: role removed
+  | "not_in_guild" // Discord bot revoke: member is not in the guild, nothing to do
+  | "not_holding_role" // Discord bot revoke: member is in the guild but did not hold the role
+  | "discord_unavailable" // Discord bot revoke: gateway not ready or a Discord API failure — retry
+  | "rate_limited"
+  | "invalid_code" // Discord verify-confirm: wrong code (attemptsRemaining accompanies it)
+  | "code_expired" // no live code (expired, never sent, or already used)
+  | "code_locked" // too many wrong attempts on the current code
+  | "bad_request" // body is valid JSON but fails validation (bad Discord id, missing/both identifiers, malformed value)
+  | "delivery_failed" // eligible, but the phone lookup or the SMS send failed
   | "server_misconfigured" // a required env var is unset — deterministic, known cause
   | "internal_error"; // anything else unexpected (a thrown exception) — cause is not known/deterministic
 

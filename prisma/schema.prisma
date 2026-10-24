@@ -993,8 +993,50 @@ model GhlAccount {
   locationToken        String?
   locationTokenExpires DateTime?
   ledgerEntries        BillingLedgerEntry[]
+  discordLink          DiscordLink?
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
+}
+
+// REIblast Discord bot: one Discord account per member, one member per Discord account. Keyed to GhlAccount.id (locationId is
+// null before provisioning). Unlink and revoke DELETE the row, so the plain unique constraints mean "currently linked".
+model DiscordLink {
+  id            String     @id @default(cuid())
+  ghlAccountId  String     @unique
+  ghlAccount    GhlAccount @relation(fields: [ghlAccountId], references: [id])
+  discordUserId String     @unique
+  linkedAt      DateTime   @default(now())
+}
+
+// Event log for DB-backed rate limiting of the Discord verify endpoints (serverless: no in-memory limiter). One row per
+// attempt; limits are "count rows in the window". ghlAccountId is deliberately NOT a foreign key: attempts for an
+// unresolved lookup have none, and a log row must never block anything. Registered in lib/admin/removeMembers.ts by ghlAccountId.
+model DiscordVerifyAttempt {
+  id            String   @id @default(cuid())
+  kind          String // "start" | "confirm"
+  discordUserId String
+  ghlAccountId  String?
+  createdAt     DateTime @default(now())
+
+  @@index([discordUserId, kind, createdAt])
+  @@index([ghlAccountId, kind, createdAt])
+}
+
+// Pending/finished "remove this Discord ID's role" requests to the bot (docs/revoke-contract.md). Written in the same transaction
+// that deletes the DiscordLink, retried by the discord_outbox job. Deliberately NOT a foreign key to GhlAccount or User and NOT
+// in lib/admin/removeMembers.ts: it must outlive a member removal. One row per Discord ID (unique + upsert = dedupe).
+model DiscordRevokeOutbox {
+  id            String    @id @default(cuid())
+  discordUserId String    @unique
+  source        String // "pause_webhook" | "member_removal" | "dunning_engine"
+  status        String    @default("pending") // pending | done | superseded | exhausted | config_error
+  attempts      Int       @default(0)
+  nextAttemptAt DateTime  @default(now())
+  lastReason    String? // bot reason code or fixed local code, never free text
+  createdAt     DateTime  @default(now())
+  completedAt   DateTime?
+
+  @@index([status, nextAttemptAt])
 }
 
 model BillingLedgerEntry {

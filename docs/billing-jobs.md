@@ -1,6 +1,6 @@
 # Nightly billing data jobs
 
-Five jobs, triggered by a GHL scheduled workflow (no Vercel Cron). The data jobs never change billing state, tags, or stages, and
+Six jobs, triggered by a GHL scheduled workflow (no Vercel Cron). The data jobs never change billing state, tags, or stages, and
 never write to GHL; `sub_sweep` feeds the dunning engine, which in shadow mode only records decisions. See `docs/ghl-server-contract.md`.
 
 | job | what it does |
@@ -9,12 +9,13 @@ never write to GHL; `sub_sweep` feeds the dunning engine, which in shadow mode o
 | `tx_sweep` | Rolling 35-day window of `GET /payments/transactions` through `ingestTransaction` (catches missed webhooks). |
 | `wallet_usage` | Previous 2 UTC days of agency wallet transactions → `WalletTransaction` (every raw row, insert-or-ignore on GHL id) and `UsageRollup` (per location incl. HQ, plus `_agency` / `_unattributed`; replaces per (scopeKey, day)). On **UTC day 3 only** it also refreshes the whole previous calendar month as ≤7-day windows. Each finished window runs the rollup-vs-rows check (below). |
 | `balances` | Wallet balance per location (incl. HQ) → `WalletBalanceSnapshot`, one row per location per UTC day. |
+| `discord_outbox` | **Every 15 minutes.** Delivers due `DiscordRevokeOutbox` rows to the Discord bot (`docs/revoke-contract.md`), re-arms `config_error` rows once `DISCORD_BOT_URL` + `DISCORD_BOT_OUTBOUND_SECRET` are both set (each re-arm is an attempt, so a still-broken config ends `exhausted` after 5), and purges `done`/`superseded` rows older than 30 days. JobRun summary: `delivered`, `retried`, `exhausted`, `config_error`, `superseded`, `purged` (this run) and `standingExhausted`, `standingConfigError` (rows currently in those states — what an alert should watch); numbers only. Health marks it stale after 1 hour, not 26. |
 | `sub_sweep` | Nightly subscription sweep: lists GHL subscriptions → `GhlSubscriptionState`, and feeds status changes the ledger never shows to the dunning engine (see below). |
 
 ## Trigger
 
 `POST /api/webhooks/ghl/jobs` with header `x-reiblast-jobs-secret: <GHL_JOBS_SECRET>` and body
-`{ "job": "replay" | "tx_sweep" | "wallet_usage" | "balances" | "sub_sweep" }`. Always answers 200 `{ accepted, job }`; the work runs in
+`{ "job": "replay" | "tx_sweep" | "wallet_usage" | "balances" | "sub_sweep" | "discord_outbox" }`. Always answers 200 `{ accepted, job }`; the work runs in
 the background (`waitUntil`). Create one GHL scheduled workflow per job.
 
 ## Plan limit assumed

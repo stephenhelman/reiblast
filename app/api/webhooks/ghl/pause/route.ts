@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma";
 import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 import { getWalletBalance, pauseLocation } from "@/lib/ghl/client";
 import { MEMBER_TAGS } from "@/lib/constants";
+import { revokeDiscordOnPause } from "@/lib/discord/revoke";
 
 export async function POST(req: NextRequest) {
   if (!verifyWebhook(req)) {
@@ -50,6 +51,9 @@ export async function POST(req: NextRequest) {
     where: { id: user.id },
     data: { status: "suspended" },
   });
+
+  // Pausing ends Discord access too. Contained: never throws, never changes this route's response.
+  await revokeDiscordOnPause(user.id);
 
   return NextResponse.json({ action: "paused" });
 }

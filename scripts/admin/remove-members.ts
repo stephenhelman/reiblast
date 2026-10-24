@@ -10,7 +10,7 @@
  * Logic + the dependency registry: lib/admin/removeMembers.ts.
  */
 import { connect } from "../billing/_cli";
-import { executeRemoval, planRemoval, unexpectedReferences, type Plan } from "../../lib/admin/removeMembers";
+import { planRemoval, removeMembers, unexpectedReferences, type Plan } from "../../lib/admin/removeMembers";
 
 const contactIds = process.argv.filter((a) => a.startsWith("--contact-id=")).map((a) => a.slice("--contact-id=".length).trim()).filter(Boolean);
 if (contactIds.length === 0) throw new Error("usage: remove-members.ts --contact-id=<ghl contact id> [--contact-id=...] [--apply]");
@@ -37,16 +37,17 @@ async function main() {
   if (!apply) return console.log("Dry-run: nothing deleted. Re-run with --apply.");
   if (removable.length === 0) return console.log("Nothing to delete.");
 
-  const deleted = await prisma.$transaction(async (tx) => {
-    const all: { contactId: string; rows: { table: string; deleted: number }[] }[] = [];
-    for (const p of removable) all.push({ contactId: p.ctx.contactId, rows: await executeRemoval(tx as never, p.ctx) });
-    return all;
-  }, { timeout: 120_000, maxWait: 30_000 });
-  for (const d of deleted) {
+  const result = await removeMembers(prisma, removable.map((p) => p.ctx));
+  for (const d of result.removed) {
     console.log(`\nDeleted for ${d.contactId}:`);
     for (const r of d.rows) if (r.deleted > 0) console.log(`  ${String(r.deleted).padStart(6)}  ${r.table}`);
   }
   console.log("\nDone (one transaction).");
+  // The Discord revokes were queued inside that transaction and delivered only after it committed. A delivery failure never undoes
+  // the removal — the outbox row stays and the discord_outbox job retries it.
+  if (result.revoke.queued) {
+    console.log(`Discord revoke: ${result.revoke.queued} queued — ${Object.entries(result.revoke.outcomes).map(([k, n]) => `${n} ${k}`).join(", ")} (anything not "done" is retried by the discord_outbox job).`);
+  }
 }
 
 main().finally(() => prisma.$disconnect());
