@@ -5,6 +5,7 @@ import { verifyWebhook } from "@/lib/ghl/verifyWebhook";
 import { MEMBER_TAGS } from "@/lib/constants";
 import { ensureGhlAccount } from "@/lib/billing/state/dualWrite";
 import { enqueueAndSendOnboardingIntent } from "@/lib/billing/onboardingIntents";
+import { applySignupFee, parseSignupFee } from "@/lib/billing/setupFee";
 
 export async function POST(req: NextRequest) {
   if (!verifyWebhook(req)) {
@@ -59,6 +60,14 @@ export async function POST(req: NextRequest) {
     });
     console.log(`[GHL webhook] OTP stored for ${email}`);
     await ensureGhlAccount(prisma, { userId: user.id, contactId }); // additive dual-write; never throws (swallows + logs)
+
+    // Setup-fee status + signup offer from the workflow's customData. Its own try/catch (ensureGhlAccount swallows and is time-bounded,
+    // so this must not live there); a failure leaves the fields null (= UNKNOWN). Conditional writes only, because this route fires on renewals.
+    try {
+      await applySignupFee(prisma, user.id, parseSignupFee(body));
+    } catch (e) {
+      console.error("[GHL webhook] setup-fee write failed (ignored):", e instanceof Error ? e.message : e);
+    }
 
     await addTag(contactId, MEMBER_TAGS.PAYMENT_RECEIVED);
     await addTag(contactId, MEMBER_TAGS.CORE);
