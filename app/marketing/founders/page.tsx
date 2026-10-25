@@ -39,7 +39,7 @@ const FOUNDER_SLOTS = 10;
 function FounderSlots() {
   return (
     <p className="text-gold font-semibold text-center">
-      Only {FOUNDER_SLOTS} founder slots. After that, REIsite is $500.
+      Only {FOUNDER_SLOTS} founder slots. After that, REIsite is $500 and REIkit is $25.
     </p>
   );
 }
@@ -52,7 +52,9 @@ function OfferCard({
   description,
   was,
   now,
+  priceLabel,
   note,
+  included = false,
 }: {
   wordmark: string;
   width: number;
@@ -61,16 +63,19 @@ function OfferCard({
   description: string;
   was: string;
   now: string;
+  priceLabel?: string;
   note?: string;
+  /** An add-in of another product, not something to buy: quieter card, no price emphasis. */
+  included?: boolean;
 }) {
   return (
-    <div className="bg-surface border border-gold/30 rounded-xl p-6 flex flex-col">
+    <div className={`bg-surface rounded-xl p-6 flex flex-col border ${included ? "border-border-default" : "border-gold/30"}`}>
       <Image src={wordmark} alt={alt} width={width} height={height} className="h-10 w-auto self-start" />
       <p className="text-white/60 text-sm leading-relaxed mt-4 flex-1">{description}</p>
       <div className="mt-5 flex items-baseline gap-3 flex-wrap">
         <span className="text-gray line-through text-lg">{was}</span>
         <span className="text-gold font-extrabold text-3xl">{now}</span>
-        <span className="text-silver text-xs uppercase tracking-widest">founder price</span>
+        {priceLabel && <span className="text-silver text-xs uppercase tracking-widest">{priceLabel}</span>}
       </div>
       {note && (
         <p className="mt-3 text-xs font-bold px-2.5 py-1 rounded-full bg-gold text-black self-start">{note}</p>
@@ -127,7 +132,7 @@ export default function FoundersPage() {
             The Founder&apos;s Offer
           </p>
           <h2 className="text-2xl md:text-3xl font-extrabold text-white text-center mb-8">
-            Founder pricing on REIsite and REIkit
+            Founder pricing on REIsite, with REIkit included free
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <OfferCard
@@ -138,16 +143,20 @@ export default function FoundersPage() {
               description="Your own real estate investor website: full site, SEO, and lead capture straight into REIblast. Live within 3 days of receiving your intake."
               was="$500"
               now="$100"
-              note="REIkit included"
+              priceLabel="founder price"
+              note="REIkit included free"
             />
             <OfferCard
               wordmark="/brand/wordmarks/rei-kit.png"
               width={382}
               height={128}
               alt="REIkit"
-              description="Logo + brand kit."
+              description="Logo + brand kit, included with your REIsite at no extra cost. REIkit isn't sold separately."
               was="$25"
-              now="$5"
+              now="Free"
+              priceLabel="founder price"
+              note="Included with REIsite"
+              included
             />
           </div>
           <div className="mt-6 space-y-2">
