@@ -19,3 +19,12 @@ export function isFounderOfferOpen(now: Date = new Date()): boolean {
 export function getFounderCheckoutLink(): string | null {
   return process.env.FOUNDER_CHECKOUT_LINK?.trim() || null;
 }
+
+/**
+ * Founder REIsite slots still unclaimed, used only by the CLAIMS_OPEN promo copy.
+ * TODO(task b): count FounderClaim rows and return TOTAL - claimed. Until then it is a fixed 10.
+ */
+export const FOUNDER_SLOTS_TOTAL = 10;
+export async function getFounderSlotsLeft(): Promise<number> {
+  return FOUNDER_SLOTS_TOTAL;
+}
