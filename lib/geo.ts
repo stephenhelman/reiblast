@@ -64,6 +64,7 @@ export function defaultTimezone(country: BusinessCountry, state?: string): strin
 export const GATED_PREFIXES = [
   "/checkout", // primary checkout page + embedded order form
   "/ari-special", // promo-code checkout (14/30-day trial forms)
+  "/founders", // Founder's Offer checkout (14-day trial form)
   "/signup", // funnel entry, links straight to the payment link
   "/onboarding", // covers /onboarding and /onboarding/success
 ] as const;
