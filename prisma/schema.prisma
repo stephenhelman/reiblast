@@ -959,6 +959,14 @@ enum GhlAccountType {
   internal
 }
 
+// OP Web Studio setup-fee status for a member (lib/billing/setupFee.ts). null on GhlAccount reads as UNKNOWN everywhere.
+enum SetupFeeStatus {
+  NOT_REQUIRED
+  PENDING
+  PAID
+  UNKNOWN
+}
+
 model GhlAccount {
   id                   String               @id @default(cuid())
   userId               String               @unique
@@ -970,6 +978,10 @@ model GhlAccount {
   warningCount         Int                  @default(0)
   trialOffer           String?
   trialEndsAt          DateTime?
+  // Setup fee owed to OP Web Studio (the only OP fact held here). Set once from the signup webhook's customData, never
+  // downgraded; null = UNKNOWN. signupOffer: "standard-7" | "founder-14" | "ari-14" | "ari-30" (unrecognized values stored raw).
+  setupFeeStatus       SetupFeeStatus?
+  signupOffer          String?
   legacyUnreconciled   Boolean              @default(false)
   accountType          GhlAccountType       @default(member)
   // Display name seen in agency wallet rows for this location (wallet_usage keeps it fresh). Null = not yet known.
