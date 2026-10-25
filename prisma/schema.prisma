@@ -1051,6 +1051,22 @@ model DiscordRevokeOutbox {
   @@index([status, nextAttemptAt])
 }
 
+// Dedupe + rotation memory for server-driven promo posts (app/api/webhooks/ghl-promo). Deliberately NO relation to User or
+// GhlAccount, so there is nothing to register in lib/admin/removeMembers.ts. Unique (promo, runKey) is the dedupe key.
+model PromoPost {
+  id               String   @id @default(cuid())
+  promo            String
+  runKey           String // discord_tick: America/Chicago "YYYY-MM-DDTHH"; discord_launch: "launch"
+  variation        Int // 1-4 for rotation posts, 0 for the launch post
+  status           String // sent | failed
+  discordMessageId String?
+  error            String? // fixed local code, never free text, never a URL
+  createdAt        DateTime @default(now())
+
+  @@unique([promo, runKey])
+  @@index([promo, status, createdAt])
+}
+
 model BillingLedgerEntry {
   id                String       @id @default(cuid())
   ghlTransactionId  String       @unique

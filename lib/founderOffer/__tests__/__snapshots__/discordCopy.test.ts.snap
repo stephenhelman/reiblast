@@ -1,0 +1,363 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`launch copy > pings the role with allowed_mentions when the id is valid 1`] = `
+{
+  "allowed_mentions": {
+    "roles": [
+      "123456789012345678",
+    ],
+  },
+  "content": "<@&123456789012345678> Founder claims are open!",
+  "embeds": [
+    {
+      "color": 16107586,
+      "description": "The first member to claim gets REIsite + REIkit completely free. Then 9 slots at $100 (normally $500).",
+      "fields": [
+        {
+          "name": "How It Works",
+          "value": "• We verify you on the claim page
+• First claim wins the free slot
+• Everyone after gets a $100 invoice
+• Your slot locks once it's paid
+• Unpaid invoices forfeit after 24 hours",
+        },
+        {
+          "name": "Who Qualifies",
+          "value": "Active or trialing members in good standing. Paused or expired accounts don't qualify.",
+        },
+        {
+          "name": "Claims Close",
+          "value": "Oct 31 at 11:59 PM CT",
+        },
+        {
+          "name": "​",
+          "value": "[Claim your founder slot](https://x.test/founders/claim)",
+        },
+      ],
+      "footer": {
+        "text": "REIsite & REIkit provided by OP Web Studio, a subsidiary of Operation Profit LLC",
+      },
+      "image": {
+        "url": "https://img.test/f.png",
+      },
+      "title": "🚨 Founder Claims Are OPEN",
+      "url": "https://x.test/founders/claim",
+    },
+  ],
+  "username": "REIblast",
+}
+`;
+
+exports[`tick copy > open v1 is within Discord limits and matches snapshot 1`] = `
+{
+  "embeds": [
+    {
+      "color": 16107586,
+      "description": "Join by Oct 31 and become a Founding Member. You get the full platform with built-in support, and you unlock the Founder's Offer.",
+      "fields": [
+        {
+          "inline": true,
+          "name": "REIsite: Your Investor Website",
+          "value": "~~$500~~ **$100** for founders",
+        },
+        {
+          "inline": true,
+          "name": "REIkit: Logo + Brand Kit",
+          "value": "~~$25~~ **FREE** for founders",
+        },
+        {
+          "name": "🚨 Founder Claims Are OPEN",
+          "value": "Founder claims are **OPEN**: **7 of 10** REIsite slots left. Claim by Oct 31 at 11:59 PM CT. The first member to claim gets REIsite free.",
+        },
+        {
+          "name": "​",
+          "value": "[Members: claim your slot](https://x.test/founders/claim) · [New? Start your trial](https://x.test/founders)",
+        },
+      ],
+      "footer": {
+        "text": "REIsite & REIkit provided by OP Web Studio, a subsidiary of Operation Profit LLC",
+      },
+      "image": {
+        "url": "https://img.test/b.png",
+      },
+      "title": "🏆 Founding Membership is Open, Ends Oct 31",
+      "url": "https://x.test/founders/claim",
+    },
+  ],
+  "username": "REIblast",
+}
+`;
+
+exports[`tick copy > open v2 is within Discord limits and matches snapshot 1`] = `
+{
+  "embeds": [
+    {
+      "color": 16107586,
+      "description": "Most wholesalers don't quit because of the software, they quit because they're stuck with it alone. Every member gets:",
+      "fields": [
+        {
+          "inline": true,
+          "name": "💬 Member Community",
+          "value": "Investors running the same system, sharing what works.",
+        },
+        {
+          "inline": true,
+          "name": "🤖 24/7 AI Support",
+          "value": "Account questions answered any time, right here in Discord.",
+        },
+        {
+          "inline": true,
+          "name": "🎓 Support Courses",
+          "value": "Step-by-step from setup to your first campaign.",
+        },
+        {
+          "inline": true,
+          "name": "📞 Live Group Sessions",
+          "value": "Help on your actual account, live.",
+        },
+        {
+          "name": "🚨 Founder Claims Are OPEN",
+          "value": "Founder claims are **OPEN**: **7 of 10** REIsite slots left. Claim by Oct 31 at 11:59 PM CT.
+[Members: claim your slot](https://x.test/founders/claim) · [New? Start your trial](https://x.test/founders)",
+        },
+      ],
+      "image": {
+        "url": "https://img.test/c.png",
+      },
+      "title": "You Don't Have to Figure Out Your CRM Alone",
+      "url": "https://x.test/founders/claim",
+    },
+  ],
+  "username": "REIblast",
+}
+`;
+
+exports[`tick copy > open v3 is within Discord limits and matches snapshot 1`] = `
+{
+  "embeds": [
+    {
+      "color": 16107586,
+      "description": "Sellers look you up before they call you back. No website, or a generic one, and you lose them. REIsite is a full investor website built for you.",
+      "fields": [
+        {
+          "name": "What's Included",
+          "value": "• SEO-ready site
+• Lead capture straight into REIblast
+• Hosting included
+• REIkit logo + brand kit, free
+• Live within 3 business days of your intake",
+        },
+        {
+          "name": "Founder Price",
+          "value": "~~$500~~ **$100**
+REIblast members active by Oct 31 only.",
+        },
+        {
+          "name": "🚨 Founder Claims Are OPEN",
+          "value": "Founder claims are **OPEN**: **7 of 10** REIsite slots left. Claim by Oct 31 at 11:59 PM CT.
+[Members: claim your slot](https://x.test/founders/claim) · [New? Start your trial](https://x.test/founders)",
+        },
+      ],
+      "footer": {
+        "text": "REIsite & REIkit provided by OP Web Studio, a subsidiary of Operation Profit LLC",
+      },
+      "image": {
+        "url": "https://img.test/d.png",
+      },
+      "title": "Your Own Investor Website, Live in 3 Days, for $100",
+      "url": "https://x.test/founders/claim",
+    },
+  ],
+  "username": "REIblast",
+}
+`;
+
+exports[`tick copy > open v4 is within Discord limits and matches snapshot 1`] = `
+{
+  "embeds": [
+    {
+      "color": 16107586,
+      "description": "When a seller Googles your name after you call them, what do they find? If the answer is "nothing" or "a Facebook page," you're losing deals you already paid to generate. Founding members get REIsite, a full investor website with SEO and lead capture into REIblast, for $100 instead of $500.",
+      "fields": [
+        {
+          "inline": true,
+          "name": "Deadline",
+          "value": "Be an active member by Oct 31.",
+        },
+        {
+          "inline": true,
+          "name": "Already a Member?",
+          "value": "You qualify. Founder claims are **OPEN**: **7 of 10** REIsite slots left. Claim by Oct 31 at 11:59 PM CT.",
+        },
+        {
+          "name": "​",
+          "value": "[Members: claim your slot](https://x.test/founders/claim) · [New? Start your trial](https://x.test/founders)",
+        },
+      ],
+      "image": {
+        "url": "https://img.test/e.png",
+      },
+      "title": "Quick Question for Wholesalers",
+      "url": "https://x.test/founders/claim",
+    },
+  ],
+  "username": "REIblast",
+}
+`;
+
+exports[`tick copy > pre v1 is within Discord limits and matches snapshot 1`] = `
+{
+  "embeds": [
+    {
+      "color": 16107586,
+      "description": "Join by Oct 31 and become a Founding Member. You get the full platform with built-in support, and you unlock the Founder's Offer.",
+      "fields": [
+        {
+          "inline": true,
+          "name": "REIsite: Your Investor Website",
+          "value": "~~$500~~ **$100** for founders",
+        },
+        {
+          "inline": true,
+          "name": "REIkit: Logo + Brand Kit",
+          "value": "~~$25~~ **FREE** for founders",
+        },
+        {
+          "name": "Founder Claims Open Wed, Oct 28 at 7 PM CT",
+          "value": "Only **10** REIsite slots, and the **first member to claim gets REIsite free**. Join before then.",
+        },
+        {
+          "name": "​",
+          "value": "[Start your 14-day free trial](https://x.test/founders)",
+        },
+      ],
+      "footer": {
+        "text": "REIsite & REIkit provided by OP Web Studio, a subsidiary of Operation Profit LLC",
+      },
+      "image": {
+        "url": "https://img.test/a.png",
+      },
+      "title": "🏆 Founding Membership is Open, Ends Oct 31",
+      "url": "https://x.test/founders",
+    },
+  ],
+  "username": "REIblast",
+}
+`;
+
+exports[`tick copy > pre v2 is within Discord limits and matches snapshot 1`] = `
+{
+  "embeds": [
+    {
+      "color": 16107586,
+      "description": "Most wholesalers don't quit because of the software, they quit because they're stuck with it alone. Every member gets:",
+      "fields": [
+        {
+          "inline": true,
+          "name": "💬 Member Community",
+          "value": "Investors running the same system, sharing what works.",
+        },
+        {
+          "inline": true,
+          "name": "🤖 24/7 AI Support",
+          "value": "Account questions answered any time, right here in Discord.",
+        },
+        {
+          "inline": true,
+          "name": "🎓 Support Courses",
+          "value": "Step-by-step from setup to your first campaign.",
+        },
+        {
+          "inline": true,
+          "name": "📞 Live Group Sessions",
+          "value": "Help on your actual account, live.",
+        },
+        {
+          "name": "Join by Oct 31 for Founder pricing",
+          "value": "Founder claims open **Wed, Oct 28 at 7 PM CT**.
+[Start your 14-day free trial](https://x.test/founders)",
+        },
+      ],
+      "image": {
+        "url": "https://img.test/c.png",
+      },
+      "title": "You Don't Have to Figure Out Your CRM Alone",
+      "url": "https://x.test/founders",
+    },
+  ],
+  "username": "REIblast",
+}
+`;
+
+exports[`tick copy > pre v3 is within Discord limits and matches snapshot 1`] = `
+{
+  "embeds": [
+    {
+      "color": 16107586,
+      "description": "Sellers look you up before they call you back. No website, or a generic one, and you lose them. REIsite is a full investor website built for you.",
+      "fields": [
+        {
+          "name": "What's Included",
+          "value": "• SEO-ready site
+• Lead capture straight into REIblast
+• Hosting included
+• REIkit logo + brand kit, free
+• Live within 3 business days of your intake",
+        },
+        {
+          "name": "Founder Price",
+          "value": "~~$500~~ **$100**
+REIblast members active by Oct 31 only.",
+        },
+        {
+          "name": "Founder Claims",
+          "value": "Founder claims open **Wed, Oct 28 at 7 PM CT**, and the first claim is free.
+Not a member yet? [Start your trial](https://x.test/founders)",
+        },
+      ],
+      "footer": {
+        "text": "REIsite & REIkit provided by OP Web Studio, a subsidiary of Operation Profit LLC",
+      },
+      "image": {
+        "url": "https://img.test/d.png",
+      },
+      "title": "Your Own Investor Website, Live in 3 Days, for $100",
+      "url": "https://x.test/founders",
+    },
+  ],
+  "username": "REIblast",
+}
+`;
+
+exports[`tick copy > pre v4 is within Discord limits and matches snapshot 1`] = `
+{
+  "embeds": [
+    {
+      "color": 16107586,
+      "description": "When a seller Googles your name after you call them, what do they find? If the answer is "nothing" or "a Facebook page," you're losing deals you already paid to generate. Founding members get REIsite, a full investor website with SEO and lead capture into REIblast, for $100 instead of $500.",
+      "fields": [
+        {
+          "inline": true,
+          "name": "Deadline",
+          "value": "Be an active member by Oct 31.",
+        },
+        {
+          "inline": true,
+          "name": "Already a Member?",
+          "value": "You qualify. Claims open **Wed, Oct 28 at 7 PM CT**.",
+        },
+        {
+          "name": "​",
+          "value": "[New? Start your trial](https://x.test/founders)",
+        },
+      ],
+      "image": {
+        "url": "https://img.test/e.png",
+      },
+      "title": "Quick Question for Wholesalers",
+      "url": "https://x.test/founders",
+    },
+  ],
+  "username": "REIblast",
+}
+`;
