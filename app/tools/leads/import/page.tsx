@@ -467,43 +467,77 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
   )
 }
 
-// ─── Extension install card (paste screen of the DealMachine tab only) ────────
+// ─── Extension install modal (paste screen of the DealMachine tab only) ───────
 
-const EXT_COLLAPSED_KEY = 'reiscrub.extension.collapsed'
+const EXT_DISMISSED_KEY = 'reiscrub.extension.dismissed'
 const EXT_BROWSER_KEY = 'reiscrub.extension.browser'
 
-function ExtensionCard() {
-  const [collapsed, setCollapsed] = useState(false)
+function ExtensionModal() {
+  const [open, setOpen] = useState(false)
+  const [confirmingClose, setConfirmingClose] = useState(false)
+  const [dismissed, setDismissed] = useState(true) // assume dismissed until storage says otherwise (no flash for returning users)
   const [browser, setBrowser] = useState<ExtensionBrowser>('chrome')
   const [copied, setCopied] = useState(false)
-  const cardRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
+    let wasDismissed = false
     try {
-      if (localStorage.getItem(EXT_COLLAPSED_KEY) === '1') setCollapsed(true)
+      wasDismissed = localStorage.getItem(EXT_DISMISSED_KEY) === '1'
       const b = localStorage.getItem(EXT_BROWSER_KEY)
       if (b && (EXTENSION_BROWSERS as readonly string[]).includes(b)) setBrowser(b as ExtensionBrowser)
     } catch {
-      // storage unavailable — defaults are fine
+      // storage unavailable — treat as first visit
     }
+    setDismissed(wasDismissed)
+    if (!wasDismissed || window.location.hash === '#extension') setOpen(true)
 
-    function revealIfHash() {
-      if (window.location.hash !== '#extension') return
-      setCollapsed(false)
-      // wait a frame so the expanded body is laid out before scrolling
-      requestAnimationFrame(() => cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+    function openIfHash() {
+      if (window.location.hash === '#extension') setOpen(true)
     }
-    revealIfHash()
-    window.addEventListener('hashchange', revealIfHash)
-    return () => window.removeEventListener('hashchange', revealIfHash)
+    window.addEventListener('hashchange', openIfHash)
+    return () => window.removeEventListener('hashchange', openIfHash)
   }, [])
 
-  function toggle() {
-    const next = !collapsed
-    setCollapsed(next)
+  // Escape asks to close (same path as the X button); body scroll locked while open.
+  useEffect(() => {
+    if (!open) return
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    dialogRef.current?.focus()
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') requestClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prevOverflow
+      window.removeEventListener('keydown', onKey)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, dismissed])
+
+  function openModal(e?: React.MouseEvent<HTMLElement>) {
+    openerRef.current = (e?.currentTarget as HTMLElement) ?? null
+    setConfirmingClose(false)
+    setOpen(true)
+  }
+
+  function finishClose() {
+    setOpen(false)
+    setConfirmingClose(false)
+    setDismissed(true)
     try {
-      localStorage.setItem(EXT_COLLAPSED_KEY, next ? '1' : '0')
+      localStorage.setItem(EXT_DISMISSED_KEY, '1')
     } catch {}
+    if (window.location.hash === '#extension') history.replaceState(null, '', window.location.pathname + window.location.search)
+    openerRef.current?.focus()
+  }
+
+  // First close (never dismissed before) asks for confirmation; after that it closes straight away.
+  function requestClose() {
+    if (dismissed) finishClose()
+    else setConfirmingClose(true)
   }
 
   function pickBrowser(b: ExtensionBrowser) {
@@ -526,86 +560,130 @@ function ExtensionCard() {
   const muted = 'rgba(255,255,255,0.6)'
 
   return (
-    <div
-      id="extension"
-      ref={cardRef}
-      style={{ background: '#111', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 12, marginBottom: 24, scrollMarginTop: 24 }}
-    >
+    <>
       <button
-        onClick={toggle}
-        aria-expanded={!collapsed}
-        aria-controls="extension-body"
-        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'transparent', border: 'none', cursor: 'pointer', padding: '14px 18px', color: '#fff', fontSize: 15, fontWeight: 600, textAlign: 'left' }}
+        id="extension-open"
+        onClick={openModal}
+        style={{ display: 'block', marginBottom: 16, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: GOLD, fontSize: 13, textAlign: 'left' }}
       >
-        <span>
-          Get the REIscrub Puller extension{' '}
-          <span style={{ color: 'rgba(255,255,255,0.4)', fontWeight: 400, fontSize: 13 }}>v{EXTENSION_VERSION}</span>
-        </span>
-        <span style={{ color: 'rgba(255,255,255,0.4)', fontSize: 13 }}>{collapsed ? 'Show' : 'Hide'}</span>
+        Get the REIscrub Puller extension (v{EXTENSION_VERSION}) →
       </button>
 
-      {!collapsed && (
-        <div id="extension-body" style={{ padding: '0 18px 18px', fontSize: 13, color: muted }}>
-          <a
-            href={EXTENSION_ZIP_PATH}
-            download
-            style={{ display: 'inline-block', background: GOLD, color: '#000', fontWeight: 700, padding: '10px 20px', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
+      {open && (
+        <div
+          onClick={requestClose}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, overflowY: 'auto' }}
+        >
+          <div
+            id="extension"
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="extension-title"
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
+            style={{ position: 'relative', background: '#111', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 12, width: '100%', maxWidth: 560, maxHeight: '100%', overflowY: 'auto', padding: 22, fontSize: 13, color: muted, outline: 'none' }}
           >
-            Download extension (.zip)
-          </a>
+            <button
+              onClick={requestClose}
+              aria-label="Close"
+              style={{ position: 'absolute', top: 10, right: 14, background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}
+            >
+              ×
+            </button>
 
-          <div style={{ display: 'flex', gap: 8, margin: '16px 0 12px', alignItems: 'center' }}>
-            <span style={{ color: 'rgba(255,255,255,0.4)' }}>Browser:</span>
-            {EXTENSION_BROWSERS.map((b) => (
-              <button
-                key={b}
-                onClick={() => pickBrowser(b)}
-                aria-pressed={browser === b}
-                style={{
-                  background: browser === b ? 'rgba(245,200,66,0.15)' : 'transparent',
-                  color: browser === b ? GOLD : muted,
-                  border: `1px solid ${browser === b ? GOLD : 'rgba(255,255,255,0.15)'}`,
-                  borderRadius: 6,
-                  padding: '4px 12px',
-                  cursor: 'pointer',
-                  fontSize: 13,
-                }}
-              >
-                {EXTENSION_BROWSER_LABEL[b]}
-              </button>
-            ))}
+            <h2 id="extension-title" style={{ color: '#fff', fontSize: 17, fontWeight: 600, margin: '0 28px 14px 0' }}>
+              Get the REIscrub Puller extension{' '}
+              <span style={{ color: 'rgba(255,255,255,0.4)', fontWeight: 400, fontSize: 13 }}>v{EXTENSION_VERSION}</span>
+            </h2>
+
+            {confirmingClose ? (
+              <div role="alertdialog" aria-live="polite">
+                <p style={{ color: '#fff', fontSize: 14, lineHeight: 1.5, margin: '0 0 16px' }}>
+                  To get the most out of REIscrub and DealMachine, we recommend using the REIscrub Puller extension. It collects
+                  your DealMachine search results for you, so you don&apos;t have to copy and paste addresses by hand.
+                </p>
+                <p style={{ margin: '0 0 16px' }}>You can reopen these instructions any time from the link above the paste box.</p>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => setConfirmingClose(false)}
+                    style={{ background: GOLD, color: '#000', fontWeight: 700, padding: '9px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 14 }}
+                  >
+                    Show me how
+                  </button>
+                  <button
+                    onClick={finishClose}
+                    style={{ background: 'transparent', color: muted, padding: '9px 18px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.2)', cursor: 'pointer', fontSize: 14 }}
+                  >
+                    Close anyway
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <a
+                  href={EXTENSION_ZIP_PATH}
+                  download
+                  style={{ display: 'inline-block', background: GOLD, color: '#000', fontWeight: 700, padding: '10px 20px', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
+                >
+                  Download extension (.zip)
+                </a>
+
+                <div style={{ display: 'flex', gap: 8, margin: '16px 0 12px', alignItems: 'center' }}>
+                  <span style={{ color: 'rgba(255,255,255,0.4)' }}>Browser:</span>
+                  {EXTENSION_BROWSERS.map((b) => (
+                    <button
+                      key={b}
+                      onClick={() => pickBrowser(b)}
+                      aria-pressed={browser === b}
+                      style={{
+                        background: browser === b ? 'rgba(245,200,66,0.15)' : 'transparent',
+                        color: browser === b ? GOLD : muted,
+                        border: `1px solid ${browser === b ? GOLD : 'rgba(255,255,255,0.15)'}`,
+                        borderRadius: 6,
+                        padding: '4px 12px',
+                        cursor: 'pointer',
+                        fontSize: 13,
+                      }}
+                    >
+                      {EXTENSION_BROWSER_LABEL[b]}
+                    </button>
+                  ))}
+                </div>
+
+                <ol style={{ paddingLeft: 20, margin: 0, display: 'flex', flexDirection: 'column', gap: 6, lineHeight: 1.5 }}>
+                  <li>
+                    Download and unzip to a permanent folder (not Downloads). Don&apos;t delete or move it later — {label} loads
+                    the extension from that folder.
+                  </li>
+                  <li>
+                    Open{' '}
+                    <code style={{ background: '#000', padding: '2px 6px', borderRadius: 4, color: '#fff' }}>{url}</code>{' '}
+                    <button
+                      onClick={copyUrl}
+                      style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: muted, borderRadius: 4, padding: '1px 8px', cursor: 'pointer', fontSize: 12 }}
+                    >
+                      {copied ? 'Copied' : 'Copy'}
+                    </button>{' '}
+                    in {label}.
+                  </li>
+                  <li>Turn on Developer mode.</li>
+                  <li>Click &quot;Load unpacked&quot; and select the folder that contains manifest.json.</li>
+                  <li>Open DealMachine, run your search, and use the panel to Collect, then Copy.</li>
+                  <li>Paste here.</li>
+                </ol>
+
+                <p style={{ marginTop: 12, marginBottom: 0 }}>Desktop only. On mobile or other browsers, paste manually below.</p>
+                <p style={{ marginTop: 6, marginBottom: 0 }}>
+                  To update, download again, replace the folder&apos;s contents, then click the reload icon on the extension in{' '}
+                  {url}.
+                </p>
+              </>
+            )}
           </div>
-
-          <ol style={{ paddingLeft: 20, margin: 0, display: 'flex', flexDirection: 'column', gap: 6, lineHeight: 1.5 }}>
-            <li>
-              Download and unzip to a permanent folder (not Downloads). Don&apos;t delete or move it later — {label} loads the
-              extension from that folder.
-            </li>
-            <li>
-              Open{' '}
-              <code style={{ background: '#000', padding: '2px 6px', borderRadius: 4, color: '#fff' }}>{url}</code>{' '}
-              <button
-                onClick={copyUrl}
-                style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: muted, borderRadius: 4, padding: '1px 8px', cursor: 'pointer', fontSize: 12 }}
-              >
-                {copied ? 'Copied' : 'Copy'}
-              </button>{' '}
-              in {label}.
-            </li>
-            <li>Turn on Developer mode.</li>
-            <li>Click &quot;Load unpacked&quot; and select the folder that contains manifest.json.</li>
-            <li>Open DealMachine, run your search, and use the panel to Collect, then Copy.</li>
-            <li>Paste here.</li>
-          </ol>
-
-          <p style={{ marginTop: 12, marginBottom: 0 }}>Desktop only. On mobile or other browsers, paste manually below.</p>
-          <p style={{ marginTop: 6, marginBottom: 0 }}>
-            To update, download again, replace the folder&apos;s contents, then click the reload icon on the extension in{' '}
-            {url}.
-          </p>
         </div>
       )}
-    </div>
+    </>
   )
 }
 
@@ -686,7 +764,7 @@ function DealMachineTab({ locationId }: { locationId: string }) {
   if (!result) {
     return (
       <div className="max-w-2xl mx-auto py-12 px-6">
-        <ExtensionCard />
+        <ExtensionModal />
         <textarea
           value={rawText}
           onChange={(e) => setRawText(e.target.value)}
