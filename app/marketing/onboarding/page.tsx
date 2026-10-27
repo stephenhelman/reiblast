@@ -717,10 +717,16 @@ function OnboardingContent() {
         <div className="max-w-md w-full">
           <div className="flex justify-center mb-8"><LogoStacked size={72} /></div>
           <div className="bg-[#141414] border border-[#2A2A2A] rounded-2xl p-8 text-center">
-            <h2 className="text-white font-bold text-xl mb-3">Your information has been submitted</h2>
-            <p className="text-white/60 text-sm leading-relaxed">
-              Your information has been submitted and is being reviewed. You&apos;ll receive an email with your login credentials within 24 hours.
+            <h2 className="text-white font-bold text-xl mb-3">You&apos;re all set — your information is in</h2>
+            <p className="text-white/60 text-sm leading-relaxed mb-6">
+              Head to your next steps to finish getting set up.
             </p>
+            <a
+              href="/welcome"
+              className="block w-full bg-gold text-black font-bold text-lg py-4 rounded-xl hover:bg-gold-hover transition-colors"
+            >
+              See Your Next Steps →
+            </a>
           </div>
         </div>
       </div>

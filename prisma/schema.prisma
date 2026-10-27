@@ -959,6 +959,14 @@ enum GhlAccountType {
   internal
 }
 
+// OP Web Studio setup-fee status for a member (lib/billing/setupFee.ts). null on GhlAccount reads as UNKNOWN everywhere.
+enum SetupFeeStatus {
+  NOT_REQUIRED
+  PENDING
+  PAID
+  UNKNOWN
+}
+
 model GhlAccount {
   id                   String               @id @default(cuid())
   userId               String               @unique
@@ -970,6 +978,10 @@ model GhlAccount {
   warningCount         Int                  @default(0)
   trialOffer           String?
   trialEndsAt          DateTime?
+  // Setup fee owed to OP Web Studio (the only OP fact held here). Set once from the signup webhook's customData, never
+  // downgraded; null = UNKNOWN. signupOffer: "standard-7" | "founder-14" | "ari-14" | "ari-30" (unrecognized values stored raw).
+  setupFeeStatus       SetupFeeStatus?
+  signupOffer          String?
   legacyUnreconciled   Boolean              @default(false)
   accountType          GhlAccountType       @default(member)
   // Display name seen in agency wallet rows for this location (wallet_usage keeps it fresh). Null = not yet known.
@@ -1037,6 +1049,22 @@ model DiscordRevokeOutbox {
   completedAt   DateTime?
 
   @@index([status, nextAttemptAt])
+}
+
+// Dedupe + rotation memory for server-driven promo posts (app/api/webhooks/ghl-promo). Deliberately NO relation to User or
+// GhlAccount, so there is nothing to register in lib/admin/removeMembers.ts. Unique (promo, runKey) is the dedupe key.
+model PromoPost {
+  id               String   @id @default(cuid())
+  promo            String
+  runKey           String // discord_tick: America/Chicago "YYYY-MM-DDTHH"; discord_launch: "launch"
+  variation        Int // 1-4 for rotation posts, 0 for the launch post
+  status           String // sent | failed
+  discordMessageId String?
+  error            String? // fixed local code, never free text, never a URL
+  createdAt        DateTime @default(now())
+
+  @@unique([promo, runKey])
+  @@index([promo, status, createdAt])
 }
 
 model BillingLedgerEntry {
