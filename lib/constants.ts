@@ -10,6 +10,11 @@ export const GHL_APP_URL = "https://app.reiblast.app";
 export const TOOLS_URL = "https://tools.reiblast.app";
 export const MARKETING_URL = "https://reiblast.app";
 export const SUPPORT_EMAIL = "support@reiblast.app";
+export const SUPPORT_PHONE_DISPLAY = "(915) 800-8266";
+export const SUPPORT_PHONE_SMS = "+19158008266";
+export const SUPPORT_SMS_BODY = "Hi Stephen, I just finished onboarding! Saving your number.";
+// `?&body=` is the form that prefills on both iOS and Android.
+export const SUPPORT_SMS_HREF = `sms:${SUPPORT_PHONE_SMS}?&body=${encodeURIComponent(SUPPORT_SMS_BODY)}`;
 
 export const ONBOARDING_STAGES = {
   PAYMENT_RECEIVED: "Payment Received",
