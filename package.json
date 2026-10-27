@@ -10,7 +10,7 @@
     "test:engine": "vitest run lib/engine/__tests__",
     "test:billing": "vitest run lib/billing/__tests__",
     "test:admin": "vitest run lib/admin/__tests__",
-    "test:scrub": "vitest run lib/__tests__/leadCleaner.payload.test.ts",
+    "test:scrub": "vitest run lib/__tests__/leadCleaner.payload.test.ts lib/__tests__/extension.test.ts",
     "test:reports-db": "vitest run lib/billing/__tests__/reports/costsSql.db.test.ts",
     "db:status:dev": "PRISMA_TARGET=dev prisma migrate status",
     "db:status:prod": "PRISMA_TARGET=prod prisma migrate status",
