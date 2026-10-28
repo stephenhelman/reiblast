@@ -55,6 +55,8 @@ export const SPECS: Spec[] = [
   { table: "BillingLedgerEntry", delegate: "billingLedgerEntry", by: "ghlAccountId / contactId", where: (c) => or(c.accountId ? { ghlAccountId: c.accountId } : null, { contactId: c.contactId }) },
   { table: "DiscordLink", delegate: "discordLink", by: "ghlAccountId", where: (c) => (c.accountId ? { ghlAccountId: c.accountId } : null) },
   { table: "DiscordVerifyAttempt", delegate: "discordVerifyAttempt", by: "ghlAccountId (no FK)", where: (c) => (c.accountId ? { ghlAccountId: c.accountId } : null) },
+  { table: "FounderClaim", delegate: "founderClaim", by: "ghlAccountId", where: (c) => (c.accountId ? { ghlAccountId: c.accountId } : null) },
+  { table: "FounderVerifyAttempt", delegate: "founderVerifyAttempt", by: "ghlAccountId (no FK)", where: (c) => (c.accountId ? { ghlAccountId: c.accountId } : null) },
   { table: "GhlSubscriptionState", delegate: "ghlSubscriptionState", by: "contactId (no FK)", where: (c) => ({ contactId: c.contactId }) },
 ];
 export const EVENT_TABLE = "GhlEvent (externalId = contact/transaction id, or payload mentions the contact)";
@@ -106,6 +108,11 @@ export async function planRemoval(db: Db, contactId: string): Promise<Plan> {
   if (user.role !== "user") return refuse(contactId, `User role is "${user.role}", not a plain member`);
   if (account && account.accountType !== "member") return refuse(contactId, `GhlAccount accountType is "${account.accountType}", not member`);
   if ((await db.adminAction.count({ where: { adminUserId: user.id } })) > 0) return refuse(contactId, REFUSED_MODELS.AdminAction);
+
+  // A founder who holds a free slot or has paid is on the books at OP Web Studio: removing them here would orphan that claim.
+  if (account && (await db.founderClaim.count({ where: { ghlAccountId: account.id, status: { in: ["PAID", "FREE_WINNER"] } } })) > 0) {
+    return refuse(contactId, "member holds a Founder's Offer claim (FREE_WINNER or PAID) — not removed");
+  }
 
   const locationIds = [...new Set([account?.locationId, user.ghlLocationId].filter((x): x is string => !!x))];
   const accountId = account?.id ?? null;
