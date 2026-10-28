@@ -1006,6 +1006,7 @@ model GhlAccount {
   locationTokenExpires DateTime?
   ledgerEntries        BillingLedgerEntry[]
   discordLink          DiscordLink?
+  founderClaim         FounderClaim?
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
 }
@@ -1264,4 +1265,49 @@ model GhlSubscriptionState {
   updatedAt      DateTime @updatedAt
 
   @@index([contactId])
+}
+
+enum FounderClaimStatus {
+  FREE_WINNER
+  PENDING_PAYMENT
+  PAID
+  RELEASED
+}
+
+// Founder's Offer claim (promo founders-2026). One row per member; a RELEASED claim is reopened in place (attempt+1, new token).
+// Holds only the claim and its invoice reference: nothing OP Web Studio owns lives on GhlAccount or User.
+model FounderClaim {
+  id                String             @id @default(cuid())
+  token             String             @unique // random, URL-safe; the key GHL/OP match on
+  ghlAccountId      String             @unique
+  ghlAccount        GhlAccount         @relation(fields: [ghlAccountId], references: [id])
+  claimNumber       Int                @unique
+  status            FounderClaimStatus
+  isFirst           Boolean
+  attempt           Int                @default(1)
+  studioContactId   String?
+  invoiceId         String?            @unique
+  invoiceUrl        String?
+  intentSentAt      DateTime?
+  claimedAt         DateTime           @default(now())
+  paidAt            DateTime?
+  releasedAt        DateTime?
+  intakeSubmittedAt DateTime?
+  announcedAt       DateTime?
+  updatedAt         DateTime           @updatedAt
+
+  @@index([status, claimedAt])
+}
+
+// Event log for DB-backed rate limiting and OTP binding of the founder claim flow (same idea as DiscordVerifyAttempt). Keyed by the
+// verified-link identity (ghlAccountId + discordUserId), never by email. Not a foreign key: a log row must never block anything.
+// Registered in lib/admin/removeMembers.ts by ghlAccountId.
+model FounderVerifyAttempt {
+  id            String   @id @default(cuid())
+  kind          String // "start" | "sent" | "confirm"
+  ghlAccountId  String
+  discordUserId String?
+  createdAt     DateTime @default(now())
+
+  @@index([ghlAccountId, kind, createdAt])
 }

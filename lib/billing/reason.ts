@@ -18,6 +18,8 @@ export type Reason =
   | "linked" // Discord verify: this Discord account is (now) linked to the member
   | "already_linked" // the member, or this Discord account, is already linked to a different counterpart
   | "not_eligible" // covers "no such account" too — the bot must not be able to tell the two apart
+  | "link_issued" // Discord founder-link: a signed claim link was minted for the linked member
+  | "not_verified" // Discord founder-link: this Discord account has no DiscordLink yet
   | "unlinked" // Discord unlink: the link was deleted
   | "not_linked" // Discord unlink: no link existed for this Discord account (idempotent repeat)
   | "revoked" // Discord bot revoke: role removed

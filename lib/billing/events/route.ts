@@ -20,9 +20,12 @@ import type { ProcessResult } from "./stageChanged";
  * auth reason — there was nothing recordable either way. The secret is NEVER logged or stored: redactCustomDataSecret
  * strips `customData.secret` before the payload is persisted to GhlEvent.
  */
-const reply = (reason: Reason) => NextResponse.json({ received: reason === "accepted", reason });
+const reply = (reason: Reason | (string & {}), received = reason === "accepted") => NextResponse.json({ received, reason });
 
-export async function handleEventRoute(req: NextRequest, cfg: { label: string; source: string; externalId: (body: Record<string, unknown>) => string | null; process: (eventId: string, db: Awaited<ReturnType<typeof getBillingDb>>) => Promise<ProcessResult> }): Promise<NextResponse> {
+/** A processor may return a specific outcome `reason` for the response body (e.g. an OP route's "no_open_claim"). */
+export type ProcessOutcome = ProcessResult | { result: ProcessResult; reason: string };
+
+export async function handleEventRoute(req: NextRequest, cfg: { label: string; source: string; externalId: (body: Record<string, unknown>) => string | null; process: (eventId: string, db: Awaited<ReturnType<typeof getBillingDb>>) => Promise<ProcessOutcome>; /** Header-only auth against a different secret (no body fallback), for routes that are not the GHL events family. */ auth?: { header: string; envName: string } }): Promise<NextResponse> {
   try {
     let body: Record<string, unknown>;
     try {
@@ -34,17 +37,18 @@ export async function handleEventRoute(req: NextRequest, cfg: { label: string; s
       return reply("bad_json");
     }
 
-    if (!process.env.GHL_EVENTS_SECRET) {
-      console.error(`[${cfg.label}] missing required env var(s):`, missingEnvVars(["GHL_EVENTS_SECRET"]).join(", "));
+    const authCfg = cfg.auth ?? { header: "x-reiblast-events-secret", envName: "GHL_EVENTS_SECRET" };
+    if (!process.env[authCfg.envName]) {
+      console.error(`[${cfg.label}] missing required env var(s):`, missingEnvVars([authCfg.envName]).join(", "));
       return reply("server_misconfigured");
     }
-    const headerSecret = req.headers.get("x-reiblast-events-secret");
-    const bodySecret = customDataStringField(body, "secret") ?? null;
+    const headerSecret = req.headers.get(authCfg.header);
+    const bodySecret = cfg.auth ? null : (customDataStringField(body, "secret") ?? null);
     if (!headerSecret && !bodySecret) {
       console.warn(`[${cfg.label}] auth missing — ignoring`);
       return reply("auth_missing");
     }
-    const authOk = (headerSecret && secretMatches(headerSecret, "GHL_EVENTS_SECRET")) || (bodySecret && secretMatches(bodySecret, "GHL_EVENTS_SECRET"));
+    const authOk = (headerSecret && secretMatches(headerSecret, authCfg.envName)) || (bodySecret && secretMatches(bodySecret, authCfg.envName));
     if (!authOk) {
       console.warn(`[${cfg.label}] auth failed — ignoring`);
       return reply("auth_failed");
@@ -59,7 +63,11 @@ export async function handleEventRoute(req: NextRequest, cfg: { label: string; s
       logInternalError(cfg.label, err);
       return reply("internal_error");
     }
-    await cfg.process(event.id, db);
+    const outcome = await cfg.process(event.id, db);
+    if (typeof outcome === "object") {
+      console.log(`[${cfg.label}] reason=${outcome.reason}`);
+      return reply(outcome.reason, outcome.result !== "failed");
+    }
     return reply("accepted");
   } catch (err) {
     logInternalError(cfg.label, err);

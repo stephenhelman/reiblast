@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { checkSecret, logInternalError } from "@/lib/billing/reason";
+import { prisma } from "@/lib/prisma";
 import { defaultPromoDb } from "@/lib/promo/post";
 import { findHandler } from "@/lib/promo/handlers";
 
 // Reusable GHL -> server promo receiver. GHL only runs the clock; the server decides what to post and where. Server-to-server, so
 // no guardRegion. Always HTTP 200 with a JSON `reason` (contract rule 6). Auth: x-reiblast-promo-secret vs GHL_PROMO_SECRET.
-// Body: { promo, event, dryRun? }. dryRun === "true" returns the built payload and sends/writes nothing. Never log webhook URLs.
+// Body: { promo, event, dryRun?, ...event fields }. dryRun === "true" returns the built payload and sends/writes nothing. Never log webhook URLs.
 
 const reply = (body: { reason: string; [k: string]: unknown }) => {
   console.log(`[ghl-promo] reason=${body.reason}`);
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
     const handler = findHandler(body.promo, body.event);
     if (!handler) return reply({ reason: "unknown_event" });
 
-    const out = await handler({ now: new Date(), dryRun: body.dryRun === "true", db: defaultPromoDb() });
+    const out = await handler({ now: new Date(), dryRun: body.dryRun === "true", db: defaultPromoDb(), body, claimDb: prisma as never });
     return reply(out);
   } catch (err) {
     logInternalError("ghl-promo", err);
