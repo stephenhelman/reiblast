@@ -15,11 +15,7 @@ exports[`launch copy > pings the role with allowed_mentions when the id is valid
       "fields": [
         {
           "name": "How It Works",
-          "value": "• We verify you on the claim page
-• First claim wins the free slot
-• Everyone after gets a $100 invoice
-• Your slot locks once it's paid
-• Unpaid invoices forfeit after 24 hours",
+          "value": "Head to #founders-claim and press **Claim my spot**. You'll get your personal link. Enter the code we text you and your slot is reserved. First member to claim gets REIsite + REIkit free; everyone after gets a $100 invoice, and your slot locks once it's paid. Unpaid invoices are released after 24 hours.",
         },
         {
           "name": "Who Qualifies",
@@ -31,7 +27,7 @@ exports[`launch copy > pings the role with allowed_mentions when the id is valid
         },
         {
           "name": "​",
-          "value": "[Claim your founder slot](https://x.test/founders/claim)",
+          "value": "[Go to #founders-claim](https://discord.com/channels/1/2)",
         },
       ],
       "footer": {
@@ -41,7 +37,7 @@ exports[`launch copy > pings the role with allowed_mentions when the id is valid
         "url": "https://img.test/f.png",
       },
       "title": "🚨 Founder Claims Are OPEN",
-      "url": "https://x.test/founders/claim",
+      "url": "https://discord.com/channels/1/2",
     },
   ],
   "username": "REIblast",
@@ -67,11 +63,11 @@ exports[`tick copy > open v1 is within Discord limits and matches snapshot 1`] =
         },
         {
           "name": "🚨 Founder Claims Are OPEN",
-          "value": "Founder claims are **OPEN**: **7 of 10** REIsite slots left. Claim by Oct 31 at 11:59 PM CT. The first member to claim gets REIsite free.",
+          "value": "Founder claims are **OPEN**: **7 of 10** REIsite slots left. Claim by Oct 31 at 11:59 PM CT. Head to #founders-claim and press **Claim my spot**. The first member to claim gets REIsite free.",
         },
         {
           "name": "​",
-          "value": "[Members: claim your slot](https://x.test/founders/claim) · [New? Start your trial](https://x.test/founders)",
+          "value": "[Members: claim your slot in #founders-claim](https://discord.com/channels/1/2) · [New? Start your trial](https://x.test/founders)",
         },
       ],
       "footer": {
@@ -81,7 +77,7 @@ exports[`tick copy > open v1 is within Discord limits and matches snapshot 1`] =
         "url": "https://img.test/b.png",
       },
       "title": "🏆 Founding Membership is Open, Ends Oct 31",
-      "url": "https://x.test/founders/claim",
+      "url": "https://discord.com/channels/1/2",
     },
   ],
   "username": "REIblast",
@@ -117,15 +113,15 @@ exports[`tick copy > open v2 is within Discord limits and matches snapshot 1`] =
         },
         {
           "name": "🚨 Founder Claims Are OPEN",
-          "value": "Founder claims are **OPEN**: **7 of 10** REIsite slots left. Claim by Oct 31 at 11:59 PM CT.
-[Members: claim your slot](https://x.test/founders/claim) · [New? Start your trial](https://x.test/founders)",
+          "value": "Founder claims are **OPEN**: **7 of 10** REIsite slots left. Claim by Oct 31 at 11:59 PM CT. Head to #founders-claim and press **Claim my spot**.
+[Members: claim your slot in #founders-claim](https://discord.com/channels/1/2) · [New? Start your trial](https://x.test/founders)",
         },
       ],
       "image": {
         "url": "https://img.test/c.png",
       },
       "title": "You Don't Have to Figure Out Your CRM Alone",
-      "url": "https://x.test/founders/claim",
+      "url": "https://discord.com/channels/1/2",
     },
   ],
   "username": "REIblast",
@@ -154,8 +150,8 @@ REIblast members active by Oct 31 only.",
         },
         {
           "name": "🚨 Founder Claims Are OPEN",
-          "value": "Founder claims are **OPEN**: **7 of 10** REIsite slots left. Claim by Oct 31 at 11:59 PM CT.
-[Members: claim your slot](https://x.test/founders/claim) · [New? Start your trial](https://x.test/founders)",
+          "value": "Founder claims are **OPEN**: **7 of 10** REIsite slots left. Claim by Oct 31 at 11:59 PM CT. Head to #founders-claim and press **Claim my spot**.
+[Members: claim your slot in #founders-claim](https://discord.com/channels/1/2) · [New? Start your trial](https://x.test/founders)",
         },
       ],
       "footer": {
@@ -165,7 +161,7 @@ REIblast members active by Oct 31 only.",
         "url": "https://img.test/d.png",
       },
       "title": "Your Own Investor Website, Live in 3 Days, for $100",
-      "url": "https://x.test/founders/claim",
+      "url": "https://discord.com/channels/1/2",
     },
   ],
   "username": "REIblast",
@@ -187,18 +183,18 @@ exports[`tick copy > open v4 is within Discord limits and matches snapshot 1`] =
         {
           "inline": true,
           "name": "Already a Member?",
-          "value": "You qualify. Founder claims are **OPEN**: **7 of 10** REIsite slots left. Claim by Oct 31 at 11:59 PM CT.",
+          "value": "You qualify. Founder claims are **OPEN**: **7 of 10** REIsite slots left. Claim by Oct 31 at 11:59 PM CT. Head to #founders-claim and press **Claim my spot**.",
         },
         {
           "name": "​",
-          "value": "[Members: claim your slot](https://x.test/founders/claim) · [New? Start your trial](https://x.test/founders)",
+          "value": "[Members: claim your slot in #founders-claim](https://discord.com/channels/1/2) · [New? Start your trial](https://x.test/founders)",
         },
       ],
       "image": {
         "url": "https://img.test/e.png",
       },
       "title": "Quick Question for Wholesalers",
-      "url": "https://x.test/founders/claim",
+      "url": "https://discord.com/channels/1/2",
     },
   ],
   "username": "REIblast",

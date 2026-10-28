@@ -14,7 +14,8 @@ export type Variation = (typeof VARIATIONS)[number];
 
 export interface PromoUrls {
   signup: string;
-  claim: string;
+  /** Where the claim CTA points: the #founders-claim channel link (not the personal-link base). */
+  claimCta: string;
 }
 export interface TickInput {
   phase: PromoPhase;
@@ -38,8 +39,9 @@ const PRICE_REIKIT = "~~$25~~ **FREE** for founders";
 /** Discord rejects an empty field name; a zero-width space renders as a heading-less field. */
 const ZWSP = "\u200b";
 const link = (label: string, url: string) => `[${label}](${url})`;
+const CLAIM_STEP = "Head to #founders-claim and press **Claim my spot**.";
 const claimsOpenLine = (slotsLeft: number) =>
-  `Founder claims are **OPEN**: **${clampSlots(slotsLeft)} of ${FOUNDER_SLOTS_TOTAL}** REIsite slots left. Claim by ${CLOSES}.`;
+  `Founder claims are **OPEN**: **${clampSlots(slotsLeft)} of ${FOUNDER_SLOTS_TOTAL}** REIsite slots left. Claim by ${CLOSES}. ${CLAIM_STEP}`;
 const clampSlots = (n: number) => Math.max(0, Math.min(FOUNDER_SLOTS_TOTAL, Math.trunc(Number.isFinite(n) ? n : 0)));
 
 function base(title: string, description: string, url: string, fields: DiscordEmbed["fields"]): DiscordEmbed {
@@ -54,14 +56,14 @@ const withFooter = (e: DiscordEmbed): DiscordEmbed => ({ ...e, footer: { text: F
 /** The CTA line(s): pre-launch points at signup only; claims-open adds the member claim link. */
 function cta(phase: PromoPhase, urls: PromoUrls, preLabel: string): string {
   return phase === "open"
-    ? `${link("Members: claim your slot", urls.claim)} · ${link("New? Start your trial", urls.signup)}`
+    ? `${link("Members: claim your slot in #founders-claim", urls.claimCta)} · ${link("New? Start your trial", urls.signup)}`
     : link(preLabel, urls.signup);
 }
 
 export function buildTickPayload(input: TickInput): DiscordPayload {
   const { phase, variation, slotsLeft, urls, assets = DISCORD_ASSETS } = input;
   const open = phase === "open";
-  const titleUrl = open ? urls.claim : urls.signup;
+  const titleUrl = open ? urls.claimCta : urls.signup;
   let embed: DiscordEmbed;
 
   switch (variation) {
@@ -176,21 +178,18 @@ export function buildLaunchPayload(input: LaunchInput): DiscordPayload {
       base(
         "🚨 Founder Claims Are OPEN",
         `The first member to claim gets REIsite + REIkit completely free. Then ${FOUNDER_SLOTS_TOTAL - 1} slots at $100 (normally $500).`,
-        urls.claim,
+        urls.claimCta,
         [
           {
             name: "How It Works",
-            value: [
-              "• We verify you on the claim page",
-              "• First claim wins the free slot",
-              "• Everyone after gets a $100 invoice",
-              "• Your slot locks once it's paid",
-              "• Unpaid invoices forfeit after 24 hours",
-            ].join("\n"),
+            value:
+              `${CLAIM_STEP} You'll get your personal link. Enter the code we text you and your slot is reserved. ` +
+              "First member to claim gets REIsite + REIkit free; everyone after gets a $100 invoice, and your slot locks once it's paid. " +
+              "Unpaid invoices are released after 24 hours.",
           },
           { name: "Who Qualifies", value: "Active or trialing members in good standing. Paused or expired accounts don't qualify." },
           { name: "Claims Close", value: CLOSES },
-          { name: ZWSP, value: link("Claim your founder slot", urls.claim) },
+          { name: ZWSP, value: link("Go to #founders-claim", urls.claimCta) },
         ],
       ),
       "launch",
