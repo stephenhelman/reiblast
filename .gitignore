@@ -51,3 +51,6 @@ scripts/kurv-probe/output/
 
 # billing audit output (customer PII)
 scripts/billing-audit/output/
+
+# audit reports (local scratch)
+scratch/

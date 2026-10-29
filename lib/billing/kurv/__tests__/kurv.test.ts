@@ -3,7 +3,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { batchDateOf, batchesDepositedIn, groupBatches, windowEndDay, windowStartInstant, type KurvTx } from "../batch";
 import { addDays, fedHolidays, isBankDay, nextBankDay } from "../calendar";
-import { batchFees, estimateMonthlyDebit, monthlyActivity, sumBatchFees, type KurvRates, type MonthlyTx } from "../fees";
+import { batchFees, estimateMonthlyDebit, monthlyActivity, sumBatchFees, type KurvRates } from "../fees";
 import { releasesTotal, reserveBalance } from "../reserve";
 
 // Rates here mirror what the dated SettingRate table will hold (seeded effective 2026-10-01); the module itself has no defaults.
