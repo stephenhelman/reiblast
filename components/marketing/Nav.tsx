@@ -1,5 +1,15 @@
 import Link from 'next/link'
 import { LogoFull } from '../shared/Logo'
+import MobileMenu, { type NavItem } from './MobileMenu'
+
+const MOBILE_ITEMS: NavItem[] = [
+  { href: 'https://app.reiblast.app', label: 'Login', external: true },
+  { href: '/features', label: 'Features' },
+  { href: '/pricing', label: 'Pricing' },
+  { href: '/about', label: 'About' },
+  { href: '/faq', label: 'FAQ' },
+  { href: '/contact', label: 'Contact' },
+]
 
 export default function Nav() {
   return (
@@ -31,12 +41,7 @@ export default function Nav() {
             Get Started
           </Link>
         </div>
-        <Link
-          href="/checkout"
-          className="md:hidden bg-gold text-black font-semibold text-sm px-4 py-2 rounded-lg"
-        >
-          Get Started
-        </Link>
+        <MobileMenu items={MOBILE_ITEMS} />
       </div>
     </nav>
   )
