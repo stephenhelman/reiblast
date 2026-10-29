@@ -15,7 +15,31 @@ type Overrides = {
   createdAt?: string;
   amountRefunded?: number;
   contactId?: string;
+  /** false → a row with no chargeSnapshot at all (never reached the gateway). */
+  snapshot?: boolean;
+  chargeId?: string;
+  transactionType?: string;
+  cardType?: string;
+  submitTimeUTC?: string;
+  settleAmount?: number;
 };
+
+/** Synthetic Authorize.net chargeSnapshot (no PII). */
+const snapshot = (o: Overrides) =>
+  o.snapshot === false
+    ? {}
+    : {
+        chargeSnapshot: {
+          transId: o.chargeId ?? "900000000001",
+          submitTimeUTC: o.submitTimeUTC ?? "2026-09-01T11:59:59.000Z",
+          transactionType: o.transactionType ?? "authCaptureTransaction",
+          responseCode: 1,
+          AVSResponse: "Y",
+          authAmount: o.settleAmount ?? o.amount ?? 57,
+          settleAmount: o.settleAmount ?? o.amount ?? 57,
+          payment: { creditCard: { cardType: o.cardType ?? "Visa" } },
+        },
+      };
 
 const base = (o: Overrides) => ({
   id: o.id ?? "aaaaaaaaaaaaaaaaaaaaaaa1",
@@ -53,7 +77,8 @@ export function listTxn(o: Overrides = {}) {
     ...(b.subType ? { entitySourceSubType: b.subType } : {}),
     ...(b.description ? { entitySourceMeta: { description: b.description } } : { entitySourceMeta: {} }),
     ...(b.subscriptionId ? { subscriptionId: b.subscriptionId } : {}),
-    chargeId: "900000000001",
+    chargeId: o.chargeId ?? "900000000001",
+    ...snapshot(o),
     paymentProviderType: b.provider,
     amountRefunded: b.amountRefunded,
     ...(b.fulfilledAt ? { fulfilledAt: b.fulfilledAt } : {}),
@@ -83,7 +108,8 @@ export function singleTxn(o: Overrides = {}) {
         meta: b.description ? { description: b.description } : {},
       },
       ...(b.subscriptionId ? { subscriptionId: b.subscriptionId } : {}),
-      chargeId: "900000000001",
+      chargeId: o.chargeId ?? "900000000001",
+      ...snapshot(o),
       paymentProvider: { type: b.provider, connectedAccount: { accountId: "0000000" } },
       amountRefunded: b.amountRefunded,
       ...(b.fulfilledAt ? { fulfilledAt: b.fulfilledAt } : {}),

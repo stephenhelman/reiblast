@@ -1,7 +1,8 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { classify, CLASSIFIER_VERSION } from "./classify";
 import { getBillingDb } from "./db";
-import { locationIdFromDescription, shouldStampRefundDetected, type MatchMethod } from "./matchAccount";
+import { kurvFields } from "./kurv/ledgerFields";
+import { matchMemberAccount, shouldStampRefundDetected, type MatchMethod } from "./matchAccount";
 import { normalizeTransaction, unwrapTransaction } from "./normalizeTransaction";
 
 type Db = Pick<PrismaClient, "ghlAccount" | "billingLedgerEntry">;
@@ -21,19 +22,7 @@ export async function ingestTransaction(txn: unknown, db?: Db, opts: { now?: Dat
   if (c.classification === "ignore") return { action: "ignored", reason: c.reason };
 
   // Only MEMBER accounts match: internal accounts (owner/HQ) are never a member's payer.
-  let account = t.contactId
-    ? await client.ghlAccount.findFirst({ where: { contactId: t.contactId, accountType: "member" }, select: { id: true } })
-    : null;
-  let matchMethod: MatchMethod | null = account ? "contactId" : null;
-
-  // Fallback for auto-recharges whose payer contact isn't a known member: the description embeds the member's location URL.
-  if (!account && c.classification === "wallet_auto_recharge") {
-    const locationId = locationIdFromDescription(t.description);
-    if (locationId) {
-      account = await client.ghlAccount.findFirst({ where: { locationId, accountType: "member" }, select: { id: true } });
-      if (account) matchMethod = "descriptionLocation";
-    }
-  }
+  const { account, matchMethod } = await matchMemberAccount(client, t.description, t.contactId);
 
   const existing = await client.billingLedgerEntry.findUnique({
     where: { ghlTransactionId: t.id },
@@ -43,6 +32,7 @@ export async function ingestTransaction(txn: unknown, db?: Db, opts: { now?: Dat
 
   const raw = unwrapTransaction(txn) as Prisma.InputJsonObject; // exactly as received (array unwrapped)
   const fields = {
+    ...kurvFields(t),
     classification: c.classification,
     classifierVersion: CLASSIFIER_VERSION,
     status: t.status,

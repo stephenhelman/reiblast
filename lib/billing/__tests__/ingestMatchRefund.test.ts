@@ -70,15 +70,15 @@ describe("auto-recharge description-URL fallback", () => {
     expect(locationIdFromDescription(null)).toBeNull();
   });
 
-  it("matches by contactId first", async () => {
+  it("matches by contactId when the description has no location", async () => {
     const { db, ledger } = fakeDb([member]);
     const id = "aaaaaaaaaaaaaaaaaaaaaac1";
-    const r = await ingestTransaction(listTxn({ id, amount: 10, subType: "saas_one_time", description: AUTO_DESC, contactId: member.contactId }), db);
+    const r = await ingestTransaction(listTxn({ id, amount: 10, subType: "saas_one_time", description: MANUAL_DESC, contactId: member.contactId }), db);
     expect(r).toMatchObject({ action: "written", matchMethod: "contactId", matchedAccount: true });
     expect(ledger.get(id)!.ghlAccountId).toBe("acct_member");
   });
 
-  it("falls back to the description location when the contact is unknown", async () => {
+  it("matches the description location when the contact is unknown", async () => {
     const { db, ledger } = fakeDb([member]);
     const id = "aaaaaaaaaaaaaaaaaaaaaac2";
     const r = await ingestTransaction(listTxn({ id, amount: 10, subType: "saas_one_time", description: AUTO_DESC, contactId: "unknownunknownunknown" }), db);
@@ -94,13 +94,25 @@ describe("auto-recharge description-URL fallback", () => {
     expect(ledger.get(id)!.ghlAccountId).toBeNull();
   });
 
-  it("does not apply to non-auto-recharge rows", async () => {
-    const { db } = fakeDb([member]);
+  it("location in the description wins over contactId, for any class", async () => {
+    const other = { id: "acct_other", contactId: "cccccccccccccccccc77", locationId: "LOCATION0000000000077" };
+    const { db, ledger } = fakeDb([member, other]);
+    const id = "aaaaaaaaaaaaaaaaaaaaaac4";
     const r = await ingestTransaction(
-      listTxn({ id: "aaaaaaaaaaaaaaaaaaaaaac4", amount: 10, subType: "saas_one_time", description: "Manual Recharge /location/LOCATION0000000000002/", contactId: "unknownunknownunknown" }),
+      listTxn({ id, amount: 10, subType: "saas_one_time", description: "Manual Recharge /location/LOCATION0000000000002/", contactId: other.contactId }),
       db,
     );
-    expect(r).toMatchObject({ classification: "wallet_manual_recharge", matchMethod: null });
+    expect(r).toMatchObject({ classification: "wallet_manual_recharge", matchMethod: "descriptionLocation" });
+    expect(ledger.get(id)!.ghlAccountId).toBe("acct_member");
+  });
+
+  it("falls back to contactId when the description location is not a member", async () => {
+    const { db } = fakeDb([member]);
+    const r = await ingestTransaction(
+      listTxn({ id: "aaaaaaaaaaaaaaaaaaaaaac5", amount: 10, subType: "saas_one_time", description: "Auto-Recharge /location/NOTAMEMBER/", contactId: member.contactId }),
+      db,
+    );
+    expect(r).toMatchObject({ matchMethod: "contactId", matchedAccount: true });
   });
 });
 
