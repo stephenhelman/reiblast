@@ -20,7 +20,7 @@ export type KurvTx = {
 };
 
 export const BATCH_CUTOFF_HOUR = 17;
-const isAmex = (brand: string | null) => !!brand && /^american\s*express$|^amex$/i.test(brand.replace(/\s/g, ""));
+export const isAmexBrand = (brand: string | null) => !!brand && /^american\s*express$|^amex$/i.test(brand.replace(/\s/g, ""));
 
 /** Succeeded authCaptureTransaction, real chargeId (not "0"), snapshot present. ID length is deliberately not a rule. */
 export function isSettledSale(t: KurvTx): boolean {
@@ -80,7 +80,7 @@ export function groupBatches(txs: readonly KurvTx[], opts: { excludeChargeIds?: 
       by.set(end, b);
     }
     b.items += 1;
-    if (!isAmex(t.cardBrand)) b.nonAmexItems += 1;
+    if (!isAmexBrand(t.cardBrand)) b.nonAmexItems += 1;
     b.grossCents += toCents(t.settleAmount!);
   }
   return [...by.values()].sort((a, b) => (a.windowEnd < b.windowEnd ? -1 : 1));

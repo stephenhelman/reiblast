@@ -6,9 +6,13 @@
  *   DATABASE_URL=<non-prod> npx tsx scripts/billing/backfill-kurv-fields.ts            # dry-run (default)
  *   DATABASE_URL=<non-prod> npx tsx scripts/billing/backfill-kurv-fields.ts --apply
  *
- * Writes only the new columns, classification and classifierVersion. ghlAccountId is never changed here; the number of
- * rows whose account link WOULD differ under the v3 match order (location first, contactId fallback) is reported.
+ * Writes the new columns, classification, classifierVersion and — per the v3 match order (parsed location id first,
+ * contactId fallback, member accounts only) — ghlAccountId where it differs. The before/after list is ALWAYS written to
+ * scripts/billing-audit/output/rematch.csv first (gitignored; ids and amounts only).
  */
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { classify, CLASSIFIER_VERSION } from "../../lib/billing/classify";
 import type { KurvTx } from "../../lib/billing/kurv/batch";
 import { kurvFields } from "../../lib/billing/kurv/ledgerFields";
@@ -23,9 +27,10 @@ const { db, apply } = await connect();
 const usd = (c: number) => (c / 100).toFixed(2);
 
 async function main() {
-  const rows = await db.billingLedgerEntry.findMany({ select: { id: true, ghlTransactionId: true, classification: true, classifierVersion: true, ghlAccountId: true, occurredAt: true, raw: true } });
+  const rows = await db.billingLedgerEntry.findMany({ select: { id: true, ghlTransactionId: true, classification: true, classifierVersion: true, ghlAccountId: true, occurredAt: true, amount: true, raw: true } });
   const members = await db.ghlAccount.findMany({ where: { accountType: "member" }, select: { id: true, contactId: true, locationId: true } });
   const byLoc = new Map(members.filter((m) => m.locationId).map((m) => [m.locationId!, m.id]));
+  const locOf = new Map(members.map((m) => [m.id, m.locationId ?? ""]));
   const byContact = new Map(members.filter((m) => m.contactId).map((m) => [m.contactId!, m.id]));
   const first = rows.reduce((m, r) => (r.occurredAt < m ? r.occurredAt : m), rows[0]?.occurredAt ?? new Date());
   console.log(`Ledger rows: ${rows.length}   earliest occurredAt: ${first.toISOString().slice(0, 10)}   classifier v${CLASSIFIER_VERSION}\n`);
@@ -33,6 +38,8 @@ async function main() {
   const matrix = new Map<string, number>();
   const plan: { id: string; data: ReturnType<typeof kurvFields> & { classification: never; classifierVersion: number } }[] = [];
   const txs: KurvTx[] = [];
+  const rematchRows: { id: string; ghlTransactionId: string; old: string | null; next: string; cls: string; amount: string; method: string }[] = [];
+  const newAccount = new Map<string, string>();
   let rematch = 0, errors = 0, batchRows = 0;
 
   for (const r of rows) {
@@ -55,14 +62,26 @@ async function main() {
       submitTimeUtc: t.submitTimeUtc?.toISOString() ?? null, settleAmount: t.settleAmountCents === null ? null : t.settleAmountCents / 100, cardBrand: t.cardBrand,
     });
     const loc = locationIdFromDescription(t.description);
-    const want = (loc && byLoc.get(loc)) || (t.contactId && byContact.get(t.contactId)) || null;
-    if (want && want !== r.ghlAccountId) rematch++;
+    const byLocId = loc ? byLoc.get(loc) : undefined;
+    const want = byLocId ?? (t.contactId ? byContact.get(t.contactId) : undefined) ?? null;
+    if (want && want !== r.ghlAccountId) {
+      rematch++;
+      newAccount.set(r.id, want);
+      rematchRows.push({ id: r.id, ghlTransactionId: r.ghlTransactionId, old: r.ghlAccountId, next: want, cls: after, amount: r.amount.toString(), method: byLocId ? "descriptionLocation" : "contactId" });
+    }
   }
 
   console.log("Classification before → after:");
   for (const [k, n] of [...matrix].sort()) console.log(`  ${k.split(" → ")[0] === k.split(" → ")[1] ? "  " : "* "}${k.padEnd(48)} ${String(n).padStart(5)}`);
   console.log(`\nRows with batch fields (settled sales): ${batchRows}   normalize errors: ${errors}`);
-  console.log(`Rows whose account link would differ under v3 matching (NOT written here): ${rematch}`);
+  const csvPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../billing-audit/output/rematch.csv");
+  fs.mkdirSync(path.dirname(csvPath), { recursive: true });
+  const q = (v: string) => `"${v.replace(/"/g, '""')}"`;
+  fs.writeFileSync(
+    csvPath,
+    ["ledgerId,ghlTransactionId,oldAccountId,oldLocationId,newAccountId,newLocationId,matchMethod,classification,amount", ...rematchRows.map((x) => [x.id, x.ghlTransactionId, x.old ?? "", x.old ? locOf.get(x.old) ?? "" : "", x.next, locOf.get(x.next) ?? "", x.method, x.cls, x.amount].map(q).join(","))].join("\n") + "\n",
+  );
+  console.log(`Rows whose account link differs under v3 matching: ${rematch}  (list: ${csvPath})`);
 
   console.log("\n=== Reconciliation vs Kurv statements (predicted from the values above) ===");
   const settings = await db.settingRate.findMany();
@@ -88,7 +107,8 @@ async function main() {
   }
   let n = 0;
   for (const p of plan) {
-    await db.billingLedgerEntry.update({ where: { id: p.id }, data: p.data });
+    const acct = newAccount.get(p.id);
+    await db.billingLedgerEntry.update({ where: { id: p.id }, data: acct ? { ...p.data, ghlAccountId: acct } : p.data });
     if (++n % 200 === 0) console.log(`  …${n}/${plan.length}`);
   }
   console.log(`\nUpdated ${n} rows.`);
