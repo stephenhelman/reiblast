@@ -781,7 +781,7 @@ model AdminAction {
 
   // Always a real user — integrity + join to the admin's name.
   adminUserId String
-  adminUser   User             @relation("AdminActions", fields: [adminUserId], references: [id], onDelete: Restrict)
+  adminUser   User            @relation("AdminActions", fields: [adminUserId], references: [id], onDelete: Restrict)
   action      AdminActionType
 
   // Polymorphic target (tool | wallet | subscription | user | ...) — targetId
@@ -832,7 +832,7 @@ model MemberAction {
   id String @id @default(cuid())
 
   userId String
-  user   User              @relation("MemberActions", fields: [userId], references: [id], onDelete: Restrict)
+  user   User             @relation("MemberActions", fields: [userId], references: [id], onDelete: Restrict)
   action MemberActionType
 
   // Polymorphic target (subscription | tool | ...) — targetId is a plain
@@ -893,16 +893,16 @@ model Cart {
 
   stripeCheckoutSessionId String?
   expiresAt               DateTime?
-  createdAt               DateTime @default(now())
+  createdAt               DateTime  @default(now())
 
   lines         CartLine[]
   memberActions MemberAction[]
-
-  @@index([userId, status])
   // Partial-unique (userId, mode) WHERE status='open' — one open cart per
   // (user, mode) — is a hand-edit in the migration SQL (Phase 2), same
   // convention as the Subscription/BundlePriceOverride partial indexes;
   // Prisma's schema DSL can't express the WHERE predicate.
+
+  @@index([userId, status])
 }
 
 // Cart line — catalog refs only, never a price. Exactly one of tierId /
@@ -950,6 +950,8 @@ enum BillingClass {
   failed_signup
   refund
   unclassified
+  // chargeId "0" or no chargeSnapshot: never reached the gateway, so never settled revenue.
+  non_gateway
 }
 
 // member = a paying REIblast member; internal = our own account (e.g. the HQ owner used for the admin entry flow).
@@ -968,47 +970,47 @@ enum SetupFeeStatus {
 }
 
 model GhlAccount {
-  id                   String               @id @default(cuid())
-  userId               String               @unique
-  user                 User                 @relation(fields: [userId], references: [id])
-  contactId            String               @unique
-  locationId           String?              @unique
-  billingState         BillingState? // null = not yet seeded
-  pauseReason          PauseReason?
-  warningCount         Int                  @default(0)
-  trialOffer           String?
-  trialEndsAt          DateTime?
+  id                    String               @id @default(cuid())
+  userId                String               @unique
+  user                  User                 @relation(fields: [userId], references: [id])
+  contactId             String               @unique
+  locationId            String?              @unique
+  billingState          BillingState? // null = not yet seeded
+  pauseReason           PauseReason?
+  warningCount          Int                  @default(0)
+  trialOffer            String?
+  trialEndsAt           DateTime?
   // Setup fee owed to OP Web Studio (the only OP fact held here). Set once from the signup webhook's customData, never
   // downgraded; null = UNKNOWN. signupOffer: "standard-7" | "founder-14" | "ari-14" | "ari-30" (unrecognized values stored raw).
-  setupFeeStatus       SetupFeeStatus?
-  signupOffer          String?
-  legacyUnreconciled   Boolean              @default(false)
-  accountType          GhlAccountType       @default(member)
+  setupFeeStatus        SetupFeeStatus?
+  signupOffer           String?
+  legacyUnreconciled    Boolean              @default(false)
+  accountType           GhlAccountType       @default(member)
   // Display name seen in agency wallet rows for this location (wallet_usage keeps it fresh). Null = not yet known.
   locationName          String?
   locationNameUpdatedAt DateTime?
   // Manual core-subscription coverage override (scripts/billing/set-coverage.ts). While now < coreCoveredUntil the account is
   // covered even if no core payment is on record; dunning must not treat a missing/failed core payment as delinquency.
-  coreCoveredUntil DateTime?
-  coreCoverageNote String?
-  dunningDecisions DunningDecision[]
-  onboardingStage      String?
+  coreCoveredUntil      DateTime?
+  coreCoverageNote      String?
+  dunningDecisions      DunningDecision[]
+  onboardingStage       String?
   // Forward-only onboarding progress (lib/billing/stages.ts ONBOARDING_PROGRESS_STAGES). Distinct from onboardingStage
   // (current-stage display field, set to whatever GHL sends including side stages); this only ever advances.
-  onboardingProgress   String?
-  onboardingProgressAt DateTime?
+  onboardingProgress    String?
+  onboardingProgressAt  DateTime?
   // Set when the member is handed off to the Clients pipeline (first reaches A2P Approved, or the backfill found an existing
   // Clients opportunity). Null = still in onboarding: the engine routes billing intents to the Onboarding pipeline.
-  activeClientSince    DateTime?
+  activeClientSince     DateTime?
   // Set once, only after a fully successful ghl-provision run; makes later provision calls a no-op.
-  provisionedAt        DateTime?
-  locationToken        String?
-  locationTokenExpires DateTime?
-  ledgerEntries        BillingLedgerEntry[]
-  discordLink          DiscordLink?
-  founderClaim         FounderClaim?
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
+  provisionedAt         DateTime?
+  locationToken         String?
+  locationTokenExpires  DateTime?
+  ledgerEntries         BillingLedgerEntry[]
+  discordLink           DiscordLink?
+  founderClaim          FounderClaim?
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
 }
 
 // REIblast Discord bot: one Discord account per member, one member per Discord account. Keyed to GhlAccount.id (locationId is
@@ -1069,29 +1071,46 @@ model PromoPost {
 }
 
 model BillingLedgerEntry {
-  id                String       @id @default(cuid())
-  ghlTransactionId  String       @unique
-  ghlAccountId      String?
-  ghlAccount        GhlAccount?  @relation(fields: [ghlAccountId], references: [id])
-  contactId         String?
-  classification    BillingClass
-  classifierVersion Int
-  status            String
-  amount            Decimal      @db.Decimal(12, 6)
-  amountRefunded    Decimal      @default(0) @db.Decimal(12, 6)
-  provider          String
-  subscriptionId    String?
-  occurredAt        DateTime
+  id                  String       @id @default(cuid())
+  ghlTransactionId    String       @unique
+  ghlAccountId        String?
+  ghlAccount          GhlAccount?  @relation(fields: [ghlAccountId], references: [id])
+  contactId           String?
+  classification      BillingClass
+  classifierVersion   Int
+  status              String
+  amount              Decimal      @db.Decimal(12, 6)
+  amountRefunded      Decimal      @default(0) @db.Decimal(12, 6)
+  provider            String
+  subscriptionId      String?
+  occurredAt          DateTime
   // Stored exactly as received (list-endpoint shape from the historical load, single-transaction
   // shape from the webhook; a row can switch shapes on update). ONLY lib/billing/normalizeTransaction.ts
   // may read this column.
-  raw               Json
+  raw                 Json
   // First time an update raised amountRefunded above its prior value. Null = never detected (rows refunded before this
   // column existed stay null: "predates tracking").
-  refundDetectedAt  DateTime?
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @default(now()) @updatedAt
+  refundDetectedAt    DateTime?
+  // Gateway facts extracted by normalizeTransaction (no PII; `raw` stays the only copy of anything else). Null on rows
+  // that predate the Kurv statement work until scripts/billing/backfill-kurv-fields.ts runs.
+  chargeId            String?
+  transactionType     String?
+  cardBrand           String?
+  settleAmountCents   Int?
+  authAmountCents     Int?
+  submitTimeUtc       DateTime?
+  avsCode             String?
+  responseCode        Int?
+  isAuthorizeNet      Boolean?
+  // Settled sales only (succeeded authCapture, real chargeId): the Kurv batch window and when it deposits.
+  batchWindowStart    DateTime?
+  batchDate           DateTime?    @db.Date
+  expectedDepositDate DateTime?    @db.Date
+  createdAt           DateTime     @default(now())
+  updatedAt           DateTime     @default(now()) @updatedAt
 
+  @@index([batchDate])
+  @@index([expectedDepositDate])
   @@index([ghlAccountId, occurredAt])
   @@index([classification, occurredAt])
   @@index([occurredAt])
@@ -1236,33 +1255,33 @@ model DunningDecision {
 // Outbox of GHL pipeline/field updates the billing engine wants made (lib/billing/intents). Always recorded first. In shadow mode
 // (or for an account not allowlisted for live) the status is "skipped_shadow" and nothing is sent.
 model GhlIntent {
-  id           String    @id @default(cuid())
-  ghlAccountId String
-  kind         String // stage | fields
-  pipeline     String // active_client | onboarding
-  payload      Json
-  dedupeKey    String    @unique
-  status       String // pending | sent | failed | skipped_shadow
-  attempts     Int       @default(0)
-  lastError    String? // errors only; never written on success
+  id             String    @id @default(cuid())
+  ghlAccountId   String
+  kind           String // stage | fields
+  pipeline       String // active_client | onboarding
+  payload        Json
+  dedupeKey      String    @unique
+  status         String // pending | sent | failed | skipped_shadow
+  attempts       Int       @default(0)
+  lastError      String? // errors only; never written on success
   /// HTTP status and first ~500 chars of GHL's response body from the most recent send attempt (null: never attempted / no response).
   responseStatus Int?
   responseBody   String?
-  sentAt       DateTime?
-  createdAt    DateTime  @default(now())
+  sentAt         DateTime?
+  createdAt      DateTime  @default(now())
 
   @@index([status, createdAt])
 }
 
 // Last-seen state of each GHL subscription (the nightly sub_sweep job). A status change is what feeds the dunning engine.
 model GhlSubscriptionState {
-  subscriptionId String   @id
+  subscriptionId String    @id
   contactId      String
   status         String
   name           String?
   trialEndsAt    DateTime?
   lastSeenAt     DateTime
-  updatedAt      DateTime @updatedAt
+  updatedAt      DateTime  @updatedAt
 
   @@index([contactId])
 }
@@ -1311,3 +1330,98 @@ model FounderVerifyAttempt {
 
   @@index([ghlAccountId, kind, createdAt])
 }
+
+// ── Partner statement (admin money dashboard v2). Amounts are integer cents; months are Denver "YYYY-MM". ──
+
+// Dated, append-only rates (Kurv fee rates, partner split). Lookup = latest effectiveFrom <= the date in question; history is never edited.
+model SettingRate {
+  id            String   @id @default(cuid())
+  key           String
+  value         Decimal  @db.Decimal(18, 8)
+  effectiveFrom DateTime @db.Date
+  note          String?
+  createdAt     DateTime @default(now())
+
+  @@unique([key, effectiveFrom])
+}
+
+// Dated fixed monthly costs charged to the statement (GHL agency plan, Authorize.net). effectiveTo null = still running.
+model FixedCost {
+  id                 String    @id @default(cuid())
+  name               String
+  monthlyAmountCents Int
+  effectiveFrom      DateTime  @db.Date
+  effectiveTo        DateTime? @db.Date
+  createdAt          DateTime  @default(now())
+
+  @@unique([name, effectiveFrom])
+}
+
+// The actual Kurv monthly statement, keyed by deposit month. Once entered it replaces the estimate. Bank deposits are
+// derived: sales − daily fees (incl. discount) − reserve funded.
+model KurvStatement {
+  id                   String   @id @default(cuid())
+  month                String   @unique
+  salesCount           Int
+  salesAmountCents     Int
+  dailyFeesPaidCents   Int
+  reserveFundedCents   Int
+  reserveReleasedCents Int      @default(0)
+  monthlyDebitCents    Int
+  notes                String?
+  enteredAt            DateTime @default(now())
+}
+
+enum ReserveMovementKind {
+  release
+  withdrawal
+  adjustment
+}
+
+// Manual entries against the company reserve fund (never split with the partner). release = Kurv paid reserve into the
+// bank (excluded from statement income); withdrawal = company took money out; adjustment is signed (opening balance lives here).
+model ReserveMovement {
+  id          String              @id @default(cuid())
+  date        DateTime            @db.Date
+  kind        ReserveMovementKind
+  amountCents Int
+  note        String?
+  createdAt   DateTime            @default(now())
+
+  @@index([date])
+}
+
+model PartnerPayment {
+  id          String   @id @default(cuid())
+  date        DateTime @db.Date
+  amountCents Int
+  note        String?
+  createdAt   DateTime @default(now())
+
+  @@index([date])
+}
+
+// A closed statement month: the full set of statement lines frozen as `snapshot`. reopenedAt set = month is open again.
+model MonthClose {
+  id              String    @id @default(cuid())
+  month           String    @unique
+  closedAt        DateTime
+  snapshot        Json
+  owedAmountCents Int
+  reopenedAt      DateTime?
+}
+
+// Progress/completion of the full-month wallet re-pull (job wallet_month_refresh), one row per Denver statement month.
+// A statement month can be closed only when completedAt is set. The windows are a deterministic function of the month
+// (lib/billing/jobs/walletMonthRefresh.ts), so windowsDone is enough to resume across scheduled runs.
+model WalletMonthRefresh {
+  id            String    @id @default(cuid())
+  month         String    @unique
+  windowsTotal  Int
+  windowsDone   Int       @default(0)
+  mismatchCount Int       @default(0)
+  startedAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now()) @updatedAt
+  completedAt   DateTime?
+}
+

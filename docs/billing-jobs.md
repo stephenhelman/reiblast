@@ -1,13 +1,15 @@
 # Nightly billing data jobs
 
-Six jobs, triggered by a GHL scheduled workflow (no Vercel Cron). The data jobs never change billing state, tags, or stages, and
+Eight jobs (`wallet_retention` ships disabled), triggered by a GHL scheduled workflow (no Vercel Cron). The data jobs never change billing state, tags, or stages, and
 never write to GHL; `sub_sweep` feeds the dunning engine, which in shadow mode only records decisions. See `docs/ghl-server-contract.md`.
 
 | job | what it does |
 |---|---|
 | `replay` | Re-runs `GhlEvent` rows that failed (unprocessed, `attempts < 5`, received > 5 min ago) through `processPaymentEvent`. |
 | `tx_sweep` | Rolling 35-day window of `GET /payments/transactions` through `ingestTransaction` (catches missed webhooks). |
-| `wallet_usage` | Previous 2 UTC days of agency wallet transactions → `WalletTransaction` (every raw row, insert-or-ignore on GHL id) and `UsageRollup` (per location incl. HQ, plus `_agency` / `_unattributed`; replaces per (scopeKey, day)). On **UTC day 3 only** it also refreshes the whole previous calendar month as ≤7-day windows. Each finished window runs the rollup-vs-rows check (below). |
+| `wallet_usage` | Previous 2 UTC days of agency wallet transactions → `WalletTransaction` (every raw row, insert-or-ignore on GHL id) and `UsageRollup` (per location incl. HQ, plus `_agency` / `_unattributed`; replaces per (scopeKey, day)). Each finished window runs the rollup-vs-rows check (below). |
+| `wallet_month_refresh` | Re-pulls every agency wallet transaction of a **finished Denver month** (UTC day 1 of the month through UTC day 1 of the next, in 3-day windows) so the Partner Statement's wallet line is the whole month. **Resumable across scheduled runs**: progress is `WalletMonthRefresh.windowsDone`, so a run that is out of budget or hits the continuation cap resumes at the next window on the next trigger. Eligible from UTC day 2 of the next month; records `completedAt` per month; a no-op (no GHL calls) once every finished month is complete — schedule it every couple of hours. **Close Month on the Partner Statement is blocked until the month's row is complete.** Counts rollup-vs-row mismatches in `mismatchCount`. |
+| `wallet_retention` | **Disabled** unless `WALLET_RETENTION_ENABLED=true`. Deletes raw `WalletTransaction` rows older than `WALLET_RETENTION_DAYS` (default 90, floor 60), one UTC day at a time, only where the month's `wallet_month_refresh` is complete and `UsageRollup` matches the raw rows for that day. `UsageRollup` is never pruned. Not shown in Health (so not "stale") until enabled. |
 | `balances` | Wallet balance per location (incl. HQ) → `WalletBalanceSnapshot`, one row per location per UTC day. |
 | `discord_outbox` | **Every 15 minutes.** Delivers due `DiscordRevokeOutbox` rows to the Discord bot (`docs/revoke-contract.md`), re-arms `config_error` rows once `DISCORD_BOT_URL` + `DISCORD_BOT_OUTBOUND_SECRET` are both set (each re-arm is an attempt, so a still-broken config ends `exhausted` after 5), and purges `done`/`superseded` rows older than 30 days. JobRun summary: `delivered`, `retried`, `exhausted`, `config_error`, `superseded`, `purged` (this run) and `standingExhausted`, `standingConfigError` (rows currently in those states — what an alert should watch); numbers only. Health marks it stale after 1 hour, not 26. |
 | `sub_sweep` | Nightly subscription sweep: lists GHL subscriptions → `GhlSubscriptionState`, and feeds status changes the ledger never shows to the dunning engine (see below). |
@@ -15,7 +17,7 @@ never write to GHL; `sub_sweep` feeds the dunning engine, which in shadow mode o
 ## Trigger
 
 `POST /api/webhooks/ghl/jobs` with header `x-reiblast-jobs-secret: <GHL_JOBS_SECRET>` and body
-`{ "job": "replay" | "tx_sweep" | "wallet_usage" | "balances" | "sub_sweep" | "discord_outbox" }`. Always answers 200 `{ accepted, job }`; the work runs in
+`{ "job": "replay" | "tx_sweep" | "wallet_usage" | "wallet_month_refresh" | "balances" | "sub_sweep" | "discord_outbox" | "wallet_retention" }`. Always answers 200 `{ accepted, job }`; the work runs in
 the background (`waitUntil`). Create one GHL scheduled workflow per job.
 
 ## Plan limit assumed

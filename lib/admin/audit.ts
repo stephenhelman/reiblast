@@ -3,7 +3,7 @@ import { LOGIN_FAIL_MAX, LOGIN_FAIL_WINDOW_MS } from "./config";
 
 type Db = Pick<PrismaClient, "adminAuditLog">;
 
-export type AdminAction = "login_sms" | "login_totp" | "login_backup" | "login_failed" | "sms_sent" | "export" | "logout";
+export type AdminAction = "login_sms" | "login_totp" | "login_backup" | "login_failed" | "sms_sent" | "export" | "logout" | "statement_change";
 
 /** Append-only. Never throws: an audit-write failure must not turn into a different auth outcome. */
 export async function logAdmin(db: Db, action: AdminAction, detail: Record<string, unknown> | null = null, ip: string | null = null): Promise<void> {

@@ -10,7 +10,7 @@ import { add, ZERO, sub, sumOf, type Money } from "./money";
  *   Refunds are attributed to the ORIGINAL transaction's month. A fully refunded row nets to zero.
  */
 export const REVENUE_STATUSES = ["succeeded", "refunded"] as const;
-export const ATTEMPT_ONLY_CLASSES: BillingClass[] = ["trial_auth", "failed_signup"];
+export const ATTEMPT_ONLY_CLASSES: BillingClass[] = ["trial_auth", "failed_signup", "non_gateway"];
 export const REVENUE_CLASS_KEYS = ["core_subscription", "wallet_auto_recharge", "wallet_manual_recharge", "other"] as const;
 export type RevenueClassKey = (typeof REVENUE_CLASS_KEYS)[number];
 export const CLASS_LABEL: Record<RevenueClassKey, string> = {

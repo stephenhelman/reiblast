@@ -154,3 +154,10 @@ re-enable the old workflows and disable the new ones. Effects already executed (
   after paying is the costly failure); an exhausted `saas_pause` raises a WARNING. Idempotent: a retry never fires once a later live decision
   for the account supersedes it. **Built** — `lib/billing/state/effects.ts` (see Phase B step 4).
 - **Old routes** are removed **2 weeks after the last account goes live**.
+
+## 6. Migration ordering notes (admin partner statement)
+- **`fix/soak-gaps` is left alone.** Its migration `20261016120000_pause_reason_subscription_expired` has never been applied anywhere
+  (checked on a copy of production: no `_prisma_migrations` row, and `PauseReason` has no `subscription_expired` value). When that
+  branch is merged it must be **re-timestamped to sort after `20261029120000_partner_statement`** (and anything else already on main),
+  never merged with its original `20261016…` name. `migrate deploy` would technically apply an earlier-dated unapplied migration, but
+  main is the trunk and new migrations sort chronologically last.

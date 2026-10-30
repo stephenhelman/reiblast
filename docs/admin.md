@@ -88,10 +88,13 @@ GHL — processor fees, chargebacks and payouts not included. Reporting timezone
 
 | Route | What it shows |
 |---|---|
-| `/` | Health badges, this month vs last month net revenue, agency cash paid, gross cash margin, members by state (each links to its page), negative balances, strikes |
+| `/` | **Partner Statement** (landing page, owner-only): month picker, every line with estimate/actual badge, source and "data through" stamp, drill-down links, "Owed to Stephen (to date)" and the outstanding balance, record a payment from Ari, close/reopen a month, CSV export and print view |
+| `/cash` | **Cash & Processor**: Kurv batches (5 PM Denver windows), the Kurv statement entry form with estimate-vs-actual variance, the reserve fund (balance, movements, release/withdrawal/adjustment entry) |
+| `/settings` | **Settings**: dated Kurv rates and fixed costs; add a new dated row, history is never edited |
+| `/overview` | Health badges, this month vs last month net revenue, agency cash paid, gross cash margin, members by state (each links to its page), negative balances, strikes |
 | `/revenue` | Net revenue by Denver month × class (chart + table), processor eras, Attempts table. Cells drill down to `/revenue/rows` |
 | `/costs` | Wallet costs by month / scope / category in four groups. Cells drill down to `/costs/rows` (raw rows, **one month at a time**) |
-| `/margin` | Agency gross cash margin by month, per-member margin (sortable), "Unmatched" line, optional fee estimate, "Partner split — formula pending" |
+| `/margin` | Agency gross cash margin by month, per-member margin (sortable), "Unmatched" line, and a Kurv-fee line modeled from the statement (replaces the old flat `ADMIN_PROCESSOR_FEE_PCT` estimate) |
 | `/members`, `/members/[id]` | Member list (state filter, sortable) and drill-down (ledger, usage by category, wallet transactions, balance history, revenue-vs-usage chart) |
 | `/health` | Job/data-quality/balance/database health, and **Dunning (shadow)**: the last 50 engine decisions and how many accounts' shadow-projected state differs from `GhlAccount.billingState` (`docs/dunning-engine.md`); the **GHL intents outbox** (counts + last 20), recent **stage-change / invoice events**, `sub_sweep` job health, and an informational list of **unpaid subscriptions** |
 
@@ -111,8 +114,9 @@ GHL — processor fees, chargebacks and payouts not included. Reporting timezone
   members, REIblast HQ, `_agency`, `_unattributed`. Aggregates display costs positive; drill-downs and raw exports keep
   the stored sign (charges negative, recharges positive).
 - **Gross cash margin** = net revenue − agency cash paid to GHL − wallet sales tax, per Denver month. This is a cash view;
-  processor fees, chargebacks and payouts are not in the data. If `ADMIN_PROCESSOR_FEE_PCT` (0–100, exclusive) is set, a
-  separate line labelled "estimate" shows that percentage of net revenue; unset hides it.
+  processor fees, chargebacks and payouts are not in the data. For months from 2026-10 a separate "Kurv fees (modeled)" line
+  shows daily fees + monthly debit from the Partner Statement model (estimate until the Kurv statement is entered).
+  `ADMIN_PROCESSOR_FEE_PCT` is no longer read.
 - **Per-member margin** = wallet recharges + core subscription collected (net of refunds) − wallet usage charged (member
   scope). Ledger rows with no account are the "Unmatched" line; revenue on a non-member account is surfaced, never dropped.
 - **Denver vs UTC**: monthly figures differ from UTC-month reports by the rows near midnight UTC. Example: August member
@@ -145,3 +149,21 @@ filters (`from`, `to`, `month`, `class`, `provider`, `account`, `group`, `scope`
 all report rules with synthetic data), and `REPORTS_TEST_DATABASE_URL=<non-production url> npm run test:reports-db` — SQL
 tests for the cost queries on synthetic rows in a `TEMP TABLE` that shadows `"WalletTransaction"` inside a transaction that
 is always rolled back (no real data is read or written; skipped when the URL is unset; refuses the production host).
+
+
+## Partner statement (admin money dashboard v2)
+Owed to Stephen for a Kurv deposit month = 50% × (bank deposits − that month's Kurv monthly debit − GHL agency plan − Authorize.net
+− GHL agency wallet usage). The statement starts 2026-10-01 with no opening balance; Stephen's own costs are not on it.
+- **Bank deposits** = settled sales − daily fees − 10% reserve for batches whose *deposit date* falls in the month (`lib/billing/kurv`).
+  Reserve *releases* are separate bank deposits and are excluded from income. The reserve is company money and is never split.
+- **Estimate → actual**: the Kurv statement entered on `/cash` replaces the estimated deposits and monthly debit. The AVS part of
+  the debit estimate is `authorizations × kurv_avs_per_auth_ratio × kurv_per_avs`.
+- **Wallet usage** = all agency wallet debits in the Denver month across every scope (members, HQ, `_agency`, `_unattributed`),
+  including A2P and tax, excluding agency recharge credits. A debit that looks like the agency plan itself would be left out.
+- **Dated settings**: rates (`SettingRate`) and fixed costs (`FixedCost`) are looked up as of the first day of the statement month.
+- **Closing**: allowed only when the month has ended (Denver), its `wallet_month_refresh` is complete, *and* the Kurv statement is entered (all enforced on the server; the reason is shown when blocked). Closing stores every line in
+  `MonthClose.snapshot`; a closed month is shown from the snapshot and never recomputed. Reopening needs a ticked box plus the
+  typed month, and the month recomputes live until closed again. Outstanding = Σ owed (closed, not reopened) − Σ payments.
+- **Freshness**: each line shows what it is current through. A banner appears when the ledger or wallet data is older than 26h.
+  The wallet needs the `wallet_usage` job (`docs/billing-jobs.md`); until it runs the wallet line is $0, not "no usage".
+- Scripts: `scripts/billing/seed-statement.ts`, `backfill-kurv-fields.ts`, `check-ledger-completeness.ts`, `statement-preview.ts`.

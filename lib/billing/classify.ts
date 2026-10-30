@@ -2,10 +2,11 @@ import type { BillingClass } from "@prisma/client";
 import type { NormalizedTransaction } from "./normalizeTransaction";
 
 /**
+ * v3: authOnly → trial_auth regardless of amount; chargeId "0" or no chargeSnapshot → non_gateway (never settled revenue).
  * v2: rule 5 also catches failed rows with no subtype at all (e.g. failed form/order signups), not just payment_link sources.
  * Rows classified by an earlier version keep their stored classifierVersion until scripts/billing/reclassify-ledger.ts changes them.
  */
-export const CLASSIFIER_VERSION = 2;
+export const CLASSIFIER_VERSION = 3;
 
 export type Classification = { classification: BillingClass | "ignore"; reason: string };
 
@@ -20,6 +21,14 @@ const SUBSCRIPTION_SUBTYPES = ["saas_subscription", "subscription_view"];
  */
 export function classify(t: NormalizedTransaction): Classification {
   if (t.liveMode === false) return { classification: "ignore", reason: "test-mode transaction (liveMode=false)" };
+
+  // Nothing reached the gateway (no charge id, "0", or no snapshot): excluded from settled revenue and Kurv batches.
+  if (!t.chargeId || t.chargeId === "0" || !t.hasChargeSnapshot) {
+    return { classification: "non_gateway", reason: !t.hasChargeSnapshot ? "no chargeSnapshot" : 'chargeId is missing or "0"' };
+  }
+
+  // $1 verification holds are never revenue, whatever amount GHL reports.
+  if (t.transactionType === "authOnlyTransaction") return { classification: "trial_auth", reason: "authOnlyTransaction" };
 
   if (t.entitySourceSubType === "saas_one_time") {
     return AUTO_RECHARGE.test(t.description ?? "")

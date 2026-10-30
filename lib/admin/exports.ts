@@ -3,15 +3,19 @@ import { CLASSIFIER_VERSION } from "@/lib/billing/classify";
 import { costCells, costDetailChunks, costWhere, SCOPE_LABEL, GROUP_LABEL, costGroupOf, scopeClassOf, summarizeCosts, usageByScope } from "@/lib/billing/reports/costs";
 import { denverMonthOf, denverStamp } from "@/lib/billing/reports/denver";
 import { walletChunks } from "@/lib/billing/reports/evidence";
-import { buildAgencyMargin, buildMemberMargin, parseFeePct, sortMemberMargin } from "@/lib/billing/reports/margin";
+import { buildAgencyMargin, buildMemberMargin, sortMemberMargin } from "@/lib/billing/reports/margin";
 import { loadMembers, matchesState, sortMembers } from "@/lib/billing/reports/members";
 import { aggregateAttempts, aggregateRevenue, attemptsDetail, CLASS_LABEL, fetchLedgerRows, netOf, providerLabel, refundNote, revenueClassOf, revenueDetail, type LedgerRow } from "@/lib/billing/reports/revenue";
+import { modeledFeesByMonth } from "@/lib/billing/statement/marginFees";
+import { statementRows, STATEMENT_COLUMNS } from "@/lib/billing/statement/csvRows";
+import { computeMonthStatement } from "@/lib/billing/statement/compute";
+import { isMonth } from "@/lib/billing/reports/denver";
 import { accountLabel, formatAccountLabel } from "./accountLabel";
 import { accountInfo, accountLabelText, scopeLabelOf, type AcctInfo } from "@/lib/billing/reports/labels";
 import type { CsvSpec, Row } from "./csv";
 import { definedOnly, parseAttemptFilters, parseCostFilters, parseMarginSort, parseMemberFilters, parseMemberId, parseRange, parseRevenueFilters, type Params } from "./filters";
 
-export const EXPORT_VIEWS = ["revenue", "attempts", "costs", "margin", "members", "member-ledger", "member-usage"] as const;
+export const EXPORT_VIEWS = ["revenue", "attempts", "costs", "margin", "members", "member-ledger", "member-usage", "statement"] as const;
 export type ExportView = (typeof EXPORT_VIEWS)[number];
 export const isExportView = (v: string): v is ExportView => (EXPORT_VIEWS as readonly string[]).includes(v);
 
@@ -133,6 +137,18 @@ export async function buildExport(view: ExportView, db: PrismaClient, p: Params,
       return { ok: true, filename: file(), spec: spec(view, filters, ["month", "scope_class", "scope_label", "cost_group", "group_label", "category", "transaction_count", "amount_as_stored", "amount_display", "raw_rows_export"], ["scope_label", "category", "group_label"], fromArray(out)) };
     }
 
+    case "statement": {
+      const month = p.get("month");
+      if (!isMonth(month)) return fail(400, "Statement export requires month=YYYY-MM.");
+      let st;
+      try {
+        st = await computeMonthStatement(db, month, { now: ctx.now, hq: ctx.hq });
+      } catch (e) {
+        return fail(400, e instanceof Error ? e.message : "Cannot build that statement.");
+      }
+      return { ok: true, filename: file(month), spec: spec(view, { month, status: st.closed ? "closed" : "open (to date)" }, STATEMENT_COLUMNS, ["label", "source", "detail"], fromArray(statementRows(st))) };
+    }
+
     case "margin": {
       const range = parseRange(p, ctx.now);
       const by = p.get("by") === "member" ? "member" : "agency";
@@ -141,12 +157,13 @@ export async function buildExport(view: ExportView, db: PrismaClient, p: Params,
       const ledger = await fetchLedgerRows(db, range);
       if (by === "agency") {
         const costs = summarizeCosts(await costCells(db, { ...range }, ctx.hq));
-        const fee = parseFeePct((ctx.env ?? process.env).ADMIN_PROCESSOR_FEE_PCT);
+        const fees = await modeledFeesByMonth(db, range.fromMonth, range.toMonth);
+        const fee = fees.size > 0 ? fees : null;
         const m = buildAgencyMargin(aggregateRevenue(ledger, range.fromMonth, range.toMonth).rows, costs.byMonth, fee);
-        const cols = ["month", "net_revenue_collected", "agency_cash_paid_to_ghl", "wallet_sales_tax", "gross_cash_margin", ...(fee ? ["processor_fee_estimate", "margin_after_fee_estimate"] : [])];
-        const out: Row[] = m.rows.map((r) => ({ month: r.month, net_revenue_collected: r.netRevenue, agency_cash_paid_to_ghl: r.agencyCash, wallet_sales_tax: r.tax, gross_cash_margin: r.margin, processor_fee_estimate: r.feeEstimate, margin_after_fee_estimate: r.marginAfterFeeEstimate }));
-        out.push({ month: "TOTAL", net_revenue_collected: m.totals.netRevenue, agency_cash_paid_to_ghl: m.totals.agencyCash, wallet_sales_tax: m.totals.tax, gross_cash_margin: m.totals.margin, processor_fee_estimate: m.totals.feeEstimate, margin_after_fee_estimate: m.totals.marginAfterFeeEstimate });
-        return { ok: true, filename: file(), spec: spec(view, fee ? { ...filters, processor_fee_pct_estimate: fee } : filters, cols, [], fromArray(out)) };
+        const cols = ["month", "net_revenue_collected", "agency_cash_paid_to_ghl", "wallet_sales_tax", "gross_cash_margin", ...(fee ? ["kurv_fees_modeled", "margin_after_kurv_fees"] : [])];
+        const out: Row[] = m.rows.map((r) => ({ month: r.month, net_revenue_collected: r.netRevenue, agency_cash_paid_to_ghl: r.agencyCash, wallet_sales_tax: r.tax, gross_cash_margin: r.margin, kurv_fees_modeled: r.feeEstimate, margin_after_kurv_fees: r.marginAfterFeeEstimate }));
+        out.push({ month: "TOTAL", net_revenue_collected: m.totals.netRevenue, agency_cash_paid_to_ghl: m.totals.agencyCash, wallet_sales_tax: m.totals.tax, gross_cash_margin: m.totals.margin, kurv_fees_modeled: m.totals.feeEstimate, margin_after_kurv_fees: m.totals.marginAfterFeeEstimate });
+        return { ok: true, filename: file(), spec: spec(view, filters, cols, [], fromArray(out)) };
       }
       const info = await accountInfo(db);
       const members = [...info.entries()].map(([accountId, i]) => ({ accountId, locationId: i.locationId }));

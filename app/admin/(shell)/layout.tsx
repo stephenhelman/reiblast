@@ -10,7 +10,7 @@ export default async function ShellLayout({ children }: { children: React.ReactN
   const base = await adminBase();
   return (
     <>
-      <header className="border-b border-border-default bg-surface">
+      <header className="border-b border-border-default bg-surface print:hidden">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-6 py-3">
           <div className="flex flex-wrap items-center gap-6">
             <span className="text-sm font-bold text-gold">REIblast Admin</span>

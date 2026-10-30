@@ -70,15 +70,15 @@ describe("auto-recharge description-URL fallback", () => {
     expect(locationIdFromDescription(null)).toBeNull();
   });
 
-  it("matches by contactId first", async () => {
+  it("matches by contactId when the description has no location", async () => {
     const { db, ledger } = fakeDb([member]);
     const id = "aaaaaaaaaaaaaaaaaaaaaac1";
-    const r = await ingestTransaction(listTxn({ id, amount: 10, subType: "saas_one_time", description: AUTO_DESC, contactId: member.contactId }), db);
+    const r = await ingestTransaction(listTxn({ id, amount: 10, subType: "saas_one_time", description: MANUAL_DESC, contactId: member.contactId }), db);
     expect(r).toMatchObject({ action: "written", matchMethod: "contactId", matchedAccount: true });
     expect(ledger.get(id)!.ghlAccountId).toBe("acct_member");
   });
 
-  it("falls back to the description location when the contact is unknown", async () => {
+  it("matches the description location when the contact is unknown", async () => {
     const { db, ledger } = fakeDb([member]);
     const id = "aaaaaaaaaaaaaaaaaaaaaac2";
     const r = await ingestTransaction(listTxn({ id, amount: 10, subType: "saas_one_time", description: AUTO_DESC, contactId: "unknownunknownunknown" }), db);
@@ -94,13 +94,25 @@ describe("auto-recharge description-URL fallback", () => {
     expect(ledger.get(id)!.ghlAccountId).toBeNull();
   });
 
-  it("does not apply to non-auto-recharge rows", async () => {
-    const { db } = fakeDb([member]);
+  it("location in the description wins over contactId, for any class", async () => {
+    const other = { id: "acct_other", contactId: "cccccccccccccccccc77", locationId: "LOCATION0000000000077" };
+    const { db, ledger } = fakeDb([member, other]);
+    const id = "aaaaaaaaaaaaaaaaaaaaaac4";
     const r = await ingestTransaction(
-      listTxn({ id: "aaaaaaaaaaaaaaaaaaaaaac4", amount: 10, subType: "saas_one_time", description: "Manual Recharge /location/LOCATION0000000000002/", contactId: "unknownunknownunknown" }),
+      listTxn({ id, amount: 10, subType: "saas_one_time", description: "Manual Recharge /location/LOCATION0000000000002/", contactId: other.contactId }),
       db,
     );
-    expect(r).toMatchObject({ classification: "wallet_manual_recharge", matchMethod: null });
+    expect(r).toMatchObject({ classification: "wallet_manual_recharge", matchMethod: "descriptionLocation" });
+    expect(ledger.get(id)!.ghlAccountId).toBe("acct_member");
+  });
+
+  it("falls back to contactId when the description location is not a member", async () => {
+    const { db } = fakeDb([member]);
+    const r = await ingestTransaction(
+      listTxn({ id: "aaaaaaaaaaaaaaaaaaaaaac5", amount: 10, subType: "saas_one_time", description: "Auto-Recharge /location/NOTAMEMBER/", contactId: member.contactId }),
+      db,
+    );
+    expect(r).toMatchObject({ matchMethod: "contactId", matchedAccount: true });
   });
 });
 
@@ -120,19 +132,10 @@ describe("wallet usage helpers", () => {
     expect(d.settlementTime.toISOString().slice(0, 10)).toBe("2026-06-18"); // same day as the rollup's slice(0,10)
   });
 
-  it("plans 1 window normally and previous-month weekly windows only on UTC day 3", () => {
-    expect(planUsageWindows(new Date("2026-09-26T05:00:00Z"))).toHaveLength(1);
-    expect(planUsageWindows(new Date("2026-09-02T05:00:00Z"))).toHaveLength(1);
-    const w = planUsageWindows(new Date("2026-09-03T05:00:00Z"));
-    expect(w).toHaveLength(1 + 5); // August: 31 days = 4 full weeks + 3 days
-    expect(w[1].from).toBe("2026-08-01T00:00:00.000Z");
-    expect(w[5].to).toBe("2026-08-31T23:59:59.999Z");
-    for (let i = 2; i < w.length; i++) expect(Date.parse(w[i].from)).toBe(Date.parse(w[i - 1].to) + 1); // contiguous, no gaps/overlap
-  });
-
-  it("January run covers December of the previous year", () => {
-    const w = planUsageWindows(new Date("2027-01-03T05:00:00Z"));
-    expect(w[1].from).toBe("2026-12-01T00:00:00.000Z");
-    expect(w[w.length - 1].to).toBe("2026-12-31T23:59:59.999Z");
+  it("the nightly job plans only the previous 2 UTC days — the month re-pull is wallet_month_refresh, even on day 3", () => {
+    for (const d of ["2026-09-02", "2026-09-03", "2027-01-03"]) expect(planUsageWindows(new Date(`${d}T05:00:00Z`))).toHaveLength(1);
+    const w = planUsageWindows(new Date("2026-09-03T05:00:00Z"))[0];
+    expect(w.from).toBe("2026-09-01T00:00:00.000Z");
+    expect(w.to).toBe("2026-09-02T23:59:59.999Z");
   });
 });

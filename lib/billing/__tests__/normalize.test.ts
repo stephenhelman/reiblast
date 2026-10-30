@@ -48,4 +48,26 @@ describe("normalizeTransaction", () => {
     expect(() => normalizeTransaction([])).toThrow();
     expect(() => normalizeTransaction({ amount: 1 })).toThrow(/_id/);
   });
+
+  describe("gateway fields", () => {
+    it("extracts chargeSnapshot facts in integer cents from both shapes", () => {
+      const o = { chargeId: "12345678901", cardType: "AmericanExpress", settleAmount: 34.21, amount: 34.2075, submitTimeUTC: "2026-10-01T00:16:28.213Z" };
+      const n = normalizeTransaction(listTxn(o));
+      expect(n).toMatchObject({
+        chargeId: "12345678901", hasChargeSnapshot: true, transactionType: "authCaptureTransaction", cardBrand: "AmericanExpress",
+        settleAmountCents: 3421, authAmountCents: 3421, avsCode: "Y", responseCode: 1, isAuthorizeNet: true,
+      });
+      expect(n.submitTimeUtc?.toISOString()).toBe("2026-10-01T00:16:28.213Z");
+      expect(normalizeTransaction(singleTxn(o))).toEqual(n);
+    });
+
+    it("a row with no snapshot has null gateway facts", () => {
+      const n = normalizeTransaction(listTxn({ snapshot: false, chargeId: "0" }));
+      expect(n).toMatchObject({ chargeId: "0", hasChargeSnapshot: false, transactionType: null, settleAmountCents: null, submitTimeUtc: null, cardBrand: null });
+    });
+
+    it("isAuthorizeNet is false for other providers", () => {
+      expect(normalizeTransaction(listTxn({ provider: "stripe" })).isAuthorizeNet).toBe(false);
+    });
+  });
 });

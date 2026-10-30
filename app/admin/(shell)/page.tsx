@@ -1,90 +1,219 @@
 import Link from "next/link";
-import AccountLabel from "@/components/admin/AccountLabel";
+import { PrintButton } from "@/components/admin/statement";
+import { StaleBanner, StatusBadge, Notice, btnCls, ghostBtnCls, inputCls, labelCls } from "@/components/admin/statementUi";
+import { ExportButton } from "@/components/admin/controls";
+import { Banner, PageTitle, Section, Table } from "@/components/admin/ui";
 import Card from "@/components/shared/Card";
+import { fmtCents, fmtDenver, fmtDenverDate } from "@/lib/admin/format";
+import { paramsOf } from "@/lib/admin/filters";
 import { adminHref } from "@/lib/admin/links";
-import { addMonths, currentDenverMonth } from "@/lib/billing/reports/denver";
-import { costCells, summarizeCosts } from "@/lib/billing/reports/costs";
-import { buildAgencyMargin, parseFeePct } from "@/lib/billing/reports/margin";
-import { fmtMoney, sub } from "@/lib/billing/reports/money";
-import { aggregateRevenue, fetchLedgerRows } from "@/lib/billing/reports/revenue";
-import { adminBase } from "@/lib/admin/cookie";
-import { BadgeRow, PageTitle, Section, Table } from "@/components/admin/ui";
-import { fmtUsd } from "@/lib/admin/format";
-import { requireOwnerOrRedirect } from "@/lib/admin/requireOwner";
-import { getBillingDb } from "@/lib/billing/db";
-import { buildBadges, getBalancesHealth, getDataQuality, getDbSize, getInactiveUsage, getJobsHealth, getMemberOverview } from "@/lib/billing/reports/health";
+import { pageCtx } from "@/lib/admin/pageCtx";
+import { addMonths, currentDenverMonth, isMonth } from "@/lib/billing/reports/denver";
+import { canCloseMonth } from "@/lib/billing/statement/close";
+import { computeMonthStatement, FIRST_STATEMENT_MONTH, outstandingBalance } from "@/lib/billing/statement/compute";
+import { lineDataThrough, staleSources } from "@/lib/billing/statement/freshness";
+import { loadFreshness } from "@/lib/billing/statement/loadPage";
+import { closeMonthAction, recordPaymentAction, reopenMonthAction } from "./statement-actions";
 
 export const dynamic = "force-dynamic";
 
-export default async function OverviewPage() {
-  await requireOwnerOrRedirect();
-  const db = await getBillingDb();
-  const base = await adminBase();
-  const hq = process.env.GHL_HQ_LOCATION_ID ?? null;
-  const thisMonth = currentDenverMonth();
-  const lastMonth = addMonths(thisMonth, -1);
-  const twoMonths = { fromMonth: lastMonth, toMonth: thisMonth };
-  const [ledger2, cells2] = await Promise.all([fetchLedgerRows(db, twoMonths), costCells(db, twoMonths, hq)]);
-  const rev2 = aggregateRevenue(ledger2, lastMonth, thisMonth).rows;
-  const margin2 = buildAgencyMargin(rev2, summarizeCosts(cells2).byMonth, parseFeePct(process.env.ADMIN_PROCESSOR_FEE_PCT)).rows;
-  const cur = margin2.find((m) => m.month === thisMonth)!;
-  const prev = margin2.find((m) => m.month === lastMonth)!;
-  const [jobs, quality, balances, dbSize, members, inactiveUsage] = await Promise.all([getJobsHealth(db), getDataQuality(db), getBalancesHealth(db), getDbSize(db), getMemberOverview(db), getInactiveUsage(db)]);
-  const badges = buildBadges({ jobs, quality, balances, inactiveUsage, db: dbSize });
-  // Negative balances on trial / active / payment_failed (warning) and paused (info); most negative first.
-  const negatives = balances.alerts.filter((a) => a.level === "warning" || a.level === "info");
+const todayIso = (d: Date) => d.toISOString().slice(0, 10);
+
+export default async function PartnerStatementPage({ searchParams }: { searchParams: Record<string, string | string[] | undefined> }) {
+  const { db, base, hq, now } = await pageCtx();
+  const p = paramsOf(searchParams);
+  const current = currentDenverMonth(now);
+  const asked = p.get("month");
+  const month = isMonth(asked) && asked >= FIRST_STATEMENT_MONTH && asked <= current ? asked : current < FIRST_STATEMENT_MONTH ? FIRST_STATEMENT_MONTH : current;
+
+  const [s, fresh, out, payments, close, kurv, refresh] = await Promise.all([
+    computeMonthStatement(db, month, { now, hq }),
+    loadFreshness(db, month),
+    outstandingBalance(db),
+    db.partnerPayment.findMany({ orderBy: [{ date: "desc" }, { createdAt: "desc" }], take: 12 }),
+    db.monthClose.findUnique({ where: { month } }),
+    db.kurvStatement.findUnique({ where: { month }, select: { month: true } }),
+    db.walletMonthRefresh.findUnique({ where: { month }, select: { windowsDone: true, windowsTotal: true, completedAt: true, mismatchCount: true } }),
+  ]);
+  const through = lineDataThrough(s, fresh);
+  const stale = s.closed ? [] : staleSources(fresh, now);
+  const check = canCloseMonth({ month, now, hasKurvStatement: !!kurv, alreadyClosed: s.closed, walletRefresh: refresh });
+  const hasEstimate = s.lines.some((l) => l.basis === "estimate");
+  const costsHref = (params: Record<string, string>) => adminHref(base, "/costs/rows", { from: month, to: month, month, ...params });
+  const drill: Record<string, { href: string; label: string }[]> = {
+    deposits: [{ href: adminHref(base, "/cash", { month }) + "#batches", label: "Batches" }, { href: adminHref(base, "/revenue/rows", { from: month, to: month, month }), label: "Revenue rows" }],
+    monthly_debit: [{ href: adminHref(base, "/cash", { month }) + "#kurv", label: "Kurv statement" }],
+    agency_plan: [{ href: adminHref(base, "/settings"), label: "Settings" }],
+    authorize_net: [{ href: adminHref(base, "/settings"), label: "Settings" }],
+    agency_wallet: [{ href: adminHref(base, "/costs", { from: month, to: month }), label: "Costs" }],
+  };
+  const keep = { month };
+  const monthOptions: string[] = [];
+  for (let m = FIRST_STATEMENT_MONTH; m <= current; m = addMonths(m, 1)) monthOptions.push(m);
 
   return (
     <div>
-      <PageTitle sub="REIblast billing — health at a glance. Member accounts only; the internal owner account is excluded.">Overview</PageTitle>
-      <div className="mt-6">
-        <BadgeRow badges={badges} />
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <PageTitle sub="What REIblast owes Stephen: 50% of Kurv bank deposits less processor and platform costs. Starts 2026-10-01; no opening balance. Stephen's own costs are not on the statement.">Partner Statement</PageTitle>
+        <div className="flex items-center gap-2 print:hidden">
+          <ExportButton view="statement" params={{ month }} label="Export CSV" />
+          <PrintButton />
+        </div>
       </div>
 
-      <div className="mt-8 grid grid-cols-1 gap-4 md:grid-cols-3">
-        <Link href={adminHref(base, "/revenue", { from: lastMonth, to: thisMonth })}>
-          <Card className="h-full transition-colors hover:border-gold">
-            <div className="text-xs uppercase tracking-wide text-white/40">Net revenue — {thisMonth}</div>
-            <div className="mt-2 text-2xl font-bold text-white">{fmtMoney(cur.netRevenue)}</div>
-            <div className="mt-1 text-sm text-white/50">{lastMonth}: {fmtMoney(prev.netRevenue)} · change {fmtMoney(sub(cur.netRevenue, prev.netRevenue))}</div>
-          </Card>
-        </Link>
-        <Link href={adminHref(base, "/costs/rows", { month: thisMonth, group: "agency_cash", from: lastMonth, to: thisMonth })}>
-          <Card className="h-full transition-colors hover:border-gold">
-            <div className="text-xs uppercase tracking-wide text-white/40">Agency cash paid to GHL — {thisMonth}</div>
-            <div className="mt-2 text-2xl font-bold text-white">{fmtMoney(cur.agencyCash)}</div>
-            <div className="mt-1 text-sm text-white/50">{lastMonth}: {fmtMoney(prev.agencyCash)}</div>
-          </Card>
-        </Link>
-        <Link href={adminHref(base, "/margin", { from: lastMonth, to: thisMonth })}>
-          <Card className="h-full transition-colors hover:border-gold">
-            <div className="text-xs uppercase tracking-wide text-white/40">Gross cash margin — {thisMonth}</div>
-            <div className={`mt-2 text-2xl font-bold ${Number(cur.margin) < 0 ? "text-red-300" : "text-white"}`}>{fmtMoney(cur.margin)}</div>
-            <div className="mt-1 text-sm text-white/50">{lastMonth}: {fmtMoney(prev.margin)} · after agency recharges and wallet tax</div>
-          </Card>
-        </Link>
+      <form method="get" className="mt-6 flex flex-wrap items-end gap-3 print:hidden">
+        <label className={labelCls}>
+          Statement month (Kurv deposit month)
+          <select name="month" defaultValue={month} className={inputCls}>
+            {monthOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+        </label>
+        <button type="submit" className={btnCls}>Show</button>
+      </form>
+
+      <Notice notice={p.get("notice")} error={p.get("error")} />
+      <StaleBanner sources={stale} />
+      {s.partial && !s.closed && <Banner tone="warn">{month} is still open: every figure is to date. Deposits for sales through the last day of the month land in early {addMonths(month, 1)}, and Kurv&apos;s monthly debit posts around the 1st.</Banner>}
+      {!s.wallet.hasData && !s.closed && <Banner tone="bad">No GHL wallet rows are loaded for {month}, so the wallet usage line is $0.00, not &quot;no usage&quot;. Load them before relying on this statement.</Banner>}
+
+      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
+        <Card variant="highlight" className="md:col-span-2">
+          <div className="flex flex-wrap items-center gap-2 text-xs uppercase tracking-wide text-white/50">
+            <span>{s.closed ? `Owed to Stephen — ${month}` : "Owed to Stephen (to date)"}</span>
+            {s.closed ? <span className="rounded-full border border-emerald-500/40 px-2 py-0.5 text-[10px] font-semibold text-emerald-300">Closed {fmtDenverDate(s.closedAt)}</span> : hasEstimate && <StatusBadge basis="estimate" />}
+          </div>
+          <div className={`mt-2 text-4xl font-bold tabular-nums ${s.owedCents < 0 ? "text-red-300" : "text-gold"}`} data-testid="owed">{fmtCents(s.owedCents)}</div>
+          <div className="mt-1 text-sm text-white/50">{+(s.splitPct * 100).toFixed(4)}% of {fmtCents(s.netCents)} net for {month}{s.closed ? "" : "; not final until the month is closed"}</div>
+        </Card>
+        <Card>
+          <div className="text-xs uppercase tracking-wide text-white/50">Outstanding balance</div>
+          <div className="mt-2 text-3xl font-bold tabular-nums text-white" data-testid="outstanding">{fmtCents(out.outstandingCents)}</div>
+          <div className="mt-1 text-sm text-white/50">Closed months owed {fmtCents(out.owedClosedCents)} − paid by Ari {fmtCents(out.paidCents)}</div>
+        </Card>
       </div>
-      <p className="mt-2 text-xs text-white/40">Month-to-date, America/Denver. Gross collected via GHL — processor fees, chargebacks and payouts not included.</p>
 
-      <Section title="Members by billing state" note={`${members.memberTotal} member accounts. “Not yet seeded” = billingState is still null.`}>
-        <Table head={["Billing state", "Accounts"]} rows={members.billingStates.map((s) => [<Link key={s.state} className="hover:text-gold" href={adminHref(base, "/members", { state: s.state === "not yet seeded" ? "not_seeded" : s.state })}>{s.state}</Link>, s.count])} empty="No member accounts." />
-      </Section>
-
-      <Section title="Negative wallet balances" note={`Trial, active, payment_failed and paused accounts only${negatives.length > 10 ? ` — most negative 10 of ${negatives.length}` : ""}. Full alert list on Health.`}>
+      <Section title={`Statement — ${month}`} note="Deposits less each cost. Estimate rows turn to actual when the Kurv statement is entered.">
         <Table
-          head={["Location", "State", "Balance", "Snapshot day"]}
-          rows={negatives.slice(0, 10).map((r) => [<AccountLabel key={r.accountId} locationId={r.locationId} locationName={r.locationName} businessName={r.businessName} />, r.billingState ?? "—", fmtUsd(r.balance as string), r.takenOn])}
-          empty="None."
+          head={["Line", "Amount", "", "Source", "Data through", ""]}
+          rows={[
+            ...s.lines.map((l) => [
+              <span key="l" className={l.key === "deposits" ? "font-semibold text-white" : ""}>{l.key === "deposits" ? "" : "− "}{l.label}</span>,
+              <span key="a" className="tabular-nums">{fmtCents(l.amountCents)}</span>,
+              <StatusBadge key="b" basis={l.basis} />,
+              <span key="s" className="text-xs text-white/50">{l.source}</span>,
+              <span key="t" className="whitespace-nowrap text-xs text-white/60">{through[l.key].text}{through[l.key].at ? ` ${fmtDenver(through[l.key].at)}` : ""}</span>,
+              <span key="d" className="flex flex-wrap gap-x-3 text-xs print:hidden">{drill[l.key].map((d) => <Link key={d.label} href={d.href} className="text-gold hover:underline">{d.label}</Link>)}</span>,
+            ]),
+            [<strong key="n">Net</strong>, <strong key="v" className="tabular-nums">{fmtCents(s.netCents)}</strong>, "", "", "", ""],
+            [<strong key="o" className="text-gold">{s.closed ? "Owed to Stephen" : "Owed to Stephen (to date)"}</strong>, <strong key="v" className="tabular-nums text-gold">{fmtCents(s.owedCents)}</strong>, "", <span key="s" className="text-xs text-white/50">{+(s.splitPct * 100).toFixed(4)}% of net</span>, "", ""],
+          ]}
         />
       </Section>
 
-      <Section title="Legacy" note="Accounts flagged legacyUnreconciled (billing history not yet reconciled).">
-        <p className="px-6 py-4 text-sm text-white/80">{members.legacyUnreconciled} member accounts</p>
-      </Section>
+      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2">
+        <Card>
+          <h3 className="text-sm font-bold text-white">Bank deposits, in detail</h3>
+          <dl className="mt-3 space-y-1 text-sm text-white/80">
+            <Row k={`Gross settled sales (${s.deposits.items} sales, ${s.deposits.batches} batches)`} v={fmtCents(s.deposits.grossCents)} />
+            <Row k="− Daily fees (incl. discount)" v={fmtCents(s.deposits.dailyFeesCents)} />
+            {s.deposits.discountCents !== null && <Row k="   discount / per-item, batch & interchange" v={`${fmtCents(s.deposits.discountCents)} / ${fmtCents(s.deposits.otherFeesCents ?? 0)}`} dim />}
+            <Row k="− Reserve funded (company money)" v={fmtCents(s.deposits.reserveCents)} />
+            <Row k="= Bank deposits" v={fmtCents(s.deposits.depositCents)} strong />
+          </dl>
+          {s.monthlyDebit.estimate && (
+            <>
+              <h3 className="mt-5 text-sm font-bold text-white">Monthly debit estimate {s.monthlyDebit.toDateOnly && <span className="font-normal text-white/50">(activity to date)</span>}</h3>
+              <dl className="mt-3 space-y-1 text-sm text-white/80">
+                <Row k={`${s.monthlyDebit.estimate.authorizations} authorizations`} v={fmtCents(s.monthlyDebit.estimate.authFeesCents)} />
+                <Row k="AVS checks (estimate)" v={fmtCents(s.monthlyDebit.estimate.avsFeesCents)} />
+                <Row k="Card-brand fees (~0.6%)" v={fmtCents(s.monthlyDebit.estimate.brandFeesCents)} />
+                <Row k="Fixed monthly fees" v={fmtCents(s.monthlyDebit.estimate.fixedCents)} />
+              </dl>
+            </>
+          )}
+        </Card>
+        <Card>
+          <h3 className="text-sm font-bold text-white">GHL agency wallet usage, by category</h3>
+          <p className="mt-1 text-xs text-white/50">{s.wallet.debitCount.toLocaleString()} debit rows. Recharge credits ({fmtCents(s.wallet.rechargeCreditsCents)}) are not a cost{s.wallet.planRowsExcluded.count ? `; ${s.wallet.planRowsExcluded.count} plan-like rows (${fmtCents(s.wallet.planRowsExcluded.cents)}) left out to avoid double-counting the agency plan` : "; no agency-plan row was found in the wallet, so nothing is double-counted"}.</p>
+          <dl className="mt-3 space-y-1 text-sm text-white/80">
+            {byCategory(s.wallet.breakdown).map((c) => (
+              <div key={c.category} className="flex justify-between gap-4">
+                <dt><Link href={costsHref({ category: c.category })} className="hover:text-gold">{c.category.replace(/_/g, " ")}</Link>{c.category.startsWith("a2p") && <span className="ml-1 text-xs text-gold">A2P</span>}</dt>
+                <dd className="tabular-nums">{fmtCents(c.cents)}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-3 text-xs text-white/50">By scope: {byScope(s.wallet.breakdown).map((x) => `${x.scope} ${fmtCents(x.cents)}`).join(" · ") || "—"}</p>
+        </Card>
+      </div>
 
-      <Section title="Strikes — live (pre-cutover)" note="From User.warningCount, the value the running app enforces today. Only users with at least one strike are listed.">
-        <Table head={["Strikes", "Users"]} rows={members.strikeCounts.map((s) => [s.warningCount, s.users])} empty="No users with strikes." />
-      </Section>
+      <Card className="mt-6">
+        <h3 className="text-sm font-bold text-white">Reserve fund — company money, never split</h3>
+        <p className="mt-2 text-sm text-white/70">
+          Funded this month {fmtCents(s.reserve.fundedCents)} · released {fmtCents(s.reserve.releasesCents)} (excluded from income) · withdrawn {fmtCents(s.reserve.withdrawalsCents)} · balance at end of {month} <strong className="text-white">{fmtCents(s.reserve.closingBalanceCents)}</strong>.{" "}
+          <Link href={adminHref(base, "/cash", { month })} className="text-gold hover:underline print:hidden">Reserve fund →</Link>
+        </p>
+      </Card>
+
+      <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 print:hidden">
+        <Card>
+          <h3 className="text-sm font-bold text-white">Record payment from Ari</h3>
+          <form action={recordPaymentAction} className="mt-3 space-y-3">
+            <input type="hidden" name="month" value={month} />
+            <div className="grid grid-cols-2 gap-3">
+              <label className={labelCls}>Date received<input type="date" name="date" required defaultValue={todayIso(now)} className={inputCls} /></label>
+              <label className={labelCls}>Amount ($)<input name="amount" inputMode="decimal" required placeholder="0.00" className={inputCls} /></label>
+            </div>
+            <label className={labelCls}>Note (optional)<input name="note" maxLength={300} className={inputCls} /></label>
+            <button type="submit" className={btnCls}>Record payment</button>
+          </form>
+          <Table head={["Date", "Amount", "Note"]} rows={payments.map((x) => [x.date.toISOString().slice(0, 10), <span key="a" className="tabular-nums">{fmtCents(x.amountCents)}</span>, x.note ?? ""])} empty="No payments recorded yet." />
+        </Card>
+        <Card>
+          <h3 className="text-sm font-bold text-white">Close month</h3>
+          {s.closed ? (
+            <>
+              <p className="mt-2 text-sm text-white/70">{month} was closed {fmtDenver(s.closedAt)}. Its figures are frozen from the snapshot and count toward the outstanding balance.</p>
+              <form action={reopenMonthAction} className="mt-4 space-y-3 rounded-lg border border-red-500/30 p-3">
+                <input type="hidden" name="month" value={month} />
+                <p className="text-xs text-red-200">Reopening unfreezes {month}: it recomputes live and stops counting toward the outstanding balance until closed again.</p>
+                <label className="flex items-center gap-2 text-xs text-white/70"><input type="checkbox" name="confirm" /> I understand</label>
+                <label className={labelCls}>Type {month} to confirm<input name="typed" autoComplete="off" className={inputCls} /></label>
+                <button type="submit" className={ghostBtnCls}>Reopen {month}</button>
+              </form>
+            </>
+          ) : (
+            <form action={closeMonthAction} className="mt-3 space-y-3">
+              <input type="hidden" name="month" value={month} />
+              <p className="text-sm text-white/70">Freezes this statement (every line) and adds {fmtCents(s.owedCents)} to what Ari owes. Needs the month to have ended, its GHL wallet refresh to be complete, and the Kurv statement entered.</p>
+              {!check.ok && <p className="text-sm text-gold" data-testid="close-reason">{check.reason}</p>}
+              {refresh?.completedAt && refresh.mismatchCount > 0 && <p className="text-xs text-red-300">The wallet refresh found {refresh.mismatchCount} rollup-vs-row mismatches; see Health.</p>}
+              <button type="submit" disabled={!check.ok} className={btnCls}>Close {month}</button>
+            </form>
+          )}
+        </Card>
+      </div>
+      <p className="mt-6 text-xs text-white/40">{close && close.reopenedAt ? `Reopened ${fmtDenver(close.reopenedAt)}. ` : ""}All times America/Denver. Estimates use dated rates (Settings). Not a bank reconciliation.</p>
     </div>
   );
+}
+
+function Row({ k, v, strong, dim }: { k: string; v: string; strong?: boolean; dim?: boolean }) {
+  return (
+    <div className={`flex justify-between gap-4 ${strong ? "border-t border-border-default pt-1 font-semibold text-white" : ""} ${dim ? "text-xs text-white/50" : ""}`}>
+      <dt>{k}</dt>
+      <dd className="tabular-nums">{v}</dd>
+    </div>
+  );
+}
+
+function byCategory(rows: { category: string; cents: number }[]) {
+  const m = new Map<string, number>();
+  for (const r of rows) m.set(r.category, (m.get(r.category) ?? 0) + r.cents);
+  return [...m].map(([category, cents]) => ({ category, cents })).sort((a, b) => b.cents - a.cents);
+}
+function byScope(rows: { scope: string; cents: number }[]) {
+  const m = new Map<string, number>();
+  for (const r of rows) m.set(r.scope, (m.get(r.scope) ?? 0) + r.cents);
+  return [...m].map(([scope, cents]) => ({ scope, cents }));
 }
