@@ -175,3 +175,14 @@ export async function revokeDiscordOnPause(userId: string, deps: RevokeDeps = {}
     console.error(`[discord/revoke] pause hook failed reason=revoke_hook_failed code=${(err as { code?: string })?.code ?? (err as Error)?.name ?? "unknown"}`);
   }
 }
+
+/**
+ * Engine hook (the saas_pause side effect): queue the revoke for the account and deliver it now, awaited (deliverRevoke never throws and has
+ * its own 10 s timeout; a failed delivery stays in the outbox for the discord_outbox job). No GhlAccount link → no-op. Idempotent: a second call
+ * finds no DiscordLink and does nothing. THROWS only when the queueing transaction itself fails, so the caller's effect retry can run it again.
+ */
+export async function revokeDiscordForEngine(accountId: string, deps: RevokeDeps = {}): Promise<void> {
+  const db = await resolveDb(deps);
+  const queued = await revokeDiscordForAccount(accountId, "dunning_engine", { ...deps, db });
+  if (queued) await deliverRevoke(queued.outboxId, { ...deps, db });
+}

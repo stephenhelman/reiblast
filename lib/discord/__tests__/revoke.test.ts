@@ -298,3 +298,32 @@ describe("revokeDiscordOnPause", () => {
     expect(waited).toHaveLength(0);
   });
 });
+
+describe("revokeDiscordForEngine (the saas_pause hook)", () => {
+  it("queues the revoke for a linked account and delivers it now (awaited); a second call is a no-op", async () => {
+    const { revokeDiscordForEngine } = await import("../revoke");
+    const { db, links, outbox } = fakeDb([link()]);
+    const f = botReply("ok", "revoked");
+    await revokeDiscordForEngine("A1", deps(db, f));
+    expect(links).toHaveLength(0);
+    expect(outbox[0]).toMatchObject({ discordUserId: D1, source: "dunning_engine", status: "done" });
+    expect(f).toHaveBeenCalledTimes(1);
+    await revokeDiscordForEngine("A1", deps(db, f)); // idempotent: no link left, nothing queued, no second POST
+    expect(outbox).toHaveLength(1);
+    expect(f).toHaveBeenCalledTimes(1);
+  });
+  it("no DiscordLink → nothing happens", async () => {
+    const { revokeDiscordForEngine } = await import("../revoke");
+    const { db, outbox } = fakeDb([]);
+    const f = botReply("ok", "revoked");
+    await revokeDiscordForEngine("A1", deps(db, f));
+    expect(outbox).toHaveLength(0);
+    expect(f).not.toHaveBeenCalled();
+  });
+  it("a bot outage does not throw: the row stays pending for the discord_outbox job's retries", async () => {
+    const { revokeDiscordForEngine } = await import("../revoke");
+    const { db, outbox } = fakeDb([link()]);
+    await revokeDiscordForEngine("A1", deps(db, botReply("error", "discord_unavailable")));
+    expect(outbox[0]).toMatchObject({ status: "pending", attempts: 1, lastReason: "discord_unavailable" });
+  });
+});

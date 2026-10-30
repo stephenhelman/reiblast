@@ -57,6 +57,8 @@ export type ApplyDeps = {
   /** live only */
   pause?: (locationId: string) => Promise<void>;
   unpause?: (locationId: string) => Promise<void>;
+  /** saas_pause also revokes Discord access: queue the revoke (and deliver it) for the account. Default: lib/discord/revoke.revokeDiscordForEngine. */
+  revokeDiscord?: (accountId: string) => Promise<void>;
   send?: SendDeps;
   env?: Record<string, string | undefined>;
 };
@@ -215,7 +217,7 @@ export async function applyDunning(db: Db, input: ApplyInput, opts: { mode?: Mod
   let executed: SideEffectResult[] | undefined;
   if (live) {
     if (committed.decision.sideEffects.length) {
-      executed = await executeEffects(committed.decision.sideEffects, account.locationId, deps);
+      executed = await executeEffects(committed.decision.sideEffects, account.locationId, deps, account.id);
       await db.dunningDecision.update({ where: { id: committed.decisionId }, data: { sideEffects: executed as unknown as Prisma.InputJsonValue } });
     }
     if (committed.intentIds.length) await sendPendingIntents(db, { onlyIds: committed.intentIds, deps: { ...deps.send, env } });

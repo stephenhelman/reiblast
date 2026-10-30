@@ -8,11 +8,12 @@ const user = (o: Record<string, unknown> = {}) => ({ id: "U1", status: "active",
 
 function rig(accountOver = {}, userOver = {}, extra: { ledger?: any[] } = {}) {
   const db = makeFake([member(accountOver)], extra.ledger ?? [], { writable: true, users: [user(userOver)] });
-  const calls = { pause: [] as string[], unpause: [] as string[], posts: [] as any[] };
+  const calls = { pause: [] as string[], unpause: [] as string[], revoked: [] as string[], posts: [] as any[] };
   const deps = (over: Record<string, unknown> = {}) => ({
     now: () => NOW, env: ENV, readBalance: negBal,
     pause: async (l: string) => void calls.pause.push(l),
     unpause: async (l: string) => void calls.unpause.push(l),
+    revokeDiscord: async (a: string) => void calls.revoked.push(a),
     send: { env: ENV, post: async (u: string, b: unknown) => (calls.posts.push([u, b]), { ok: true, status: 200 }) },
     ...over,
   });
@@ -159,5 +160,27 @@ describe("live is OFF by default", () => {
     } finally {
       if (prev !== undefined) process.env.DUNNING_MODE = prev;
     }
+  });
+});
+
+describe("live pause revokes Discord; resume does not restore it", () => {
+  it("the 3rd strike → saas_pause → pauseLocation AND a Discord revoke for the account", async () => {
+    const { db, calls, deps } = rig({ billingState: "payment_failed", warningCount: 2, locationId: "LOC_A1" });
+    await applyDunning(db, failed("p"), { mode: "live", deps: deps() });
+    expect(calls.pause).toEqual(["LOC_A1"]);
+    expect(calls.revoked).toEqual(["A1"]);
+  });
+  it("a core failure pauses the same way (pauseLocation + Discord revoke)", async () => {
+    const { db, calls, deps } = rig({ billingState: "active", locationId: "LOC_A1" });
+    await applyDunning(db, { ghlAccountId: "A1", trigger: "ledger:cf2", event: { kind: "core_failed" }, eventAt: hoursAgo(1) }, { mode: "live", deps: deps() });
+    expect(db.decisions[0]).toMatchObject({ toState: "paused", pauseReason: "non_payment" });
+    expect(calls.pause).toEqual(["LOC_A1"]);
+    expect(calls.revoked).toEqual(["A1"]);
+  });
+  it("a core payment resumes the location and never touches Discord", async () => {
+    const { db, calls, deps } = rig({ billingState: "paused", pauseReason: "non_payment", locationId: "LOC_A1" });
+    await applyDunning(db, { ghlAccountId: "A1", trigger: "ledger:cs", event: { kind: "core_succeeded" }, eventAt: hoursAgo(1) }, { mode: "live", deps: deps() });
+    expect(calls.unpause).toEqual(["LOC_A1"]);
+    expect(calls.revoked).toEqual([]);
   });
 });
