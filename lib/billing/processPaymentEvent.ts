@@ -20,21 +20,25 @@ export type ProcessOptions = {
   retryPending?: boolean;
 };
 
-/** Sources that are never a webhook to replay (nothing "processes" them later): recorded once, done.
- *  - "job_trigger": the jobs route's own trigger-attempt log (app/api/webhooks/ghl/jobs/route.ts).
- *  - "stage_change_unmapped" / "client_handoff_review": review records written on purpose with processedAt = null so a human
- *    can look at them (lib/billing/events/stageChanged.ts, clientHandoff.ts). Replaying them as payments only fails them and
- *    stamps lastError on rows that are not errors. */
-export const NON_REPLAYABLE_SOURCES = ["job_trigger", "stage_change_unmapped", "client_handoff_review"] as const;
+/** The GhlEvent source of a payment webhook. ONLY these rows are ever processed as payments (fetch the transaction, ingest it). */
+export const PAYMENT_SOURCE = "payment";
 
-/** Where an event is eligible for replay: unprocessed, under the attempt cap, old enough, and a source that IS a webhook
- *  (excludes NON_REPLAYABLE_SOURCES even on the rare row where processedAt wasn't set at insert — belt and suspenders). */
+/**
+ * WHITELIST of GhlEvent sources the replay job may retry, each dispatched by processGhlEvent to ITS OWN processor (never to the payment one):
+ * payment webhooks, stage-change and invoice webhooks, and OP invoices. Everything else is not a webhook to reprocess — "job_trigger" (the jobs
+ * route's trigger log), "stage_change_unmapped" / "client_handoff_review" (review records written on purpose with processedAt = null so a human
+ * can look at them), and any source added later. A whitelist, so a new source can never be mistaken for a payment by default.
+ * ("op_invoice" is OP_INVOICE_SOURCE in lib/founderOffer/opInvoice.ts; a test pins the two together.)
+ */
+export const REPLAYABLE_SOURCES = [PAYMENT_SOURCE, "stage_change", "invoice", "op_invoice"] as const;
+
+/** Where an event is eligible for replay: unprocessed, under the attempt cap, old enough, and a whitelisted source. */
 export function replayableWhere(now = new Date()) {
   return {
     processedAt: null,
     attempts: { lt: MAX_EVENT_ATTEMPTS },
     receivedAt: { lt: new Date(now.getTime() - MIN_EVENT_AGE_MS) },
-    source: { notIn: [...NON_REPLAYABLE_SOURCES] },
+    source: { in: [...REPLAYABLE_SOURCES] },
   };
 }
 
@@ -47,6 +51,8 @@ export async function processPaymentEvent(eventId: string, opts: ProcessOptions)
   const event = await db.ghlEvent.findUnique({ where: { id: eventId } });
   if (!event) return "not_found";
   if (event.processedAt) return "already_processed";
+  // Only a payment webhook is ever processed as a payment. Any other source reaching here (a review record, a trigger log) is left exactly as it is.
+  if (event.source !== PAYMENT_SOURCE) return "already_processed";
 
   let ingested: IngestResult | null = null;
   try {
@@ -84,7 +90,7 @@ export async function processPaymentEvent(eventId: string, opts: ProcessOptions)
 /** Retry up to RETRY_AFTER_SUCCESS pending failed events under the replay limits. */
 export async function retryPendingEvents(db: PrismaClient, excludeId?: string): Promise<number> {
   const pending = await db.ghlEvent.findMany({
-    where: { ...replayableWhere(), source: "payment", ...(excludeId ? { id: { not: excludeId } } : {}) }, // other sources are retried by the replay job's dispatcher
+    where: { ...replayableWhere(), source: PAYMENT_SOURCE, ...(excludeId ? { id: { not: excludeId } } : {}) }, // other sources are retried by the replay job's dispatcher
     orderBy: { receivedAt: "asc" },
     take: RETRY_AFTER_SUCCESS,
     select: { id: true },

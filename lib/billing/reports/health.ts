@@ -62,7 +62,7 @@ export async function getDataQuality(db: PrismaClient, now = new Date(), listLim
     }),
     db.billingLedgerEntry.groupBy({ by: ["classification"], where: { ghlAccountId: null }, _count: { _all: true } }),
     // All sources here, not just "payment" — filtered/broken out below. job_trigger rows are processedAt-at-insert (never
-    // "failed" by this definition) so they fall out on their own; NON_REPLAYABLE_SOURCES is the belt-and-suspenders version.
+    // "failed" by this definition) so they fall out on their own; the REPLAYABLE_SOURCES whitelist is the belt-and-suspenders version.
     db.ghlEvent.findMany({ where: { ...failedEventWhere, source: "payment" }, orderBy: { receivedAt: "desc" }, take: listLimit, select: { id: true, source: true, externalId: true, attempts: true, lastError: true, receivedAt: true } }),
     db.ghlEvent.findMany({ where: { receivedAt: { gte: new Date(now.getTime() - 864e5) } }, select: { source: true, processedAt: true, attempts: true, lastError: true } }),
   ]);

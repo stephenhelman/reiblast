@@ -4,14 +4,16 @@ vi.mock("../../intents/send", () => ({ sendPendingIntents: vi.fn(async () => ({ 
 vi.mock("../../state/effects", () => ({ retrySideEffects: vi.fn(async () => ({ attempted: 0, succeeded: 0, stillFailing: 0, exhausted: 0, superseded: 0 })) }));
 
 import { runReplay } from "../../jobs/replay";
-import { NON_REPLAYABLE_SOURCES, replayableWhere } from "../../processPaymentEvent";
+import { PAYMENT_SOURCE, REPLAYABLE_SOURCES, processPaymentEvent, replayableWhere } from "../../processPaymentEvent";
+import { OP_INVOICE_SOURCE } from "@/lib/founderOffer/opInvoice";
 import { processGhlEvent } from "../../events/process";
 
-/** Minimal `where` matcher covering what replayableWhere uses: equality, {notIn}, {lt}. */
+/** Minimal `where` matcher covering what replayableWhere uses: equality, {in}, {notIn}, {lt}. */
 function matches(row: Record<string, any>, where: Record<string, any>): boolean {
   return Object.entries(where).every(([k, cond]) => {
     const v = row[k];
     if (cond && typeof cond === "object" && !(cond instanceof Date)) {
+      if ("in" in cond) return cond.in.includes(v);
       if ("notIn" in cond) return !cond.notIn.includes(v);
       if ("lt" in cond) return v < cond.lt;
       return true;
@@ -29,10 +31,10 @@ function matches(row: Record<string, any>, where: Record<string, any>): boolean 
 describe("job_trigger rows are never replayed", () => {
   beforeEach(() => vi.spyOn(console, "warn").mockImplementation(() => {}));
 
-  it("NON_REPLAYABLE_SOURCES includes job_trigger, and replayableWhere excludes it even when unprocessed", () => {
-    expect(NON_REPLAYABLE_SOURCES).toContain("job_trigger");
+  it("replayableWhere is a whitelist, so job_trigger is excluded even when unprocessed", () => {
+    expect(REPLAYABLE_SOURCES).not.toContain("job_trigger");
     const where = replayableWhere(new Date("2026-09-27T00:00:00Z")) as any;
-    expect(where.source).toEqual({ notIn: [...NON_REPLAYABLE_SOURCES] });
+    expect(where.source).toEqual({ in: [...REPLAYABLE_SOURCES] });
   });
 
   it("processGhlEvent is a no-op for a job_trigger row — never routed to processPaymentEvent, never touches attempts/lastError", async () => {
@@ -64,12 +66,44 @@ describe("job_trigger rows are never replayed", () => {
   });
 });
 
-describe("review records are never replayed as payments", () => {
-  it("stage_change_unmapped and client_handoff_review are excluded from replay and no-op if dispatched", async () => {
-    const { NON_REPLAYABLE_SOURCES, replayableWhere } = await import("../../processPaymentEvent");
+describe("payment replay is restricted to source = 'payment' everywhere", () => {
+  it("the whitelist is exactly the sources that have their own processor, and pins the OP source name", () => {
+    expect([...REPLAYABLE_SOURCES].sort()).toEqual(["invoice", "op_invoice", "payment", "stage_change"]);
+    expect(REPLAYABLE_SOURCES).toContain(OP_INVOICE_SOURCE);
+    expect(PAYMENT_SOURCE).toBe("payment");
+  });
+
+  it("review records and any unknown source are excluded from replay and no-op if dispatched (even with attempts/lastError set)", async () => {
     const { processGhlEvent } = await import("../../events/process");
-    expect(replayableWhere(new Date()).source.notIn).toEqual(expect.arrayContaining(["job_trigger", "stage_change_unmapped", "client_handoff_review"]));
-    expect(NON_REPLAYABLE_SOURCES).toHaveLength(3);
-    for (const src of ["stage_change_unmapped", "client_handoff_review"]) expect(await processGhlEvent("x", src, {} as never)).toBe("already_processed");
+    const where = replayableWhere(new Date("2026-10-30T00:00:00Z")) as any;
+    const old = new Date("2026-10-01T00:00:00Z");
+    for (const source of ["stage_change_unmapped", "client_handoff_review", "job_trigger", "some_future_source"]) {
+      expect(matches({ source, processedAt: null, attempts: 0, receivedAt: old }, where)).toBe(false);
+      expect(await processGhlEvent("x", source, {} as never)).toBe("already_processed");
+    }
+    for (const source of REPLAYABLE_SOURCES) expect(matches({ source, processedAt: null, attempts: 0, receivedAt: old }, where)).toBe(true);
+  });
+
+  it("processPaymentEvent itself refuses a non-payment row: no fetch, no attempts/lastError written", async () => {
+    const writes: unknown[] = [];
+    for (const source of ["stage_change_unmapped", "client_handoff_review", "stage_change", "some_future_source"]) {
+      const db: any = {
+        ghlEvent: {
+          findUnique: async () => ({ id: "e1", source, externalId: "HQCONTACT00001", processedAt: null, attempts: 0 }),
+          update: async (a: unknown) => { writes.push(a); },
+          findMany: async () => { throw new Error("must not look for pending events"); },
+        },
+      };
+      expect(await processPaymentEvent("e1", { db })).toBe("already_processed"); // would otherwise attempt GET /payments/transactions/<id> → 422
+    }
+    expect(writes).toEqual([]);
+  });
+
+  it("the post-success pending-event retry only ever selects source = 'payment'", async () => {
+    const { retryPendingEvents } = await import("../../processPaymentEvent");
+    let seen: any = null;
+    const db: any = { ghlEvent: { findMany: async (a: any) => { seen = a; return []; } } };
+    await retryPendingEvents(db, "ev0");
+    expect(seen.where.source).toBe("payment");
   });
 });
