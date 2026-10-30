@@ -185,7 +185,7 @@ type QueueCursor = {
 };
 
 /**
- * Nightly job: previous 2 UTC days, plus the whole previous calendar month (as weekly windows) on UTC day 3.
+ * Nightly job: previous 2 UTC days. (The whole-month re-pull is wallet_month_refresh.)
  * Windows run sequentially; the cursor carries the queue, the position and the in-window cursor, so it resumes anywhere.
  */
 export const runWalletUsage: JobFn = async (ctx) => {

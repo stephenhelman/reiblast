@@ -9,17 +9,23 @@ const now = new Date("2026-11-03T12:00:00Z");
 const h = (n: number) => new Date(now.getTime() - n * 3600_000);
 const F = (o: Partial<Freshness> = {}): Freshness => ({ ledgerAt: h(1), walletLastRowAt: h(20), walletIngestedAt: h(3), kurvEnteredAt: null, ...o });
 
+const refreshed = { windowsDone: 12, windowsTotal: 12, completedAt: new Date("2026-11-04T00:00:00Z") };
+const closeIn = (o: Partial<Parameters<typeof canCloseMonth>[0]> = {}) => canCloseMonth({ month: "2026-10", now, hasKurvStatement: true, alreadyClosed: false, walletRefresh: refreshed, ...o });
+
 describe("canCloseMonth", () => {
-  it("needs the month to have ended AND a Kurv statement", () => {
-    expect(canCloseMonth({ month: "2026-10", now: new Date("2026-10-31T12:00:00Z"), hasKurvStatement: true, alreadyClosed: false })).toMatchObject({ ok: false, reason: expect.stringMatching(/hasn't ended/) });
-    expect(canCloseMonth({ month: "2026-10", now, hasKurvStatement: false, alreadyClosed: false })).toMatchObject({ ok: false, reason: expect.stringMatching(/Kurv statement/) });
-    expect(canCloseMonth({ month: "2026-10", now, hasKurvStatement: true, alreadyClosed: false })).toEqual({ ok: true });
-    expect(canCloseMonth({ month: "2026-10", now, hasKurvStatement: true, alreadyClosed: true }).ok).toBe(false);
+  it("needs the month ended AND the wallet refresh complete AND a Kurv statement", () => {
+    expect(closeIn()).toEqual({ ok: true });
+    expect(closeIn({ now: new Date("2026-10-31T12:00:00Z") })).toMatchObject({ ok: false, reason: expect.stringMatching(/hasn't ended/) });
+    expect(closeIn({ hasKurvStatement: false })).toMatchObject({ ok: false, reason: expect.stringMatching(/Kurv statement/) });
+    expect(closeIn({ alreadyClosed: true }).ok).toBe(false);
+  });
+  it("blocks while the wallet refresh is missing or partial, and says how far it is", () => {
+    expect(closeIn({ walletRefresh: null })).toMatchObject({ ok: false, reason: expect.stringMatching(/hasn't started/) });
+    expect(closeIn({ walletRefresh: { windowsDone: 4, windowsTotal: 12, completedAt: null } })).toMatchObject({ ok: false, reason: expect.stringMatching(/4\/12 windows/) });
   });
   it("the month ends at Denver midnight, not UTC midnight", () => {
-    // 2026-11-01 05:59Z is still Oct 31 23:59 MDT? (Nov 1 is fall-back: MDT until 08:00Z) — still October in Denver.
-    expect(canCloseMonth({ month: "2026-10", now: new Date("2026-11-01T05:59:00Z"), hasKurvStatement: true, alreadyClosed: false }).ok).toBe(false);
-    expect(canCloseMonth({ month: "2026-10", now: new Date("2026-11-01T06:00:00Z"), hasKurvStatement: true, alreadyClosed: false }).ok).toBe(true);
+    expect(closeIn({ now: new Date("2026-11-01T05:59:00Z") }).ok).toBe(false);
+    expect(closeIn({ now: new Date("2026-11-01T06:00:00Z") }).ok).toBe(true);
   });
 });
 

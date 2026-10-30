@@ -26,17 +26,18 @@ export default async function PartnerStatementPage({ searchParams }: { searchPar
   const asked = p.get("month");
   const month = isMonth(asked) && asked >= FIRST_STATEMENT_MONTH && asked <= current ? asked : current < FIRST_STATEMENT_MONTH ? FIRST_STATEMENT_MONTH : current;
 
-  const [s, fresh, out, payments, close, kurv] = await Promise.all([
+  const [s, fresh, out, payments, close, kurv, refresh] = await Promise.all([
     computeMonthStatement(db, month, { now, hq }),
     loadFreshness(db, month),
     outstandingBalance(db),
     db.partnerPayment.findMany({ orderBy: [{ date: "desc" }, { createdAt: "desc" }], take: 12 }),
     db.monthClose.findUnique({ where: { month } }),
     db.kurvStatement.findUnique({ where: { month }, select: { month: true } }),
+    db.walletMonthRefresh.findUnique({ where: { month }, select: { windowsDone: true, windowsTotal: true, completedAt: true, mismatchCount: true } }),
   ]);
   const through = lineDataThrough(s, fresh);
   const stale = s.closed ? [] : staleSources(fresh, now);
-  const check = canCloseMonth({ month, now, hasKurvStatement: !!kurv, alreadyClosed: s.closed });
+  const check = canCloseMonth({ month, now, hasKurvStatement: !!kurv, alreadyClosed: s.closed, walletRefresh: refresh });
   const hasEstimate = s.lines.some((l) => l.basis === "estimate");
   const costsHref = (params: Record<string, string>) => adminHref(base, "/costs/rows", { from: month, to: month, month, ...params });
   const drill: Record<string, { href: string; label: string }[]> = {
@@ -184,8 +185,9 @@ export default async function PartnerStatementPage({ searchParams }: { searchPar
           ) : (
             <form action={closeMonthAction} className="mt-3 space-y-3">
               <input type="hidden" name="month" value={month} />
-              <p className="text-sm text-white/70">Freezes this statement (every line) and adds {fmtCents(s.owedCents)} to what Ari owes. Needs the month to have ended and the Kurv statement entered.</p>
+              <p className="text-sm text-white/70">Freezes this statement (every line) and adds {fmtCents(s.owedCents)} to what Ari owes. Needs the month to have ended, its GHL wallet refresh to be complete, and the Kurv statement entered.</p>
               {!check.ok && <p className="text-sm text-gold" data-testid="close-reason">{check.reason}</p>}
+              {refresh?.completedAt && refresh.mismatchCount > 0 && <p className="text-xs text-red-300">The wallet refresh found {refresh.mismatchCount} rollup-vs-row mismatches; see Health.</p>}
               <button type="submit" disabled={!check.ok} className={btnCls}>Close {month}</button>
             </form>
           )}

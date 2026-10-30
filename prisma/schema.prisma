@@ -1410,3 +1410,18 @@ model MonthClose {
   owedAmountCents Int
   reopenedAt      DateTime?
 }
+
+// Progress/completion of the full-month wallet re-pull (job wallet_month_refresh), one row per Denver statement month.
+// A statement month can be closed only when completedAt is set. The windows are a deterministic function of the month
+// (lib/billing/jobs/walletMonthRefresh.ts), so windowsDone is enough to resume across scheduled runs.
+model WalletMonthRefresh {
+  id            String    @id @default(cuid())
+  month         String    @unique
+  windowsTotal  Int
+  windowsDone   Int       @default(0)
+  mismatchCount Int       @default(0)
+  startedAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now()) @updatedAt
+  completedAt   DateTime?
+}
+

@@ -132,19 +132,10 @@ describe("wallet usage helpers", () => {
     expect(d.settlementTime.toISOString().slice(0, 10)).toBe("2026-06-18"); // same day as the rollup's slice(0,10)
   });
 
-  it("plans 1 window normally and previous-month weekly windows only on UTC day 3", () => {
-    expect(planUsageWindows(new Date("2026-09-26T05:00:00Z"))).toHaveLength(1);
-    expect(planUsageWindows(new Date("2026-09-02T05:00:00Z"))).toHaveLength(1);
-    const w = planUsageWindows(new Date("2026-09-03T05:00:00Z"));
-    expect(w).toHaveLength(1 + 5); // August: 31 days = 4 full weeks + 3 days
-    expect(w[1].from).toBe("2026-08-01T00:00:00.000Z");
-    expect(w[5].to).toBe("2026-08-31T23:59:59.999Z");
-    for (let i = 2; i < w.length; i++) expect(Date.parse(w[i].from)).toBe(Date.parse(w[i - 1].to) + 1); // contiguous, no gaps/overlap
-  });
-
-  it("January run covers December of the previous year", () => {
-    const w = planUsageWindows(new Date("2027-01-03T05:00:00Z"));
-    expect(w[1].from).toBe("2026-12-01T00:00:00.000Z");
-    expect(w[w.length - 1].to).toBe("2026-12-31T23:59:59.999Z");
+  it("the nightly job plans only the previous 2 UTC days — the month re-pull is wallet_month_refresh, even on day 3", () => {
+    for (const d of ["2026-09-02", "2026-09-03", "2027-01-03"]) expect(planUsageWindows(new Date(`${d}T05:00:00Z`))).toHaveLength(1);
+    const w = planUsageWindows(new Date("2026-09-03T05:00:00Z"))[0];
+    expect(w.from).toBe("2026-09-01T00:00:00.000Z");
+    expect(w.to).toBe("2026-09-02T23:59:59.999Z");
   });
 });

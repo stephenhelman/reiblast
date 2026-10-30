@@ -161,7 +161,7 @@ Owed to Stephen for a Kurv deposit month = 50% × (bank deposits − that month'
 - **Wallet usage** = all agency wallet debits in the Denver month across every scope (members, HQ, `_agency`, `_unattributed`),
   including A2P and tax, excluding agency recharge credits. A debit that looks like the agency plan itself would be left out.
 - **Dated settings**: rates (`SettingRate`) and fixed costs (`FixedCost`) are looked up as of the first day of the statement month.
-- **Closing**: allowed only after the month has ended (Denver) *and* the Kurv statement is entered. Closing stores every line in
+- **Closing**: allowed only when the month has ended (Denver), its `wallet_month_refresh` is complete, *and* the Kurv statement is entered (all enforced on the server; the reason is shown when blocked). Closing stores every line in
   `MonthClose.snapshot`; a closed month is shown from the snapshot and never recomputed. Reopening needs a ticked box plus the
   typed month, and the month recomputes live until closed again. Outstanding = Σ owed (closed, not reopened) − Σ payments.
 - **Freshness**: each line shows what it is current through. A banner appears when the ledger or wallet data is older than 26h.

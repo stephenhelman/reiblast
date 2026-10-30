@@ -51,7 +51,13 @@ export async function closeMonthAction(f: FormData): Promise<void> {
   const db = await getBillingDb();
   const now = new Date();
   const existing = await db.monthClose.findUnique({ where: { month } });
-  const check = canCloseMonth({ month, now, hasKurvStatement: !!(await db.kurvStatement.findUnique({ where: { month } })), alreadyClosed: !!existing && !existing.reopenedAt });
+  const check = canCloseMonth({
+    month,
+    now,
+    hasKurvStatement: !!(await db.kurvStatement.findUnique({ where: { month } })),
+    alreadyClosed: !!existing && !existing.reopenedAt,
+    walletRefresh: await db.walletMonthRefresh.findUnique({ where: { month }, select: { windowsDone: true, windowsTotal: true, completedAt: true } }),
+  });
   if (!check.ok) return done(back, "error", check.reason);
   // Snapshot the live statement (the closed-month shortcut is skipped on purpose: this month isn't closed yet).
   const snapshot = await computeLiveStatement(db, month, { now });
