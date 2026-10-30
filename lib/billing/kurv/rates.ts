@@ -18,11 +18,19 @@ export const KURV_RATE_KEYS = {
 
 const day = (d: Date | string) => (typeof d === "string" ? d : d.toISOString()).slice(0, 10);
 
+/** Thrown when a dated setting has no row yet (the statement hasn't been seeded). Pages show a setup notice instead of crashing. */
+export class MissingRateError extends Error {
+  constructor(readonly key: string, readonly asOf: string) {
+    super(`SettingRate "${key}" has no value effective on or before ${asOf}.`);
+    this.name = "MissingRateError";
+  }
+}
+
 /** Latest value per key with effectiveFrom <= asOf ("YYYY-MM-DD"). Throws on a missing key rather than guessing a default. */
 export function rateAsOf(rows: readonly RateRow[], key: string, asOf: string): number {
   let best: RateRow | undefined;
   for (const r of rows) if (r.key === key && day(r.effectiveFrom) <= asOf && (!best || day(r.effectiveFrom) > day(best.effectiveFrom))) best = r;
-  if (!best) throw new Error(`SettingRate "${key}" has no value effective on or before ${asOf}.`);
+  if (!best) throw new MissingRateError(key, asOf);
   return Number(best.value.toString());
 }
 

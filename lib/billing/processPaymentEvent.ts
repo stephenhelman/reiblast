@@ -20,9 +20,12 @@ export type ProcessOptions = {
   retryPending?: boolean;
 };
 
-/** Sources that are never a webhook to replay (nothing "processes" them later): recorded once, done. Currently just the
- *  jobs route's own trigger-attempt log (source "job_trigger", see app/api/webhooks/ghl/jobs/route.ts). */
-export const NON_REPLAYABLE_SOURCES = ["job_trigger"] as const;
+/** Sources that are never a webhook to replay (nothing "processes" them later): recorded once, done.
+ *  - "job_trigger": the jobs route's own trigger-attempt log (app/api/webhooks/ghl/jobs/route.ts).
+ *  - "stage_change_unmapped" / "client_handoff_review": review records written on purpose with processedAt = null so a human
+ *    can look at them (lib/billing/events/stageChanged.ts, clientHandoff.ts). Replaying them as payments only fails them and
+ *    stamps lastError on rows that are not errors. */
+export const NON_REPLAYABLE_SOURCES = ["job_trigger", "stage_change_unmapped", "client_handoff_review"] as const;
 
 /** Where an event is eligible for replay: unprocessed, under the attempt cap, old enough, and a source that IS a webhook
  *  (excludes NON_REPLAYABLE_SOURCES even on the rare row where processedAt wasn't set at insert — belt and suspenders). */

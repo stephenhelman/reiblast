@@ -17,7 +17,7 @@ type Cursor = {
   locName?: SeenName | null; // most recent usable locationName seen for the CURRENT location (reset per location)
   uSkip: number;
   uAcc: Record<string, Acc>; // scopeKey → acc for the unfiltered pass
-  stats: { rowsSeen: number; scopesWritten: number; rollupRows: number; unfilteredRows: number; txInserted: number; namesUpdated?: number };
+  stats: { rowsSeen: number; scopesWritten: number; rollupRows: number; unfilteredRows: number; txInserted: number; namesUpdated?: number; duplicateIds?: number };
 };
 
 export type RollupMismatch = { scopeKey: string; day: string; category: string; rollupCount: number | null; rowsCount: number | null; rollupAmount: string | null; rowsAmount: string | null };
@@ -137,12 +137,20 @@ export async function runWalletUsageWindow(ctx: JobContext, opts: UsageOptions =
       for (;;) {
         if (ctx.shouldYield()) return { done: false, cursor: snapshot(), summary: summary() };
         const rows = await walletTransactionsPage({ skip: st.skip, from: window.from, to: window.to, locationId: loc.locationId });
+        // GHL can return the same transaction id twice in one response. WalletTransaction keeps one row per id, so the
+        // rollup must count each id once or it over-counts (this is what the rollup-vs-rows check flagged on 2026-10-15).
+        const fresh: typeof rows = [];
         for (const r of rows) {
+          if (seen.has(r.id)) {
+            st.stats.duplicateIds = (st.stats.duplicateIds ?? 0) + 1;
+            continue;
+          }
           seen.add(r.id);
           addToAcc(st.locAcc, r);
+          fresh.push(r);
         }
         st.locName = latestLocationName(st.locName ?? null, rows);
-        await storeRows(rows, () => [loc.locationId, loc.ghlAccountId]);
+        await storeRows(fresh, () => [loc.locationId, loc.ghlAccountId]);
         st.stats.rowsSeen += rows.length;
         if (rows.length < PAGE) break;
         st.skip += PAGE;
@@ -160,7 +168,12 @@ export async function runWalletUsageWindow(ctx: JobContext, opts: UsageOptions =
   for (;;) {
     if (ctx.shouldYield()) return { done: false, cursor: snapshot(), summary: summary() };
     const rows = await walletTransactionsPage({ skip: st.uSkip, from: window.from, to: window.to });
-    const fresh = rows.filter((r) => !seen.has(r.id));
+    const fresh: typeof rows = [];
+    for (const r of rows) {
+      if (seen.has(r.id)) continue; // already counted (a location pass, or a duplicate inside this response)
+      seen.add(r.id);
+      fresh.push(r);
+    }
     for (const r of fresh) {
       addToAcc((st.uAcc[unfilteredScope(r.locationName)] ??= {}), r);
       st.stats.unfilteredRows++;

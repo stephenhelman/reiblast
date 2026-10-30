@@ -9,6 +9,7 @@ import { paramsOf } from "@/lib/admin/filters";
 import { adminHref } from "@/lib/admin/links";
 import { pageCtx } from "@/lib/admin/pageCtx";
 import { addMonths, currentDenverMonth, isMonth } from "@/lib/billing/reports/denver";
+import { MissingRateError } from "@/lib/billing/kurv/rates";
 import { canCloseMonth } from "@/lib/billing/statement/close";
 import { computeMonthStatement, FIRST_STATEMENT_MONTH, outstandingBalance } from "@/lib/billing/statement/compute";
 import { lineDataThrough, staleSources } from "@/lib/billing/statement/freshness";
@@ -26,8 +27,22 @@ export default async function PartnerStatementPage({ searchParams }: { searchPar
   const asked = p.get("month");
   const month = isMonth(asked) && asked >= FIRST_STATEMENT_MONTH && asked <= current ? asked : current < FIRST_STATEMENT_MONTH ? FIRST_STATEMENT_MONTH : current;
 
+  let statement;
+  try {
+    statement = await computeMonthStatement(db, month, { now, hq });
+  } catch (e) {
+    if (!(e instanceof MissingRateError)) throw e;
+    return (
+      <div>
+        <PageTitle sub="Setup needed before the statement can be computed.">Partner Statement</PageTitle>
+        <Banner tone="warn">
+          The dated rates and fixed costs haven&apos;t been seeded in this database yet ({e.key} has no value on or before {e.asOf}). Run <code>scripts/billing/seed-statement.ts</code> (ship plan, step 4), or add rows on <Link className="underline" href={adminHref(base, "/settings")}>Settings</Link>. The typed-column backfill (step 5) is needed for deposits to appear.
+        </Banner>
+      </div>
+    );
+  }
   const [s, fresh, out, payments, close, kurv, refresh] = await Promise.all([
-    computeMonthStatement(db, month, { now, hq }),
+    Promise.resolve(statement),
     loadFreshness(db, month),
     outstandingBalance(db),
     db.partnerPayment.findMany({ orderBy: [{ date: "desc" }, { createdAt: "desc" }], take: 12 }),
