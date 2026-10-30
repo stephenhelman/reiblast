@@ -2,14 +2,14 @@ import Link from "next/link";
 import AccountLabel from "@/components/admin/AccountLabel";
 import { ExportButton, Money, RangeForm, SortHeader } from "@/components/admin/controls";
 import { PageTitle, Section, Table } from "@/components/admin/ui";
-import Card from "@/components/shared/Card";
 import { paramsOf, parseMarginSort, parseRange } from "@/lib/admin/filters";
 import { adminHref } from "@/lib/admin/links";
 import { pageCtx } from "@/lib/admin/pageCtx";
 import { costCells, summarizeCosts, usageByScope } from "@/lib/billing/reports/costs";
 import { accountInfo } from "@/lib/billing/reports/labels";
-import { buildAgencyMargin, buildMemberMargin, parseFeePct, sortMemberMargin } from "@/lib/billing/reports/margin";
+import { buildAgencyMargin, buildMemberMargin, sortMemberMargin } from "@/lib/billing/reports/margin";
 import { fmtMoney } from "@/lib/billing/reports/money";
+import { modeledFeesByMonth } from "@/lib/billing/statement/marginFees";
 import { aggregateRevenue, fetchLedgerRows } from "@/lib/billing/reports/revenue";
 
 export const dynamic = "force-dynamic";
@@ -19,9 +19,10 @@ export default async function MarginPage({ searchParams }: { searchParams: Recor
   const p = paramsOf(searchParams);
   const range = parseRange(p, now);
   const { sort, dir } = parseMarginSort(p);
-  const fee = parseFeePct(process.env.ADMIN_PROCESSOR_FEE_PCT);
 
   const [ledger, cells, info, usage] = await Promise.all([fetchLedgerRows(db, range), costCells(db, range, hq), accountInfo(db), usageByScope(db, range, hq)]);
+  const fees = await modeledFeesByMonth(db, range.fromMonth, range.toMonth);
+  const fee = fees.size > 0 ? fees : null;
   const agency = buildAgencyMargin(aggregateRevenue(ledger, range.fromMonth, range.toMonth).rows, summarizeCosts(cells).byMonth, fee);
   const members = [...info.entries()].map(([accountId, i]) => ({ accountId, locationId: i.locationId }));
   const mm = buildMemberMargin(members, ledger, usage, range);
@@ -43,10 +44,10 @@ export default async function MarginPage({ searchParams }: { searchParams: Recor
 
       <Section
         title="Agency cash margin"
-        note={`Gross cash margin = net revenue collected − agency recharges paid to GHL (auto + manual) − wallet sales tax. Net revenue uses the Revenue rule; costs are by Denver month of settlement. Processor fees, chargebacks and payouts are not in the data.${fee ? ` The fee line is an ESTIMATE at ${fee}% of net revenue (ADMIN_PROCESSOR_FEE_PCT).` : ""}`}
+        note={`Gross cash margin = net revenue collected − agency recharges paid to GHL (auto + manual) − wallet sales tax. Net revenue uses the Revenue rule; costs are by Denver month of settlement. Processor fees, chargebacks and payouts are not in the data.${fee ? " The Kurv fee line is modeled by the Partner Statement (estimate until the Kurv statement is entered) for months from 2026-10; it is by deposit month, not collection month." : ""}`}
       >
         <Table
-          head={["Month", "Net revenue collected", "Agency cash paid to GHL", "Wallet sales tax", "Gross cash margin", ...(fee ? ["Processor fees (estimate)", "Margin after fees (estimate)"] : [])]}
+          head={["Month", "Net revenue collected", "Agency cash paid to GHL", "Wallet sales tax", "Gross cash margin", ...(fee ? ["Kurv fees (modeled)", "Margin after Kurv fees"] : [])]}
           rows={[
             ...agency.rows.map((r) => [
               <Link key={r.month} className="hover:text-gold" href={adminHref(base, "/revenue", { from: r.month, to: r.month })}>{r.month}</Link>,
@@ -60,13 +61,6 @@ export default async function MarginPage({ searchParams }: { searchParams: Recor
           ]}
         />
       </Section>
-
-      <div className="mt-8">
-        <Card>
-          <h2 className="text-lg font-bold text-white">Partner split</h2>
-          <p className="mt-1 text-sm text-white/50">Formula pending.</p>
-        </Card>
-      </div>
 
       <Section title="Per member" note="Wallet recharges + core subscription collected (net of refunds) versus wallet usage charged, over the selected months. Ledger rows with no account are the Unmatched line. HQ and the internal owner account are not members.">
         <Table

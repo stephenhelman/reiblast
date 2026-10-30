@@ -44,7 +44,7 @@ export function parseRevenueFilters(p: Params, now = new Date()): RevenueFilters
   };
 }
 
-const BILLING_CLASSES: BillingClass[] = ["core_subscription", "wallet_auto_recharge", "wallet_manual_recharge", "trial_auth", "failed_signup", "refund", "unclassified"];
+const BILLING_CLASSES: BillingClass[] = ["core_subscription", "wallet_auto_recharge", "wallet_manual_recharge", "trial_auth", "failed_signup", "refund", "unclassified", "non_gateway"];
 export function parseAttemptFilters(p: Params, now = new Date()): AttemptFilters {
   const status = p.get("status");
   return { ...parseRange(p, now), month: monthParam(p), classification: enumOf<BillingClass>(p.get("classification"), BILLING_CLASSES), status: status && /^[a-z_]{1,24}$/.test(status) ? status : undefined };

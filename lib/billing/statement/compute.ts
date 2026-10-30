@@ -1,7 +1,7 @@
 import { Prisma, type PrismaClient } from "@prisma/client";
 import { isAmexBrand, type Batch } from "../kurv/batch";
 import { addDays } from "../kurv/calendar";
-import { sumBatchFees, type MonthlyActivity } from "../kurv/fees";
+import { estimateMonthlyDebit, sumBatchFees, type MonthlyActivity } from "../kurv/fees";
 import { kurvRatesAsOf, rateAsOf } from "../kurv/rates";
 import { STATEMENT_START } from "../kurv/reference";
 import { movementDelta } from "../kurv/reserve";
@@ -98,24 +98,19 @@ export async function reserveBalance(db: StatementDb, month: string = currentDen
   return bal;
 }
 
-/**
- * The statement for one Denver month (the Kurv deposit month). A closed month returns its stored snapshot untouched; any
- * other month is computed live from the ledger, dated settings and wallet rows.
- */
-export async function computeMonthStatement(db: StatementDb, month: string, opts: { now?: Date; hq?: string | null } = {}): Promise<MonthStatement> {
+export type ComputeOpts = { now?: Date; hq?: string | null; /** Ignore an entered KurvStatement and show the pure estimate (variance view). */ forceEstimate?: boolean };
+
+/** The live (never snapshot) statement for one Denver month. */
+export async function computeLiveStatement(db: StatementDb, month: string, opts: ComputeOpts = {}): Promise<MonthStatement> {
   if (!isMonth(month)) throw new Error(`Invalid month "${month}".`);
   if (month < FIRST_STATEMENT_MONTH) throw new Error(`The statement starts ${STATEMENT_START}; ${month} is not part of it.`);
   const now = opts.now ?? new Date();
-
-  const closed = await db.monthClose.findUnique({ where: { month } });
-  if (closed && !closed.reopenedAt) return { ...(closed.snapshot as unknown as MonthStatement), closed: true, closedAt: closed.closedAt.toISOString() };
-
   const first = `${month}-01`, nextFirst = `${addMonths(month, 1)}-01`;
   const rateRows = await db.settingRate.findMany();
   const rates = kurvRatesAsOf(rateRows, first);
   const batches = await loadBatches(db, month);
   const activity = await loadActivity(db, month);
-  const kurv = await db.kurvStatement.findUnique({ where: { month } });
+  const kurv = opts.forceEstimate ? null : await db.kurvStatement.findUnique({ where: { month } });
   const costs = await db.fixedCost.findMany({ where: { effectiveFrom: { lt: asDate(nextFirst) }, OR: [{ effectiveTo: null }, { effectiveTo: { gte: asDate(first) } }] }, orderBy: { effectiveFrom: "asc" } });
   const latest = new Map(costs.map((c) => [c.name, c.monthlyAmountCents])); // ascending → last (latest) wins
   const moves = (await db.reserveMovement.findMany({ where: { date: { gte: asDate(first), lt: asDate(nextFirst) } } })).map((m) => ({ kind: m.kind, amountCents: m.amountCents }));
@@ -134,6 +129,31 @@ export async function computeMonthStatement(db: StatementDb, month: string, opts
     partial: now < denverMonthStart(addMonths(month, 1)),
     now,
   });
+}
+
+/**
+ * The statement for one Denver month (the Kurv deposit month). A closed month returns its stored snapshot untouched; any
+ * other month is computed live from the ledger, dated settings and wallet rows.
+ */
+export async function computeMonthStatement(db: StatementDb, month: string, opts: ComputeOpts = {}): Promise<MonthStatement> {
+  if (!isMonth(month)) throw new Error(`Invalid month "${month}".`);
+  if (month < FIRST_STATEMENT_MONTH) throw new Error(`The statement starts ${STATEMENT_START}; ${month} is not part of it.`);
+  const closed = await db.monthClose.findUnique({ where: { month } });
+  if (closed && !closed.reopenedAt) return { ...(closed.snapshot as unknown as MonthStatement), closed: true, closedAt: closed.closedAt.toISOString() };
+  return computeLiveStatement(db, month, opts);
+}
+
+/** Kurv's total cost for a month in cents (daily fees incl. discount + monthly debit), estimate or actual. No wallet/reserve queries. */
+export async function kurvFeesCents(db: StatementDb, month: string): Promise<number | null> {
+  if (month < FIRST_STATEMENT_MONTH) return null;
+  const rateRows = await db.settingRate.findMany();
+  const kurv = await db.kurvStatement.findUnique({ where: { month } });
+  if (kurv) return kurv.dailyFeesPaidCents + kurv.monthlyDebitCents;
+  const batches = await loadBatches(db, month);
+  const f = sumBatchFees(batches, kurvRatesAsOf(rateRows, `${month}-01`));
+  const activity = await loadActivity(db, month);
+  const debit = estimateMonthlyDebit({ ...activity, volumeCents: f.grossCents }, kurvRatesAsOf(rateRows, `${month}-01`));
+  return f.discountCents + f.otherFeesCents + debit.totalCents;
 }
 
 /** Σ owed for closed months − Σ payments received from the partner. Open months never count. */

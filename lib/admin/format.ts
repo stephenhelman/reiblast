@@ -14,3 +14,9 @@ export function fmtDenverDate(d: Date | string | null | undefined): string {
 export const fmtMb = (mb: number): string => (mb >= 1024 ? `${(mb / 1024).toFixed(2)} GB` : `${mb.toFixed(1)} MB`);
 export const fmtUsd = (s: string | number): string => Number(s).toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 6 });
 export const last4 = (s: string): string => `…${s.slice(-4)}`;
+
+/** Integer cents → "$1,234.56" / "-$1,234.56". */
+export function fmtCents(c: number): string {
+  const s = (Math.abs(c) / 100).toLocaleString("en-US", { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return c < 0 && Math.round(Math.abs(c)) !== 0 ? `-${s}` : s;
+}

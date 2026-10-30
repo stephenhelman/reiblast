@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { BillingClass } from "@prisma/client";
-import { buildAgencyMargin, buildMemberMargin, parseFeePct, sortMemberMargin } from "../../reports/margin";
+import { buildAgencyMargin, buildMemberMargin, sortMemberMargin } from "../../reports/margin";
 import { aggregateRevenue, revenueDetail, type LedgerRow } from "../../reports/revenue";
 import { sumOf } from "../../reports/money";
 
@@ -28,13 +28,16 @@ describe("agency gross cash margin", () => {
   it("the margin can be negative", () => {
     expect(buildAgencyMargin([{ month: "2026-08", net: "100" } as never], [{ month: "2026-08", byGroup: G("150", "5") }] as never, null).rows[0].margin).toBe("-55.000000");
   });
-  it("the fee line exists only when a valid percentage is configured, and is separate from the margin", () => {
-    const m = buildAgencyMargin(revenue, costs, "2.9");
-    expect(m.rows[0].feeEstimate).toBe("43.514500"); // 2.9% of 1500.50
+  it("the fee line comes from the modeled Kurv fees by month, and is separate from the margin", () => {
+    const m = buildAgencyMargin(revenue, costs, new Map([["2026-08", "43.514500"]]));
+    expect(m.rows[0].feeEstimate).toBe("43.514500");
     expect(m.rows[0].margin).toBe("484.263767"); // gross margin unchanged
     expect(m.rows[0].marginAfterFeeEstimate).toBe("440.749267");
-    expect(parseFeePct("2.9")).toBe("2.9");
-    for (const bad of [undefined, "", "abc", "0", "100", "-1", "2.9%", "1e2"]) expect(parseFeePct(bad)).toBeNull();
+    // a month the model doesn't cover shows no estimate and is not charged one
+    expect(m.rows[1].feeEstimate).toBeNull();
+    expect(m.rows[1].marginAfterFeeEstimate).toBeNull();
+    expect(m.totals.feeEstimate).toBe("43.514500");
+    expect(m.totals.marginAfterFeeEstimate).toBe("640.749267");
   });
 });
 
