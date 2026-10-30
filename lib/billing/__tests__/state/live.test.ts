@@ -184,3 +184,39 @@ describe("live pause revokes Discord; resume does not restore it", () => {
     expect(calls.revoked).toEqual([]);
   });
 });
+
+describe('DUNNING_LIVE_ACCOUNTS="*" means every member account (internal accounts still excluded)', () => {
+  const STAR = { ...ENV, DUNNING_LIVE_ACCOUNTS: "*" };
+  const star = (db: ReturnType<typeof makeFake>, calls: { pause: string[] }, id = "A1") =>
+    applyDunning(db, { ...failed("star"), ghlAccountId: id }, { mode: "live", deps: { now: () => NOW, env: STAR, readBalance: negBal, pause: async (l: string) => void calls.pause.push(l), revokeDiscord: async () => {}, send: { env: STAR, post: async () => ({ ok: true, status: 200 }) } } });
+
+  it("isLiveAllowed: '*' allows any account id / location; an empty list still allows nobody; a named list is unchanged", () => {
+    expect(isLiveAllowed({ id: "ANY", locationId: null }, { DUNNING_LIVE_ACCOUNTS: "*" })).toBe(true);
+    expect(isLiveAllowed({ id: "ANY", locationId: "LOCX" }, { DUNNING_LIVE_ACCOUNTS: " * " })).toBe(true);
+    expect(isLiveAllowed({ id: "ANY", locationId: "LOCX" }, { DUNNING_LIVE_ACCOUNTS: "" })).toBe(false);
+    expect(isLiveAllowed({ id: "ANY", locationId: "LOCX" }, {})).toBe(false);
+    expect(isLiveAllowed({ id: "ANY", locationId: "LOCX" }, { DUNNING_LIVE_ACCOUNTS: "A1,LOCY" })).toBe(false);
+    expect(isLiveAllowed({ id: "A1", locationId: null }, { DUNNING_LIVE_ACCOUNTS: "A1,LOCY" })).toBe(true);
+    expect(liveAllowlist({ DUNNING_LIVE_ACCOUNTS: "*" })).toEqual(["*"]);
+  });
+  it("a member that is NOT named anywhere is acted on live (state written, location paused)", async () => {
+    const db = makeFake([member({ id: "SOMEONE", locationId: "LOC_S", billingState: "payment_failed", warningCount: 2 })], [], { writable: true, users: [user({ id: "U1" })] });
+    const calls = { pause: [] as string[] };
+    const r = await star(db, calls, "SOMEONE");
+    expect(r).toMatchObject({ status: "recorded", mode: "live" });
+    expect(calls.pause).toEqual(["LOC_S"]);
+    expect(db.decisions[0]).toMatchObject({ mode: "live", toState: "paused" });
+  });
+  it("an INTERNAL account is still skipped, even with '*'", async () => {
+    const db = makeFake([member({ id: "OWNER", accountType: "internal" })], [], { writable: true, users: [user()] });
+    const calls = { pause: [] as string[] };
+    expect(await star(db, calls, "OWNER")).toMatchObject({ status: "skipped", why: "not a member account" });
+    expect(calls.pause).toEqual([]);
+    expect(db.decisions).toHaveLength(0);
+  });
+  it("without '*' the same unnamed member stays shadow", async () => {
+    const db = makeFake([member({ id: "SOMEONE", locationId: "LOC_S", billingState: "payment_failed", warningCount: 2 })], [], { writable: true, users: [user()] });
+    const r = await applyDunning(db, { ...failed("nostar"), ghlAccountId: "SOMEONE" }, { mode: "live", deps: { now: () => NOW, env: ENV, readBalance: negBal } });
+    expect(r).toMatchObject({ status: "recorded", mode: "shadow" });
+  });
+});

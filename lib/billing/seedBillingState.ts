@@ -4,7 +4,7 @@ import { denverDayOf, denverDayStart } from "./reports/denver";
 /**
  * Trailing-N-Denver-day activity window start (default 30). Used by scripts/billing/seed-billing-state.ts to classify a
  * legacy paused/expired/canceled/incomplete_expired subscription: did the location have ANY wallet activity in this
- * window? Snapped to a Denver-day boundary (like coreCoveredUntil elsewhere), so the window is deterministic regardless
+ * window? Snapped to a Denver-day boundary (like exemptUntil elsewhere), so the window is deterministic regardless
  * of the time of day the script runs.
  */
 export function trailingActivityWindowStart(now: Date, days = 30): Date {

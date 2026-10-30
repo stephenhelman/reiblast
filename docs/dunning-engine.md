@@ -13,20 +13,20 @@ stage keys equal `BillingState` values).
 | wallet recharge **failed**, balance < 0 | strike +1. active/trial → `payment_failed`; strikes 1–2 stay `payment_failed`; the **3rd → paused (non_payment)** with **`saas_pause` in the same decision** |
 | wallet recharge failed, balance ≥ 0 or unknown | recorded, nothing changes ("no strike" / "balance unknown; strike not counted") |
 | wallet recharge **succeeded** | strikes = 0 always. It only **cures** — `payment_failed` → active, or paused/`non_payment` → resume — when the **post-recharge balance is ≥ 0** (live: read after the recharge; replay: estimated). Otherwise strikes reset but the state stays: *"recharge succeeded, balance still negative"* (an unknown balance counts as not confirmed). An unpaid core failure keeps `payment_failed` regardless (a resume then lands in `payment_failed`). Other pause reasons are never resumed |
-| core subscription **failed** | → `payment_failed`, **no strike**, marks a core failure open — unless `now < coreCoveredUntil` ("covered, ignored") |
-| invoice **expired** | → paused (`expired_invoice`) with `saas_pause` in the same decision; same coverage protection |
-| core subscription **succeeded** | clears the core failure. trial / `payment_failed` → active (stays `payment_failed` while wallet strikes remain); paused `expired_invoice`/`non_payment` → active + `saas_resume`, strikes reset. `manual_killswitch`/`voluntary` pauses are not resumed |
+| core subscription **failed** | → **paused (`non_payment`) at once**, with **`saas_pause`** (which also revokes Discord) in the same decision; **no strike**; marks a core failure open. Onboarding members: Onboarding **Paused**. Already paused: just records the open failure. Suppressed while **exempt** |
+| invoice **expired** | → paused (`expired_invoice`) with `saas_pause` in the same decision; suppressed while exempt |
+| core subscription **succeeded** (a paid GHL invoice is a succeeded `core_subscription` payment) | clears the core failure and **cures**: trial / `payment_failed` (incl. `subscription_expired`) → active (stays `payment_failed` while wallet strikes remain); paused `expired_invoice`/`non_payment` → active + `saas_resume`, strikes reset. Onboarding members go back to the stage matching their progress. `manual_killswitch`/`voluntary` pauses are not resumed. Works while exempt |
 | `trial_auth` succeeded | null/trial → **trial**, `trialOffer` only if the subscription name matches `/\d+\s*Day Trial/i`, `trialEndsAt` from the subscription. Any other state: "ignored (state X)" |
 | any payment event on **inactive** / **churned** | recorded as "state excludes action" — never struck, never auto-resumed |
 | command `expired_sub` (Clients stage "Expired Sub") | payment_failed + `subscription_expired`, no pause, no side effects; already there = confirmation |
 | command `paused` / `inactive` / `churned` / `active` | `manual_killswitch` pause + `saas_pause` / `voluntary` pause + `saas_pause` / churned + `saas_pause` / resume + strikes reset. If the state **already matches**, it is a **confirmation**: no intent; `inactive`/`churned`/`active` re-assert their effect idempotently; `paused` re-sends nothing (its own decision already carried the pause and its retries) |
 | `pause_confirmed` (legacy `paused_confirm` stage) | **removed as a step**: still parsed, but always a no-op ("no confirmation step"). Nothing depends on it |
-| sweep: subscription **canceled** | → churned + `saas_pause` (deferred while covered; a cancel during the trial churns at once); nothing if the contact has another live subscription |
-| sweep: subscription **expired** | → `payment_failed` with `pauseReason` **`subscription_expired`**, core failure open, no pause, Clients intent **`expired_sub`** ("Expired Sub"); onboarding members get Onboarding Payment Failed. Deferred while covered; paused/inactive/churned are not moved. A succeeded core payment cures it to active (reason cleared); a wallet recharge does not. Does not churn |
-| sweep: trial ended unconverted | trial → `payment_failed`, core failure open (coverage protects) |
+| sweep: subscription **canceled** | → churned + `saas_pause` (suppressed while exempt, a cancel during the trial included; decided for real by a later run once the exemption has ended); nothing if the contact has another live subscription |
+| sweep: subscription **expired** | → `payment_failed` with `pauseReason` **`subscription_expired`**, core failure open, no pause, Clients intent **`expired_sub`** ("Expired Sub"); onboarding members get Onboarding Payment Failed. Suppressed while exempt; paused/inactive/churned are not moved. A succeeded core payment cures it to active (reason cleared); a wallet recharge does not. Does not churn |
+| sweep: trial ended unconverted | a core failure: trial → **paused (`non_payment`)** + `saas_pause`, core failure open (suppressed while exempt) |
 | sweep: subscription trialing | null/trial → trial with offer and end date |
 
-A failure is tracked by kind: wallet strikes (counter) and `coreFailureOpen` (flag). `payment_failed` lasts while either is open.
+A failure is tracked by kind: wallet strikes (counter) and `coreFailureOpen` (flag). **`payment_failed` is used only for wallet strikes 1–2 and for `subscription_expired`;** a core subscription failure pauses at once. A wallet recharge never lifts a pause while a core failure is open (only a core payment does).
 A `null` (unseeded) state is treated like active, except that `trial_auth` moves it to trial.
 
 `decide` returns `{ nextState, pauseReason, warningCount, coreFailureOpen, trialOffer, trialEndsAt, sideEffects[], intents[], reason }`.
@@ -80,7 +80,7 @@ use, these calls fail harmlessly (logged, swallowed).
 
 Dry-run by default (`--apply` writes `DunningDecision` rows with mode `replay`, idempotent; refuses the production host). Each member
 starts from a neutral state (**trial** if their first core-related row is a `trial_auth`, else **active**) and their ledger events run
-through `decide` in `occurredAt` order, with `coreCoveredUntil` checked **at each event's own time**. Subscriptions are read
+through `decide` in `occurredAt` order, with `exemptUntil` checked **at each event's own time**. Subscriptions are read
 (GET) for `trial_auth` events.
 
 **Estimated balances.** Only one day of balance snapshots exists (2026-09-26), so historical balances are *reconstructed*: from the
@@ -181,13 +181,13 @@ The 15-minute `paused_confirm` requirement is gone — see *Pausing* above. The 
 
 - A payment event never moves an **inactive** or **churned** account ("state excludes action").
 - A **manual_killswitch** pause (and a voluntary one) is never auto-resumed by a payment: core success and a recharge with balance ≥ 0 both leave it paused, with no `saas_resume`.
-- **trial_ended_unconverted** → `payment_failed` with a core failure open (only from trial; coverage still protects).
+- **trial_ended_unconverted** → paused (`non_payment`) with `saas_pause`, core failure open (only from trial; an exemption still protects).
 
 ## Soak-gap fixes
 
 - **Starting-state seeding in shadow** (`state/seedStart.ts`). Shadow never writes `GhlAccount` — except that a member whose `billingState` is **null** gets its starting
   state written (trial with `trialOffer`/`trialEndsAt`, active, or payment_failed) when `applyDunning` handles `trial_auth`, `subscription_trialing`, a core
-  success/failure, `trial_ended_unconverted` or `subscription_expired`, and when `sub_sweep` (phase "seed") finds a null-state member whose best live subscription is
+  success or `subscription_expired` (a core failure / unconverted trial now decides *paused*, which is a decision, not a starting state, so it seeds nothing), and when `sub_sweep` (phase "seed") finds a null-state member whose best live subscription is
   trialing / active / unpaid. Conditional on `billingState IS NULL`, so a non-null state is never overwritten; no side effects, no intents. Paused / canceled /
   expired / incomplete_expired subscriptions are left unseeded by the sweep pass (the event path or the seed script decides those).
 - **Handoff catch-up** (`scripts/billing/handoff-catchup.ts`). Members who reached A2P Approved with a null state are the `client_handoff_review` events. After seeding,
@@ -196,6 +196,29 @@ The 15-minute `paused_confirm` requirement is gone — see *Pausing* above. The 
 - **Onboarding side-stage moves.** A manual move to Onboarding "Paused" / "Payment Failed" is a command for a member without `activeClientSince`, exactly like the
   Clients stages (Paused = `manual_killswitch` pause); `onboardingProgress` is never touched. A "Payment Failed" command is recorded like the Clients one (the engine
   has no rule for it, so the decision is a no-op).
+
+## Exemption (`GhlAccount.exemptUntil` / `exemptReason`)
+
+Replaces the old `coreCoveredUntil` / `coreCoverageNote` override (columns left in place, unused). While `now < exemptUntil` (**exclusive**: it ends at 00:00
+America/Denver on the stored date) the engine takes **no adverse automatic action** for the account: no wallet strike is counted, no `payment_failed`, no
+pause (core failure, expired invoice, 3rd strike), no churn (a cancel during the trial included), no expired-sub move, no trial-ended failure. **Every such
+event is still recorded as a `DunningDecision` whose reason starts `exempt until <date>: …`** (a no-op: state, strikes, side effects and intents unchanged).
+Payments still cure (a core or wallet success resumes/cures as usual) and **manual stage commands still apply**. The decision's trigger is suffixed
+`:exempt:<date>` so the same event (a churn, an unconverted trial, an expired invoice) is decided for real by a later sweep once the exemption has ended.
+Set it with `scripts/billing/set-exemption.ts` (see `docs/billing-jobs.md`). It never writes to GHL and does not change the account's state.
+
+## Side effects: `saas_pause` also revokes Discord
+
+`saas_pause` (3rd strike, core failure, expired invoice, manual Paused/Inactive/Churned, churn) pauses the GHL location **and** revokes the member's Discord
+access (`revokeDiscordForEngine`: deletes the `DiscordLink` and queues the bot revoke in one transaction, then delivers it; the `discord_outbox` job retries a
+failed delivery). The two steps are independent and both idempotent; if either fails the effect is recorded as failed and the ordinary side-effect retries
+(5 attempts, 5m/30m/2h/6h/24h) re-run both. **`saas_resume` lifts the location pause only — Discord is not restored automatically:** the revoke deleted the
+link and the bot contract has no grant endpoint, so the member re-links through the normal Discord verify flow (eligible again once `User.status` is `active`).
+
+## `DUNNING_LIVE_ACCOUNTS="*"`
+
+`DUNNING_LIVE_ACCOUNTS` takes account ids / location ids, or `*` for **every member account**. Internal accounts are never acted on (they are skipped before the
+allowlist is consulted). Empty = nobody.
 
 ## Not built yet
 

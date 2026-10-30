@@ -121,10 +121,10 @@ GHL — processor fees, chargebacks and payouts not included. Reporting timezone
   scope). Ledger rows with no account are the "Unmatched" line; revenue on a non-member account is surfaced, never dropped.
 - **Denver vs UTC**: monthly figures differ from UTC-month reports by the rows near midnight UTC. Example: August member
   usage is −888.483003 by UTC month (matches `UsageRollup`) and −906.046875 by Denver month.
-- **Members**: "Covered until" = `GhlAccount.coreCoveredUntil` + `coreCoverageNote` (manual override) and "Expected next
-  charge (≈)" = latest succeeded core payment + 1 month, always labelled an estimate; if `coreCoveredUntil` is later than the
-  estimate (or there is no estimate) an "override applies" badge shows. Coverage ends at 00:00 America/Denver on the stored
-  date. Set it with `scripts/billing/set-coverage.ts` (see `docs/billing-jobs.md`, "Core coverage override").
+- **Members**: "Exempt until" = `GhlAccount.exemptUntil` + `exemptReason` (special-account exemption) and "Expected next
+  charge (≈)" = latest succeeded core payment + 1 month, always labelled an estimate; if `exemptUntil` is later than the
+  estimate (or there is no estimate) an "override applies" badge shows. The exemption ends at 00:00 America/Denver on the stored
+  date. Set it with `scripts/billing/set-exemption.ts` (see `docs/billing-jobs.md`, "Exemption").
 
 ### CSV exports (`/api/admin/export/[view]`)
 

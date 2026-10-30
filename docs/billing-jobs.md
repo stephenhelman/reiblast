@@ -128,19 +128,22 @@ current version on **every row it evaluates**, so after a run the whole ledger c
 classifier would ignore are reported and re-stamped, never reclassified; rows that fail to normalize are left untouched.
 Rows written by `ingestTransaction` after a classifier bump already carry the new version.
 
-## Core coverage override (`GhlAccount.coreCoveredUntil` / `coreCoverageNote`)
+## Exemption (`GhlAccount.exemptUntil` / `exemptReason`) — replaces the core coverage override
 
-A manual override for members who are covered for the core subscription without a matching payment on record (for example
-prepaid during a processor migration). `scripts/billing/set-coverage.ts` (dry-run default, `--apply`, refuses the production
-host) sets it: `--location-id`, `--until=YYYY-MM-DD` (a Denver date, **exclusive**: covered while now < 00:00
-America/Denver on that date), `--note`, and optionally `--state`, `--pause-reason=none|…` and `--legacy-unreconciled=true|false`
-to correct the account at the same time. It prints a before/after table. **DB only — it never writes to GHL, so the GHL
-pipeline stage is not moved; keep the stage consistent by hand.**
+For special members the engine must never act against (comped, partners, prepaid during a processor migration…). `scripts/billing/set-exemption.ts`
+(dry-run default, `--apply`, production guard: `BILLING_DB_TARGET=prod` + `--i-mean-production` + typed host) sets it:
+`--location-id=<id> --until=YYYY-MM-DD --reason="…"` (a Denver date, **exclusive**: exempt while now < 00:00 America/Denver on that date), or `--clear`.
+Prints a before/after table. **DB only — it never writes to GHL and does not change the account's state or stage.**
 
-**Dunning rule:** while `now < coreCoveredUntil`, a missing or failed core payment must not be treated as delinquency
-(see `docs/payments-webhook-system.md`). The dashboard shows "Covered until" and the note next to the estimated next charge
-(latest succeeded core payment + 1 month); if the override is later than that estimate the member list marks
-"override applies".
+Migration `20261030130000_ghl_account_exemption` added the two columns and copied every existing `coreCoveredUntil` / `coreCoverageNote` into them; the old
+columns are unused (drop them in a later cleanup migration).
+
+**Dunning rule and the dashboard fields:** see `docs/dunning-engine.md` → *Exemption*. For the dashboard project:
+- `exemptUntil` (`DateTime?`, UTC instant of Denver midnight; null = not exempt). Exempt right now ⇔ `exemptUntil != null && now < exemptUntil`.
+- `exemptReason` (`String?`, ≤ 500 chars, free text shown to staff).
+- Evidence of the exemption working: `DunningDecision.reason` starts with `exempt until <YYYY-MM-DD>:` and `trigger` ends `:exempt:<YYYY-MM-DD>`.
+- The Members page/CSV export show "Exempt until" / `exempt_until` and `exempt_reason`, and the "override applies" badge compares `exemptUntil` with the
+  estimated next charge (latest succeeded core payment + 1 month).
 
 ## `sub_sweep` (nightly subscription sweep)
 
@@ -150,14 +153,13 @@ upserts `GhlSubscriptionState`, and feeds the engine:
 
 - **First run** (state table empty) **seeds without emitting** and reports what it would have emitted. A dry-run (no `--apply`) writes
   nothing at all, ever.
-- **Status changes:** `canceled` / `expired` → churned (`subscription_canceled` / `subscription_expired`); a cancel **during the trial**
-  churns immediately; newly `trialing` → trial (offer and end date). `paused`, `unpaid` and `incomplete_expired` never emit.
-- **Coverage:** a non-trial churn while `now < coreCoveredUntil` is recorded as *deferred* (trigger `sub:<id>:canceled:deferred:<date>`);
-  each run re-checks and churns once coverage has ended (trigger `sub:<id>:canceled`).
+- **Status changes:** `canceled` → churned; `expired` → `payment_failed` / `subscription_expired` (Expired Sub, no pause); newly `trialing` → trial (offer and end date). `paused`, `unpaid` and `incomplete_expired` never emit.
+- **Exemption:** while the account is exempt a churn/expiry is recorded as an `exempt` no-op (trigger `sub:<id>:canceled:exempt:<date>`);
+  each run re-checks and decides it for real once the exemption has ended (trigger `sub:<id>:canceled`). A cancel during the trial is suppressed too.
 - **Other live subscription:** a canceled/expired subscription never churns an account whose contact still holds another live one
   (trialing / active / unpaid) — common after a processor migration (old subscription canceled, new one live).
 - **Trial expiry:** a trial ended more than 2 days ago (subscription not canceled/expired) with **no succeeded `core_subscription` since
-  the trial began** → `payment_failed` with the core failure open (coverage protects it). Once per subscription.
+  the trial began** → a core failure: **paused (`non_payment`)** with `saas_pause`, core failure open (an exemption protects it). Once per subscription.
 - **Invoice backstop:** lists invoices and emits `invoice_expired` for unpaid, past-due (or void) core recovery invoices, because GHL has
   no native "expired" invoice status.
 - Resumable like the other jobs (the cursor carries what it read). Events run through the same write path as everything else, so in
