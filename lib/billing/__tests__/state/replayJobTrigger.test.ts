@@ -63,3 +63,13 @@ describe("job_trigger rows are never replayed", () => {
     expect(rows.filter((r) => matches(r, where))).toEqual([]); // the job_trigger row never made it into a batch
   });
 });
+
+describe("review records are never replayed as payments", () => {
+  it("stage_change_unmapped and client_handoff_review are excluded from replay and no-op if dispatched", async () => {
+    const { NON_REPLAYABLE_SOURCES, replayableWhere } = await import("../../processPaymentEvent");
+    const { processGhlEvent } = await import("../../events/process");
+    expect(replayableWhere(new Date()).source.notIn).toEqual(expect.arrayContaining(["job_trigger", "stage_change_unmapped", "client_handoff_review"]));
+    expect(NON_REPLAYABLE_SOURCES).toHaveLength(3);
+    for (const src of ["stage_change_unmapped", "client_handoff_review"]) expect(await processGhlEvent("x", src, {} as never)).toBe("already_processed");
+  });
+});
