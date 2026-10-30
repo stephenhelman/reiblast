@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { listTxn } from "../../__tests__/fixtures";
 import { normalizeTransaction } from "../../normalizeTransaction";
 import { kurvFields } from "../ledgerFields";
-import { KURV_RATE_KEYS, kurvRatesAsOf, rateAsOf } from "../rates";
+import { KURV_RATE_KEYS, kurvRatesAsOf, MissingRateError, rateAsOf } from "../rates";
 
 const f = (o = {}) => kurvFields(normalizeTransaction(listTxn(o)));
 const day = (d: Date | null) => d?.toISOString().slice(0, 10) ?? null;
@@ -40,6 +40,9 @@ describe("dated rates", () => {
     expect(rateAsOf(withNew, KURV_RATE_KEYS.discountRate, "2026-12-31")).toBe(0.5);
     expect(rateAsOf(withNew, KURV_RATE_KEYS.discountRate, "2027-01-01")).toBe(0.03);
     expect(() => rateAsOf(withNew, KURV_RATE_KEYS.discountRate, "2026-09-30")).toThrow(/no value effective/);
+  });
+  it("a missing row is a typed MissingRateError (pages show a setup notice, not a crash)", () => {
+    expect(() => kurvRatesAsOf([], "2026-10-01")).toThrow(MissingRateError);
   });
   it("assembles a full KurvRates", () => {
     expect(Object.keys(kurvRatesAsOf(rows, "2026-10-15")).sort()).toEqual(Object.keys(KURV_RATE_KEYS).sort());

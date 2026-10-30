@@ -1,13 +1,13 @@
 import Link from "next/link";
 import { Notice, StaleBanner, btnCls, inputCls, labelCls } from "@/components/admin/statementUi";
-import { PageTitle, Section, Table } from "@/components/admin/ui";
+import { Banner, PageTitle, Section, Table } from "@/components/admin/ui";
 import Card from "@/components/shared/Card";
 import { fmtCents, fmtDenver } from "@/lib/admin/format";
 import { paramsOf } from "@/lib/admin/filters";
 import { adminHref } from "@/lib/admin/links";
 import { pageCtx } from "@/lib/admin/pageCtx";
 import { sumBatchFees } from "@/lib/billing/kurv/fees";
-import { kurvRatesAsOf } from "@/lib/billing/kurv/rates";
+import { kurvRatesAsOf, MissingRateError } from "@/lib/billing/kurv/rates";
 import { addMonths, currentDenverMonth, denverStamp, isMonth } from "@/lib/billing/reports/denver";
 import { computeLiveStatement, FIRST_STATEMENT_MONTH, loadBatches, reserveBalance } from "@/lib/billing/statement/compute";
 import { staleSources } from "@/lib/billing/statement/freshness";
@@ -26,6 +26,17 @@ export default async function CashPage({ searchParams }: { searchParams: Record<
   const asked = p.get("month");
   const month = isMonth(asked) && asked >= FIRST_STATEMENT_MONTH && asked <= current ? asked : current < FIRST_STATEMENT_MONTH ? FIRST_STATEMENT_MONTH : current;
 
+  try {
+    kurvRatesAsOf(await db.settingRate.findMany(), `${month}-01`);
+  } catch (e) {
+    if (!(e instanceof MissingRateError)) throw e;
+    return (
+      <div>
+        <PageTitle sub="Setup needed.">Cash &amp; Processor</PageTitle>
+        <Banner tone="warn">The dated Kurv rates haven&apos;t been seeded in this database yet ({e.key}). Run <code>scripts/billing/seed-statement.ts</code> (ship plan, step 4) or add rows on <Link className="underline" href={adminHref(base, "/settings")}>Settings</Link>.</Banner>
+      </div>
+    );
+  }
   const [batches, rateRows, est, kurv, fresh, balance, moves] = await Promise.all([
     loadBatches(db, month),
     db.settingRate.findMany(),

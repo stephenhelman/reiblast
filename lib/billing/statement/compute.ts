@@ -2,7 +2,7 @@ import { Prisma, type PrismaClient } from "@prisma/client";
 import { isAmexBrand, type Batch } from "../kurv/batch";
 import { addDays } from "../kurv/calendar";
 import { estimateMonthlyDebit, sumBatchFees, type MonthlyActivity } from "../kurv/fees";
-import { kurvRatesAsOf, rateAsOf } from "../kurv/rates";
+import { kurvRatesAsOf, MissingRateError, rateAsOf } from "../kurv/rates";
 import { STATEMENT_START } from "../kurv/reference";
 import { movementDelta } from "../kurv/reserve";
 import { addMonths, currentDenverMonth, denverDayOf, denverMonthStart, isMonth, sqlDenverMonth } from "../reports/denver";
@@ -149,11 +149,15 @@ export async function kurvFeesCents(db: StatementDb, month: string): Promise<num
   const rateRows = await db.settingRate.findMany();
   const kurv = await db.kurvStatement.findUnique({ where: { month } });
   if (kurv) return kurv.dailyFeesPaidCents + kurv.monthlyDebitCents;
-  const batches = await loadBatches(db, month);
-  const f = sumBatchFees(batches, kurvRatesAsOf(rateRows, `${month}-01`));
-  const activity = await loadActivity(db, month);
-  const debit = estimateMonthlyDebit({ ...activity, volumeCents: f.grossCents }, kurvRatesAsOf(rateRows, `${month}-01`));
-  return f.discountCents + f.otherFeesCents + debit.totalCents;
+  try {
+    const rates = kurvRatesAsOf(rateRows, `${month}-01`);
+    const f = sumBatchFees(await loadBatches(db, month), rates);
+    const debit = estimateMonthlyDebit({ ...(await loadActivity(db, month)), volumeCents: f.grossCents }, rates);
+    return f.discountCents + f.otherFeesCents + debit.totalCents;
+  } catch (e) {
+    if (e instanceof MissingRateError) return null; // not seeded: margin simply shows no modeled fee
+    throw e;
+  }
 }
 
 /** Σ owed for closed months − Σ payments received from the partner. Open months never count. */
