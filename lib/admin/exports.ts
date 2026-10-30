@@ -182,11 +182,11 @@ export async function buildExport(view: ExportView, db: PrismaClient, p: Params,
       const sorted = sortMembers(rows.filter((r) => matchesState(r, state)), sort, dir, label);
       const out: Row[] = sorted.map((r) => ({
         account_id: r.accountId, location_id: r.locationId, account_label: label(r), billing_state: r.billingState ?? "not_seeded", pause_reason: r.pauseReason, legacy_unreconciled: r.legacyUnreconciled,
-        covered_until: r.coveredUntil, coverage_note: r.coverageNote, expected_next_charge_estimate: r.expectedNextCharge, last_core_payment_utc: r.lastCorePaymentAt,
+        exempt_until: r.exemptUntil, exempt_reason: r.exemptReason, expected_next_charge_estimate: r.expectedNextCharge, last_core_payment_utc: r.lastCorePaymentAt,
         strikes_live_pre_cutover: r.strikes, balance_status: r.balance?.status, balance: r.balance?.balance, balance_day: r.balance?.takenOn, usage_30d: r.usage30, recharges_30d: r.recharges30, trial_offer: r.trialOffer, trial_ends_at: r.trialEndsAt,
       }));
       const filters = definedOnly({ state, sort, dir });
-      return { ok: true, filename: file(), spec: spec(view, filters, ["account_id", "location_id", "account_label", "billing_state", "pause_reason", "legacy_unreconciled", "covered_until", "coverage_note", "expected_next_charge_estimate", "last_core_payment_utc", "strikes_live_pre_cutover", "balance_status", "balance", "balance_day", "usage_30d", "recharges_30d", "trial_offer", "trial_ends_at"], ["account_label", "pause_reason", "coverage_note", "trial_offer"], fromArray(out)) };
+      return { ok: true, filename: file(), spec: spec(view, filters, ["account_id", "location_id", "account_label", "billing_state", "pause_reason", "legacy_unreconciled", "exempt_until", "exempt_reason", "expected_next_charge_estimate", "last_core_payment_utc", "strikes_live_pre_cutover", "balance_status", "balance", "balance_day", "usage_30d", "recharges_30d", "trial_offer", "trial_ends_at"], ["account_label", "pause_reason", "exempt_reason", "trial_offer"], fromArray(out)) };
     }
 
     case "member-ledger": {

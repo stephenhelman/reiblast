@@ -81,11 +81,12 @@ describe("shadow write path", () => {
     expect(fine.decisions[0]).toMatchObject({ toStrikes: 0, toState: "active" });
   });
 
-  it("honors coreCoveredUntil for core failures", async () => {
-    const db = makeFake([member({ coreCoveredUntil: new Date("2026-11-21T07:00:00Z") })]);
+  it("honors exemptUntil for core failures", async () => {
+    const db = makeFake([member({ exemptUntil: new Date("2026-11-21T07:00:00Z") })]);
     await applyDunning(db, { ghlAccountId: "A1", trigger: "ledger:c", event: { kind: "core_failed" }, eventAt: hoursAgo(1) }, { mode: "shadow", deps: deps() });
     expect(db.decisions[0]).toMatchObject({ toState: "active", coreFailureOpen: false });
-    expect(db.decisions[0].reason).toMatch(/covered, ignored/);
+    expect(db.decisions[0].reason).toMatch(/^exempt/);
+    expect(db.decisions[0].trigger).toBe("ledger:c:exempt:2026-11-21");
   });
 
   it("trial_auth reads the subscription and records the trial fields on the intent", async () => {

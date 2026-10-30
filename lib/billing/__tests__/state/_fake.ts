@@ -19,7 +19,7 @@ export function matches(row: Row, where: Row = {}): boolean {
     return v === cond;
   });
 }
-export type FakeAccount = { id: string; accountType: "member" | "internal"; locationId: string | null; coreCoveredUntil: Date | null; billingState: any; warningCount: number; pauseReason: any; contactId?: string; trialOffer?: string | null; trialEndsAt?: Date | null; userId?: string; onboardingStage?: string | null; onboardingProgress?: string | null; activeClientSince?: Date | null };
+export type FakeAccount = { id: string; accountType: "member" | "internal"; locationId: string | null; exemptUntil: Date | null; billingState: any; warningCount: number; pauseReason: any; contactId?: string; trialOffer?: string | null; trialEndsAt?: Date | null; userId?: string; onboardingStage?: string | null; onboardingProgress?: string | null; activeClientSince?: Date | null };
 
 /**
  * In-memory stand-in for the delegates the engine touches. `ghlAccount` deliberately has NO update/updateMany/create: a shadow run
@@ -156,7 +156,7 @@ export function makeFake(accounts: FakeAccount[], ledger: Row[] = [], opts: { wr
   return db;
 }
 
-export const member = (o: Partial<FakeAccount> = {}): FakeAccount => ({ id: "A1", accountType: "member", locationId: "LOC_A1", coreCoveredUntil: null, billingState: "active", warningCount: 0, pauseReason: null, contactId: "CONTACT_A1", trialOffer: null, trialEndsAt: null, userId: "U1", onboardingStage: null, onboardingProgress: null, activeClientSince: new Date("2026-09-01T00:00:00Z"), ...o }); // handed off by default (Clients routing); pass activeClientSince: null for an onboarding member
+export const member = (o: Partial<FakeAccount> = {}): FakeAccount => ({ id: "A1", accountType: "member", locationId: "LOC_A1", exemptUntil: null, billingState: "active", warningCount: 0, pauseReason: null, contactId: "CONTACT_A1", trialOffer: null, trialEndsAt: null, userId: "U1", onboardingStage: null, onboardingProgress: null, activeClientSince: new Date("2026-09-01T00:00:00Z"), ...o }); // handed off by default (Clients routing); pass activeClientSince: null for an onboarding member
 export const NOW = new Date("2026-09-27T12:00:00.000Z");
 export const hoursAgo = (h: number, from = NOW) => new Date(from.getTime() - h * 3600 * 1000);
 export const negBal = async () => ({ status: "ok" as const, value: "-3.000000", estimated: false });

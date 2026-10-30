@@ -10,7 +10,7 @@ import { hoursAgo, makeFake, member, NOW } from "./_fake";
 const snap = (o: Partial<Snapshot> = {}): Snapshot => ({ state: "active", strikes: 0, pauseReason: null, coreFailureOpen: false, ...o });
 const neg: BalanceReading = { status: "ok", value: "-5.000000", estimated: false };
 const pos: BalanceReading = { status: "ok", value: "12.500000", estimated: false };
-const ctx = (o: Partial<Context> = {}): Context => ({ now: NOW, coveredUntil: null, ...o });
+const ctx = (o: Partial<Context> = {}): Context => ({ now: NOW, exemptUntil: null, ...o });
 const HANDED: Context["routing"] = { handedOff: true, onboardingProgress: "A2P Approved" };
 const ONB = (onboardingProgress: string | null): Context["routing"] => ({ handedOff: false, onboardingProgress });
 const wFail: DunningEvent = { kind: "wallet_recharge_failed", wallet: "auto" };
@@ -39,7 +39,7 @@ describe("B10 — pipeline routing", () => {
   });
   it("onboarding member: expired invoice and a core failure route the same way", () => {
     expect(pipes(decide(snap(), { kind: "invoice_expired" }, ctx({ routing: ONB("New Client") })))).toEqual(["onboarding:paused"]);
-    expect(pipes(decide(snap(), coreFail, ctx({ routing: ONB("New Client") })))).toEqual(["onboarding:payment_failed"]);
+    expect(pipes(decide(snap(), coreFail, ctx({ routing: ONB("New Client") })))).toEqual(["onboarding:paused"]);
   });
   it("onboarding member: trial / trial-field refreshes / inactive / churned send nothing to either pipeline", () => {
     const trial = decide(snap({ state: null }), { kind: "trial_auth_succeeded" }, ctx({ routing: ONB("New Client"), subscription: { name: "14 Day Trial", trialEndsAt: null } }));
@@ -99,7 +99,7 @@ describe("B6 — pause timing: saas_pause is part of the paused decision", () =>
     expect(decide(snap({ state: "payment_failed", strikes: 1 }), wFail, ctx({ walletBalance: neg })).sideEffects).toEqual([]);
   });
   it("coverage still protects an expired invoice (no pause)", () => {
-    expect(decide(snap(), { kind: "invoice_expired" }, ctx({ coveredUntil: new Date("2026-10-30T00:00:00Z") })).sideEffects).toEqual([]);
+    expect(decide(snap(), { kind: "invoice_expired" }, ctx({ exemptUntil: new Date("2026-10-30T00:00:00Z") })).sideEffects).toEqual([]);
   });
   it("pause_confirmed, if still delivered, decides nothing", () => {
     const d = decide(snap({ state: "paused", pauseReason: "non_payment" }), { kind: "pause_confirmed" }, ctx());
@@ -143,11 +143,11 @@ describe("confirmed rules (payments never move parked accounts; killswitch; tria
     const d = decide(snap({ state: "inactive", pauseReason: "voluntary" }), coreOk, ctx());
     expect(d.nextState).toBe("inactive");
   });
-  it("trial_ended_unconverted → payment_failed (core failure open); only from trial", () => {
+  it("trial_ended_unconverted → paused (non_payment, core failure open, saas_pause); only from trial", () => {
     const d = decide(snap({ state: "trial" }), { kind: "trial_ended_unconverted" }, ctx({ routing: HANDED }));
-    expect(d).toMatchObject({ nextState: "payment_failed", coreFailureOpen: true });
-    expect(pipes(d)).toEqual(["active_client:payment_failed"]);
-    expect(pipes(decide(snap({ state: "trial" }), { kind: "trial_ended_unconverted" }, ctx({ routing: ONB("A2P Pending") })))).toEqual(["onboarding:payment_failed"]);
+    expect(d).toMatchObject({ nextState: "paused", pauseReason: "non_payment", coreFailureOpen: true });
+    expect(pipes(d)).toEqual(["active_client:paused"]);
+    expect(pipes(decide(snap({ state: "trial" }), { kind: "trial_ended_unconverted" }, ctx({ routing: ONB("A2P Pending") })))).toEqual(["onboarding:paused"]);
     expect(decide(snap({ state: "active" }), { kind: "trial_ended_unconverted" }, ctx()).noop).toBe(true);
   });
 });

@@ -10,7 +10,7 @@ import { TRIAL_OFFER_RE, type BillingState, type DunningEvent, type PauseReason 
 export const SEEDABLE_STATES: BillingState[] = ["trial", "active", "payment_failed"];
 
 /** Events that establish a member's starting state (first trial / core payment / subscription status). Wallet events never seed. */
-export const SEEDING_EVENTS: DunningEvent["kind"][] = ["trial_auth_succeeded", "subscription_trialing", "core_succeeded", "core_failed", "trial_ended_unconverted", "subscription_expired"];
+export const SEEDING_EVENTS: DunningEvent["kind"][] = ["trial_auth_succeeded", "subscription_trialing", "core_succeeded", "subscription_expired"];
 
 export type StartingState = { billingState: BillingState; pauseReason: PauseReason | null; trialOffer?: string | null; trialEndsAt?: Date | null };
 

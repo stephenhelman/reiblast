@@ -40,8 +40,8 @@ describe("coverage checklist", () => {
   it("an empty period shows everything unseen", () => {
     expect(coverageChecklist([], 0).every((r) => r.count === 0)).toBe(true);
   });
-  it("a covered core failure and an unknown-balance failure are not counted as the situations they resemble", () => {
-    const rows = coverageChecklist([dec({ eventKind: "core_failed", reason: "covered, ignored" }), dec({ reason: "balance unknown; strike not counted" })], 0);
+  it("an exempt core failure and an unknown-balance failure are not counted as the situations they resemble", () => {
+    const rows = coverageChecklist([dec({ eventKind: "core_failed", reason: "exempt until 2026-12-31: core subscription failed; no automatic action" }), dec({ reason: "balance unknown; strike not counted" })], 0);
     const c = (k: string) => rows.find((r) => r.key === k)!.count;
     expect(c("core_failed")).toBe(0);
     expect(c("uncounted")).toBe(0);

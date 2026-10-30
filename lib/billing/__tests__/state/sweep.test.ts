@@ -39,12 +39,9 @@ describe("transition rules (pure)", () => {
   it("first-run seed treats the current status as new (prev null)", () => {
     expect(transitionEvents(sub({ subscriptionId: "s", contactId: "c", status: "canceled" }), null, NOW)).toHaveLength(1);
   });
-  it("churn trigger: deferred (with the coverage date) while covered, plain once coverage ended; never deferred during a trial", () => {
-    const cov = D("2026-11-21T07:00:00Z");
-    expect(churnTrigger("s1", "canceled", { duringTrial: false, coveredUntil: cov, now: NOW })).toBe("sub:s1:canceled:deferred:2026-11-21");
-    expect(churnTrigger("s1", "canceled", { duringTrial: false, coveredUntil: cov, now: D("2026-11-21T07:00:00Z") })).toBe("sub:s1:canceled");
-    expect(churnTrigger("s1", "expired", { duringTrial: false, coveredUntil: null, now: NOW })).toBe("sub:s1:expired");
-    expect(churnTrigger("s1", "canceled", { duringTrial: true, coveredUntil: cov, now: NOW })).toBe("sub:s1:canceled");
+  it("churn trigger: one per subscription and outcome (applyDunning suffixes it while the account is exempt)", () => {
+    expect(churnTrigger("s1", "canceled")).toBe("sub:s1:canceled");
+    expect(churnTrigger("s1", "expired")).toBe("sub:s1:expired");
   });
   it("another live subscription (trialing/active/unpaid — not paused) blocks a churn", () => {
     const all = [{ id: "a", contactId: "c1", status: "canceled" }, { id: "b", contactId: "c1", status: "active" }, { id: "c", contactId: "c2", status: "canceled" }, { id: "d", contactId: "c2", status: "paused" }, { id: "e", contactId: "c3", status: "canceled" }, { id: "f", contactId: "c3", status: "unpaid" }, { id: "g", contactId: "c4", status: "canceled" }, { id: "h", contactId: "c4", status: "canceled" }];
@@ -78,7 +75,7 @@ const parsed = (rows: Record<string, unknown>[]) => rows.map((r) => parseSubRow(
 
 const accounts = () => [
   member({ id: "A1", contactId: "CONTACT1", billingState: "trial", locationId: "LOC1" }),
-  member({ id: "A2", contactId: "CONTACT2", billingState: "active", locationId: "LOC2", coreCoveredUntil: D("2026-10-15T00:00:00Z") }),
+  member({ id: "A2", contactId: "CONTACT2", billingState: "active", locationId: "LOC2", exemptUntil: D("2026-10-15T00:00:00Z") }),
   member({ id: "A3", contactId: "CONTACT3", billingState: "trial", locationId: "LOC3" }),
   member({ id: "A4", contactId: "CONTACT4", billingState: "trial", locationId: "LOC4" }),
   member({ id: "A5", contactId: "CONTACT5", billingState: "active", locationId: "LOC5" }),
@@ -155,7 +152,7 @@ describe("sub_sweep job", () => {
     expect(db.subStates.find((x: any) => x.subscriptionId === "S1").status).toBe("canceled");
   });
 
-  it("COVERAGE-DELAYED CHURN: while covered the churn is recorded as deferred; once coverage ends the next run churns — exactly once", async () => {
+  it("EXEMPT CHURN: while exempt the churn is recorded as exempt; once the exemption ends the next run churns — exactly once", async () => {
     const db = makeFake(accounts(), ledger());
     setSubs(baseSubs());
     await run(db); // seed (S2 active, A2 covered until 2026-10-15)
@@ -163,8 +160,8 @@ describe("sub_sweep job", () => {
     await run(db);
     const deferred = db.decisions.filter((d: any) => d.ghlAccountId === "A2");
     expect(deferred).toHaveLength(1);
-    expect(deferred[0]).toMatchObject({ trigger: "sub:S2:canceled:deferred:2026-10-15", toState: "active", sideEffects: [] });
-    expect(deferred[0].reason).toMatch(/churn deferred: covered until 2026-10-15/);
+    expect(deferred[0]).toMatchObject({ trigger: "sub:S2:canceled:exempt:2026-10-15", toState: "active", sideEffects: [] });
+    expect(deferred[0].reason).toMatch(/^exempt until 2026-10-15.*churn/);
 
     await run(db, { now: D("2026-10-10T00:00:00Z") }); // still covered: nothing new
     expect(db.decisions.filter((d: any) => d.ghlAccountId === "A2")).toHaveLength(1);
@@ -199,7 +196,7 @@ describe("sub_sweep job", () => {
     expect(e).toMatchObject({ trigger: "sub:S5a:expired", toState: "payment_failed", pauseReason: "subscription_expired", coreFailureOpen: true });
   });
 
-  it("TRIAL EXPIRY: > trial end + 2 days with no paid core since the trial began → payment_failed (core failure open); a converted trial is left alone; runs once", async () => {
+  it("TRIAL EXPIRY: > trial end + 2 days with no paid core since the trial began → paused (non_payment, core failure open); a converted trial is left alone; runs once", async () => {
     const db = makeFake(accounts(), ledger());
     setSubs(baseSubs());
     await run(db); // seed
@@ -207,19 +204,23 @@ describe("sub_sweep job", () => {
     expect((r.summary as any)).toMatchObject({ trialUnconverted: 1, trialConverted: 1 });
     const d = db.decisions.filter((x: any) => x.eventKind === "trial_ended_unconverted");
     expect(d).toHaveLength(1);
-    expect(d[0]).toMatchObject({ trigger: "sub:S3:trial_ended", ghlAccountId: "A3", fromState: "trial", toState: "payment_failed", coreFailureOpen: true, toStrikes: 0 });
+    expect(d[0]).toMatchObject({ trigger: "sub:S3:trial_ended", ghlAccountId: "A3", fromState: "trial", toState: "paused", pauseReason: "non_payment", coreFailureOpen: true, toStrikes: 0 });
+    expect(db.decisions.find((x: any) => x.ghlAccountId === "A3").sideEffects).toEqual([{ type: "saas_pause" }]);
     await run(db);
     expect(db.decisions.filter((x: any) => x.eventKind === "trial_ended_unconverted")).toHaveLength(1); // idempotent
   });
-  it("trial expiry is protected by coverage", async () => {
+  it("trial expiry is suppressed while exempt, and decided for real once the exemption ends", async () => {
     const acc = accounts();
-    acc[2].coreCoveredUntil = D("2026-12-01T00:00:00Z");
+    acc[2].exemptUntil = D("2026-12-01T00:00:00Z");
     const db = makeFake(acc, ledger());
     setSubs(baseSubs());
     await run(db);
     await run(db);
     expect(db.decisions.find((x: any) => x.ghlAccountId === "A3")).toMatchObject({ toState: "trial" });
-    expect(db.decisions.find((x: any) => x.ghlAccountId === "A3").reason).toMatch(/covered, ignored/);
+    expect(db.decisions.find((x: any) => x.ghlAccountId === "A3").reason).toMatch(/^exempt/);
+    expect(db.decisions.find((x: any) => x.ghlAccountId === "A3").trigger).toBe("sub:S3:trial_ended:exempt:2026-12-01");
+    await run(db, { now: D("2026-12-02T00:00:00Z") });
+    expect(db.decisions.filter((x: any) => x.ghlAccountId === "A3").map((x: any) => x.toState)).toEqual(["trial", "paused"]);
   });
 
   it("a NEW trialing subscription → trial with the offer and end date; a repeat run does nothing", async () => {

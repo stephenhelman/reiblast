@@ -134,10 +134,10 @@ describe("live branch (only reachable with DUNNING_MODE=live)", () => {
   it("live projects from the persisted account (not from shadow rows), and keeps the open-core-failure flag from its own decisions", async () => {
     const { db, deps } = rig({ billingState: "active" });
     await applyDunning(db, { ghlAccountId: "A1", trigger: "ledger:cf", event: { kind: "core_failed" }, eventAt: hoursAgo(2) }, { mode: "live", deps: deps() });
-    expect(db.decisions[0]).toMatchObject({ toState: "payment_failed", coreFailureOpen: true });
-    // a wallet recharge success with a positive balance must NOT clear payment_failed while the core failure is open
+    expect(db.decisions[0]).toMatchObject({ toState: "paused", toStrikes: 0, coreFailureOpen: true });
+    // a wallet recharge success with a positive balance must NOT lift the pause while the core failure is open
     await applyDunning(db, { ghlAccountId: "A1", trigger: "ledger:ws", event: { kind: "wallet_recharge_succeeded", wallet: "auto" }, eventAt: hoursAgo(1) }, { mode: "live", deps: deps({ readBalance: posBal }) });
-    expect(db.decisions[1]).toMatchObject({ fromState: "payment_failed", toState: "payment_failed", coreFailureOpen: true });
+    expect(db.decisions[1]).toMatchObject({ fromState: "paused", toState: "paused", coreFailureOpen: true });
   });
 
   it("userStatusFor maps states", () => {

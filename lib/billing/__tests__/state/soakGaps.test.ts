@@ -15,7 +15,7 @@ import { CLIENTS_STAGE_NAME_TO_STATE } from "../../stages";
 import { hoursAgo, makeFake, member, NOW } from "./_fake";
 
 const snap = (o: Partial<Snapshot> = {}): Snapshot => ({ state: "active", strikes: 0, pauseReason: null, coreFailureOpen: false, ...o });
-const ctx = (o: Partial<Context> = {}): Context => ({ now: NOW, coveredUntil: null, ...o });
+const ctx = (o: Partial<Context> = {}): Context => ({ now: NOW, exemptUntil: null, ...o });
 const expired: DunningEvent = { kind: "subscription_expired" };
 const coreOk: DunningEvent = { kind: "core_succeeded" };
 const stages = (d: ReturnType<typeof decide>) => d.intents.map((i) => `${i.pipeline}:${i.stage}`);
@@ -40,7 +40,7 @@ describe("1. Expired Sub", () => {
   });
   it("already expired = no change; covered = deferred; paused/inactive/churned are not moved", () => {
     expect(decide(snap({ state: "payment_failed", pauseReason: "subscription_expired", coreFailureOpen: true }), expired, ctx()).noop).toBe(true);
-    expect(decide(snap(), expired, ctx({ coveredUntil: new Date(NOW.getTime() + 864e5) })).noop).toBe(true);
+    expect(decide(snap(), expired, ctx({ exemptUntil: new Date(NOW.getTime() + 864e5) })).noop).toBe(true);
     expect(decide(snap({ state: "paused", pauseReason: "manual_killswitch" }), expired, ctx()).nextState).toBe("paused");
     expect(decide(snap({ state: "inactive" }), expired, ctx()).nextState).toBe("inactive");
     expect(decide(snap({ state: "churned" }), expired, ctx()).nextState).toBe("churned");
@@ -105,13 +105,13 @@ describe("2. starting-state seeding in shadow mode", () => {
     expect(db.decisions[0].sideEffects).toEqual([]);
     expect(db.intents.every((i: any) => i.status === "skipped_shadow")).toBe(true);
   });
-  it("a first core payment seeds active; a core failure seeds payment_failed", async () => {
+  it("a first core payment seeds active; a first core failure (a pause decision, not a starting state) seeds nothing", async () => {
     const ok = makeFake([member({ billingState: null })]);
     await applyDunning(ok, { ghlAccountId: "A1", trigger: "ledger:c1", event: { kind: "core_succeeded" }, eventAt: hoursAgo(1) }, { mode: "shadow", deps });
     expect((await ok.ghlAccount.findUnique({ where: { id: "A1" } })).billingState).toBe("active");
     const bad = makeFake([member({ billingState: null })]);
     await applyDunning(bad, { ghlAccountId: "A1", trigger: "ledger:c2", event: { kind: "core_failed" }, eventAt: hoursAgo(1) }, { mode: "shadow", deps });
-    expect((await bad.ghlAccount.findUnique({ where: { id: "A1" } })).billingState).toBe("payment_failed");
+    expect((await bad.ghlAccount.findUnique({ where: { id: "A1" } })).billingState).toBeNull();
   });
   it("an expired subscription on a null account seeds payment_failed with the subscription_expired reason", async () => {
     const db = makeFake([member({ billingState: null })]);

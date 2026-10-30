@@ -38,9 +38,10 @@ export type BalanceReading = { status: "ok"; value: string; estimated: boolean }
 export type SubscriptionInfo = { name: string | null; trialEndsAt: Date | null };
 
 export type Context = {
-  /** The event's own time (replay) or the current time (shadow/live): what "now < coreCoveredUntil" is evaluated against. */
+  /** The event's own time (replay) or the current time (shadow/live): what "now < exemptUntil" is evaluated against. */
   now: Date;
-  coveredUntil: Date | null;
+  /** GhlAccount.exemptUntil: while now < exemptUntil the engine takes no adverse automatic action (decisions are recorded as "exempt"). */
+  exemptUntil: Date | null;
   walletBalance?: BalanceReading;
   subscription?: SubscriptionInfo | null;
   /**

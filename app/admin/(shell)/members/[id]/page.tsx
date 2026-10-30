@@ -61,7 +61,7 @@ export default async function MemberPage({ params, searchParams }: { params: { i
           <Fact label="Pause reason">{m.pauseReason?.replace("_", " ") ?? "—"}</Fact>
           <Fact label="Legacy unreconciled">{m.legacyUnreconciled ? "yes" : "no"}</Fact>
           <Fact label="Strikes (live, pre-cutover)">{m.strikes}</Fact>
-          <Fact label="Covered until">{m.coveredUntil ? fmtDenverDate(m.coveredUntil) : "—"}{m.coverageNote && <span className="block text-xs text-white/40">{m.coverageNote}</span>}</Fact>
+          <Fact label="Exempt until">{m.exemptUntil ? fmtDenverDate(m.exemptUntil) : "—"}{m.exemptReason && <span className="block text-xs text-white/40">{m.exemptReason}</span>}</Fact>
           <Fact label="Expected next charge (≈ estimate)">
             {m.expectedNextCharge ? `≈ ${fmtDenverDate(m.expectedNextCharge)}` : "—"}
             {m.coverageOverrideApplies && <span className="ml-2 rounded border border-gold/50 px-1.5 text-xs text-gold">override applies</span>}
@@ -74,7 +74,7 @@ export default async function MemberPage({ params, searchParams }: { params: { i
           <Fact label="30-day recharges">{fmtMoney(m.recharges30)}</Fact>
         </div>
         <p className="mt-4 text-xs text-white/40">
-          Expected next charge is latest succeeded core payment + 1 month — an estimate, not a billing date. Covered until is the manual override and ends at 00:00 Denver on that date.
+          Expected next charge is latest succeeded core payment + 1 month — an estimate, not a billing date. Exempt until is the manual override and ends at 00:00 Denver on that date.
         </p>
       </Card>
 

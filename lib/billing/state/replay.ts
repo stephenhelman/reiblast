@@ -17,7 +17,7 @@ export function seedSnapshot(rows: { classification: BillingClass; occurredAt: D
 
 export function replayAccount(
   events: ReplayEvent[],
-  opts: { seed: Snapshot; coveredUntil: Date | null; balanceFor: (e: ReplayEvent) => BalanceReading | undefined; subscriptionFor: (e: ReplayEvent) => SubscriptionInfo | null | undefined },
+  opts: { seed: Snapshot; exemptUntil: Date | null; balanceFor: (e: ReplayEvent) => BalanceReading | undefined; subscriptionFor: (e: ReplayEvent) => SubscriptionInfo | null | undefined },
 ): { steps: ReplayStep[]; final: Snapshot & { trialOffer: string | null; trialEndsAt: Date | null } } {
   const ordered = [...events].sort((a, b) => a.eventAt.getTime() - b.eventAt.getTime() || (a.trigger < b.trigger ? -1 : 1));
   let cur: Snapshot = opts.seed;
@@ -27,7 +27,7 @@ export function replayAccount(
   for (const ev of ordered) {
     const balance = needsBalance(cur, ev.event) ? opts.balanceFor(ev) : undefined;
     const subscription = needsSubscription(cur, ev.event) ? opts.subscriptionFor(ev) : undefined;
-    const decision = decide(cur, ev.event, { now: ev.eventAt, coveredUntil: opts.coveredUntil, walletBalance: balance, subscription });
+    const decision = decide(cur, ev.event, { now: ev.eventAt, exemptUntil: opts.exemptUntil, walletBalance: balance, subscription });
     steps.push({ trigger: ev.trigger, eventKind: ev.event.kind, eventAt: ev.eventAt, from: cur, decision, balance });
     if (decision.trialChanged) {
       trialOffer = decision.trialOffer;
@@ -38,9 +38,9 @@ export function replayAccount(
   return { steps, final: { ...cur, trialOffer, trialEndsAt } };
 }
 
-export type Milestone = { at: Date; kind: "strike" | "paused" | "resumed" | "payment_failed" | "recovered" | "trial" | "covered_ignored"; detail: string };
+export type Milestone = { at: Date; kind: "strike" | "paused" | "resumed" | "payment_failed" | "recovered" | "trial" | "exempt_ignored"; detail: string };
 
-/** Human-readable timeline: strikes, pauses (with reason), resumes, payment_failed episodes (enter/leave), covered-ignored failures. */
+/** Human-readable timeline: strikes, pauses (with reason), resumes, payment_failed episodes (enter/leave), exempt (ignored) failures. */
 export function milestones(steps: ReplayStep[]): Milestone[] {
   const out: Milestone[] = [];
   for (const s of steps) {
@@ -48,7 +48,7 @@ export function milestones(steps: ReplayStep[]): Milestone[] {
     const from = s.from.state;
     const to = d.nextState;
     if (s.eventKind === "wallet_recharge_failed" && d.warningCount > s.from.strikes) out.push({ at: s.eventAt, kind: "strike", detail: `strike ${d.warningCount}${s.balance?.status === "ok" && s.balance.estimated ? " (estimated balance)" : ""}` });
-    if (d.reason.startsWith("covered, ignored")) out.push({ at: s.eventAt, kind: "covered_ignored", detail: d.reason });
+    if (d.reason.startsWith("exempt")) out.push({ at: s.eventAt, kind: "exempt_ignored", detail: d.reason });
     if (to === "paused" && from !== "paused") out.push({ at: s.eventAt, kind: "paused", detail: `paused (${d.pauseReason ?? "?"})` });
     else if (from === "paused" && to !== "paused") out.push({ at: s.eventAt, kind: "resumed", detail: `resumed → ${to}` });
     else if (to === "payment_failed" && from !== "payment_failed") out.push({ at: s.eventAt, kind: "payment_failed", detail: "payment_failed begins" });

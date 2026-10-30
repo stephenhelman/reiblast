@@ -990,10 +990,14 @@ model GhlAccount {
   // Display name seen in agency wallet rows for this location (wallet_usage keeps it fresh). Null = not yet known.
   locationName          String?
   locationNameUpdatedAt DateTime?
-  // Manual core-subscription coverage override (scripts/billing/set-coverage.ts). While now < coreCoveredUntil the account is
-  // covered even if no core payment is on record; dunning must not treat a missing/failed core payment as delinquency.
+  // DEPRECATED (unused): replaced by exemptUntil / exemptReason (values copied by migration 20261030130000). Drop in a later cleanup migration.
   coreCoveredUntil      DateTime?
   coreCoverageNote      String?
+  // Special-account exemption (scripts/billing/set-exemption.ts). While now < exemptUntil (EXCLUSIVE; 00:00 America/Denver on the date) the
+  // engine takes NO adverse automatic action: no strikes, no payment_failed, no pause, no churn, no expired-sub move. Every decision is still
+  // recorded with a reason starting "exempt". Payments still cure; manual stage commands still apply. Null = not exempt.
+  exemptUntil           DateTime?
+  exemptReason          String?
   dunningDecisions      DunningDecision[]
   onboardingStage       String?
   // Forward-only onboarding progress (lib/billing/stages.ts ONBOARDING_PROGRESS_STAGES). Distinct from onboardingStage

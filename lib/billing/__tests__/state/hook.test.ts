@@ -26,7 +26,7 @@ function fakeDb(opts: { dunningExplodes?: boolean } = {}) {
     },
     ghlAccount: {
       findFirst: async ({ where }: any) => (where.contactId === "cccccccccccccccccc01" ? { id: "A1" } : null),
-      findUnique: async () => ({ id: "A1", accountType: "member", contactId: "cccccccccccccccccc01", locationId: "LOC1", coreCoveredUntil: null, trialOffer: null, trialEndsAt: null, userId: "U1", billingState: "active", warningCount: 0, pauseReason: null }),
+      findUnique: async () => ({ id: "A1", accountType: "member", contactId: "cccccccccccccccccc01", locationId: "LOC1", exemptUntil: null, trialOffer: null, trialEndsAt: null, userId: "U1", billingState: "active", warningCount: 0, pauseReason: null }),
     },
     billingLedgerEntry: {
       findUnique: async ({ where, select }: any) => {

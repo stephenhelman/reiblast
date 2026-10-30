@@ -18,8 +18,8 @@ export type MemberFacts = {
   strikes: number;
   trialOffer: string | null;
   trialEndsAt: Date | null;
-  coveredUntil: Date | null;
-  coverageNote: string | null;
+  exemptUntil: Date | null;
+  exemptReason: string | null;
   balance: BalanceSnap | null;
   lastCorePaymentAt: Date | null;
   usage30: Money;
@@ -29,7 +29,7 @@ export type MemberFacts = {
 export type MemberRow = MemberFacts & {
   /** ≈ last succeeded core payment + 1 month. An ESTIMATE, not a billing date. */
   expectedNextCharge: Date | null;
-  /** coveredUntil is set and later than the estimate (or there is no estimate): the manual override is what applies. */
+  /** exemptUntil is set and later than the estimate (or there is no estimate): the manual override is what applies. */
   coverageOverrideApplies: boolean;
 };
 
@@ -42,7 +42,7 @@ export function addOneMonth(d: Date): Date {
 
 export function withEstimates(f: MemberFacts): MemberRow {
   const expectedNextCharge = f.lastCorePaymentAt ? addOneMonth(f.lastCorePaymentAt) : null;
-  const coverageOverrideApplies = !!f.coveredUntil && (!expectedNextCharge || f.coveredUntil.getTime() > expectedNextCharge.getTime());
+  const coverageOverrideApplies = !!f.exemptUntil && (!expectedNextCharge || f.exemptUntil.getTime() > expectedNextCharge.getTime());
   return { ...f, expectedNextCharge, coverageOverrideApplies };
 }
 
@@ -63,7 +63,7 @@ export function sortMembers(rows: MemberRow[], sort: MemberSort, dir: "asc" | "d
       case "state": return String(a.billingState ?? "~").localeCompare(String(b.billingState ?? "~"));
       case "balance": return cmp(a.balance?.balance ?? "-999999999", b.balance?.balance ?? "-999999999");
       case "lastCore": return time(a.lastCorePaymentAt) - time(b.lastCorePaymentAt);
-      case "covered": return time(a.coveredUntil) - time(b.coveredUntil);
+      case "covered": return time(a.exemptUntil) - time(b.exemptUntil);
       case "usage30": return cmp(a.usage30, b.usage30);
       case "recharges30": return cmp(a.recharges30, b.recharges30);
       case "strikes": return a.strikes - b.strikes;
@@ -109,7 +109,7 @@ export async function loadMembers(db: PrismaClient, hq: string | null | undefine
   const [accounts, snaps, ledger, usage] = await Promise.all([
     db.ghlAccount.findMany({
       where: { accountType: "member" },
-      select: { id: true, locationId: true, locationName: true, billingState: true, pauseReason: true, legacyUnreconciled: true, trialOffer: true, trialEndsAt: true, coreCoveredUntil: true, coreCoverageNote: true, user: { select: { businessName: true, warningCount: true } } },
+      select: { id: true, locationId: true, locationName: true, billingState: true, pauseReason: true, legacyUnreconciled: true, trialOffer: true, trialEndsAt: true, exemptUntil: true, exemptReason: true, user: { select: { businessName: true, warningCount: true } } },
     }),
     latestSnapshots(db),
     fetchLedgerRows(db, {}),
@@ -131,8 +131,8 @@ export async function loadMembers(db: PrismaClient, hq: string | null | undefine
       strikes: a.user?.warningCount ?? 0,
       trialOffer: a.trialOffer,
       trialEndsAt: a.trialEndsAt,
-      coveredUntil: a.coreCoveredUntil,
-      coverageNote: a.coreCoverageNote,
+      exemptUntil: a.exemptUntil,
+      exemptReason: a.exemptReason,
       balance: a.locationId ? (snaps.get(a.locationId) ?? null) : null,
       lastCorePaymentAt: lastCore.get(a.id) ?? null,
       usage30: (a.locationId ? usage.get(a.locationId)?.cost : undefined) ?? ZERO,

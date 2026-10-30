@@ -15,8 +15,8 @@ import type { JobFn } from "./types";
  * ledger event, so this job feeds them to the dunning engine.
  *
  *  - FIRST RUN (GhlSubscriptionState empty): seeds the state table WITHOUT emitting any event, and reports what it would have emitted.
- *  - Later runs: emit on a status change — canceled/expired → churned (deferred while covered; a cancel during the trial churns at once),
- *    newly trialing → trial. Every run also (a) settles coverage-deferred churns whose coverage has ended, (b) flags trials that ended
+ *  - Later runs: emit on a status change — canceled → churned, expired → payment_failed (subscription_expired); both suppressed while the account is exempt,
+ *    newly trialing → trial. Every run also (a) settles churns/expiries recorded as "exempt" whose exemption has ended, (b) flags trials that ended
  *    (+2 days) with no succeeded core payment since the trial began, and (c) backstops invoice expiry (GHL has no "expired" status).
  *  - A canceled/expired subscription NEVER churns an account whose contact still holds another live subscription (trialing/active/unpaid).
  *  - `unpaid`, `paused`, `incomplete_expired` never emit (unpaid is shown on Health).
@@ -47,7 +47,7 @@ export const runSubSweep: JobFn = async (ctx) => {
 
   /** Run (or preview) one engine event for the account owning `contactId`. */
   async function fire(contactId: string, event: DunningEvent, trigger: string, info?: SubscriptionInfo | null) {
-    const account = await db.ghlAccount.findFirst({ where: { contactId, accountType: "member" }, select: { id: true, coreCoveredUntil: true, activeClientSince: true, onboardingProgress: true } });
+    const account = await db.ghlAccount.findFirst({ where: { contactId, accountType: "member" }, select: { id: true, exemptUntil: true, activeClientSince: true, onboardingProgress: true } });
     if (!account) return bump("noAccount");
     if (emitting) {
       const r = await applyDunning(db, { ghlAccountId: account.id, trigger, event, eventAt: ctx.now, subscriptionInfo: info }, { mode, deps: { now: () => ctx.now } }); // the job's clock, so coverage is judged at the sweep's own time
@@ -62,7 +62,7 @@ export const runSubSweep: JobFn = async (ctx) => {
     // preview: decide against the current shadow projection, write nothing
     const proj = await loadProjection(db, account.id, "shadow");
     if (!proj) return bump("noAccount");
-    const d = decide(proj, event, { now: ctx.now, coveredUntil: account.coreCoveredUntil, subscription: info ?? undefined, routing: { handedOff: !!account.activeClientSince, onboardingProgress: account.onboardingProgress } });
+    const d = decide(proj, event, { now: ctx.now, exemptUntil: account.exemptUntil, subscription: info ?? undefined, routing: { handedOff: !!account.activeClientSince, onboardingProgress: account.onboardingProgress } });
     bump(`wouldEmit:${event.kind}`);
     bump(d.noop ? "wouldNoop" : "wouldChange");
     bump(`wouldTransition:${proj.state ?? "unseeded"}→${d.nextState ?? "—"}${d.noop ? " (no change)" : ""} on ${event.kind}`);
@@ -106,8 +106,7 @@ export const runSubSweep: JobFn = async (ctx) => {
           note(`${last4(s.contactId)} ${ch.event.kind}: skipped — the contact still has another live subscription`);
           continue;
         }
-        const covered = isChurn ? (await db.ghlAccount.findFirst({ where: { contactId: s.contactId, accountType: "member" }, select: { coreCoveredUntil: true } }))?.coreCoveredUntil ?? null : null;
-        const trigger = ch.suffix === "trialing" ? `sub:${s.id}:trialing` : churnTrigger(s.id, ch.suffix, { duringTrial: ch.event.kind === "subscription_canceled" && ch.event.duringTrial, coveredUntil: covered, now: ctx.now });
+        const trigger = ch.suffix === "trialing" ? `sub:${s.id}:trialing` : churnTrigger(s.id, ch.suffix);
         await fire(s.contactId, ch.event, trigger, { name: s.name, trialEndsAt: s.trialEndsAt ? new Date(s.trialEndsAt) : null });
       }
     }
@@ -132,13 +131,13 @@ export const runSubSweep: JobFn = async (ctx) => {
     st.phase = "settle";
   }
 
-  // ── phase 3: coverage-deferred churn whose coverage has ended ─────────────
+  // ── phase 3: churn/expiry recorded as exempt, whose exemption has ended ─────────────
   if (st.phase === "settle") {
     for (const s of st.seen.filter((x) => x.status === "canceled" || x.status === "expired")) {
       if (ctx.shouldYield()) return yieldNow();
       if (hasOtherLiveSubscription(st.seen, s)) continue;
-      const acct = await db.ghlAccount.findFirst({ where: { contactId: s.contactId, accountType: "member", coreCoveredUntil: { not: null, lte: ctx.now } }, select: { id: true } });
-      if (!acct) continue; // never covered, or still covered — handled when the status changed / deferred until coverage ends
+      const acct = await db.ghlAccount.findFirst({ where: { contactId: s.contactId, accountType: "member", exemptUntil: { not: null, lte: ctx.now } }, select: { id: true } });
+      if (!acct) continue; // never exempt, or still exempt — handled when the status changed / decided once the exemption ends
       bump("settleCandidates");
       const expired = s.status === "expired";
       await fire(s.contactId, expired ? { kind: "subscription_expired" } : { kind: "subscription_canceled", duringTrial: false }, `sub:${s.id}:${expired ? "expired" : "canceled"}`);
@@ -159,7 +158,7 @@ export const runSubSweep: JobFn = async (ctx) => {
       const paid = await db.billingLedgerEntry.findFirst({ where: { ghlAccountId: acct.id, classification: "core_subscription", status: "succeeded", occurredAt: { gte: since } }, select: { ghlTransactionId: true } });
       if (paid) { bump("trialConverted"); continue; }
       bump("trialUnconverted");
-      await fire(s.contactId, { kind: "trial_ended_unconverted" }, trialEndedTrigger(s.id));
+      await fire(s.contactId, { kind: "trial_ended_unconverted" }, trialEndedTrigger(s.id)); // applyDunning suffixes the trigger while the account is exempt
     }
     st.phase = "invoices";
   }

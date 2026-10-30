@@ -41,16 +41,16 @@ export default async function MembersPage({ searchParams }: { searchParams: Reco
 
       <Section
         title="Members"
-        note={`Covered until = manual override (GhlAccount.coreCoveredUntil + note); it ends at 00:00 Denver on that date. Expected next charge (≈) is an estimate: latest succeeded core payment + 1 month. Strikes are User.warningCount, live (pre-cutover). Usage and recharges are the last 30 days.`}
+        note={`Exempt until = manual override (GhlAccount.exemptUntil + note); it ends at 00:00 Denver on that date. Expected next charge (≈) is an estimate: latest succeeded core payment + 1 month. Strikes are User.warningCount, live (pre-cutover). Usage and recharges are the last 30 days.`}
       >
         <Table
-          head={[h("label", "Member"), h("state", "State"), "Pause reason", "Legacy", h("covered", "Covered until"), "Expected next charge (≈)", h("strikes", "Strikes (live, pre-cutover)"), h("balance", "Balance"), h("lastCore", "Last core payment"), h("usage30", "30-day usage"), h("recharges30", "30-day recharges")]}
+          head={[h("label", "Member"), h("state", "State"), "Pause reason", "Legacy", h("covered", "Exempt until"), "Expected next charge (≈)", h("strikes", "Strikes (live, pre-cutover)"), h("balance", "Balance"), h("lastCore", "Last core payment"), h("usage30", "30-day usage"), h("recharges30", "30-day recharges")]}
           rows={rows.map((r) => [
             <Link key="a" href={adminHref(base, `/members/${r.accountId}`)} className="hover:text-gold"><AccountLabel locationId={r.locationId} locationName={r.locationName} businessName={r.businessName} /></Link>,
             r.billingState ?? <span key="s" className="text-gold">not seeded</span>,
             r.pauseReason?.replace("_", " ") ?? "—",
             r.legacyUnreconciled ? <span key="l" className="text-gold">yes</span> : "—",
-            r.coveredUntil ? <span key="c">{fmtDenverDate(r.coveredUntil)}{r.coverageNote && <span className="block text-xs text-white/40">{r.coverageNote}</span>}</span> : "—",
+            r.exemptUntil ? <span key="c">{fmtDenverDate(r.exemptUntil)}{r.exemptReason && <span className="block text-xs text-white/40">{r.exemptReason}</span>}</span> : "—",
             r.expectedNextCharge ? <span key="e">≈ {fmtDenverDate(r.expectedNextCharge)}{r.coverageOverrideApplies && <span className="ml-2 rounded border border-gold/50 px-1.5 text-xs text-gold">override applies</span>}</span> : r.coverageOverrideApplies ? <span key="e" className="rounded border border-gold/50 px-1.5 text-xs text-gold">override applies</span> : "—",
             r.strikes || "—",
             r.balance ? <Money key="b" neg={Number(r.balance.balance ?? 0) < 0}>{r.balance.status === "ok" ? fmtMoney(r.balance.balance) : r.balance.status}</Money> : "—",

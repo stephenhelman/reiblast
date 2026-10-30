@@ -6,7 +6,7 @@ const snap = (o: Partial<Snapshot> = {}): Snapshot => ({ state: "active", strike
 const NOW = new Date("2026-09-27T12:00:00.000Z");
 const neg: BalanceReading = { status: "ok", value: "-5.000000", estimated: false };
 const pos: BalanceReading = { status: "ok", value: "12.500000", estimated: false };
-const ctx = (o: Partial<Context> = {}): Context => ({ now: NOW, coveredUntil: null, ...o });
+const ctx = (o: Partial<Context> = {}): Context => ({ now: NOW, exemptUntil: null, ...o });
 const wFail: DunningEvent = { kind: "wallet_recharge_failed", wallet: "auto" };
 const wOk: DunningEvent = { kind: "wallet_recharge_succeeded", wallet: "auto" };
 const stages = (d: ReturnType<typeof decide>) => d.intents.map((i) => i.stage);
@@ -116,10 +116,11 @@ describe("wallet recharge SUCCESS (resume guard: only cures when the post-rechar
       expect(d.reason).toMatch(/recharge succeeded, balance (still negative|unknown)/);
     }
   });
-  it("paused (non_payment) with an open core failure resumes into payment_failed once the balance is >= 0", () => {
+  it("paused (non_payment) with an UNPAID core failure is not lifted by a wallet recharge (strikes still reset)", () => {
     const d = decide(snap({ state: "paused", strikes: 3, pauseReason: "non_payment", coreFailureOpen: true }), wOk, ctx({ walletBalance: pos }));
-    expect(d).toMatchObject({ nextState: "payment_failed", pauseReason: null, warningCount: 0 });
-    expect(effects(d)).toEqual(["saas_resume"]);
+    expect(d).toMatchObject({ nextState: "paused", pauseReason: "non_payment", warningCount: 0, coreFailureOpen: true });
+    expect(d.sideEffects).toEqual([]);
+    expect(d.reason).toMatch(/core failure still open/);
   });
   it("paused for any OTHER reason is never resumed by a wallet recharge, even with a positive balance (strikes still reset)", () => {
     for (const pauseReason of ["expired_invoice", "manual_killswitch", "voluntary"] as PauseReason[]) {
@@ -137,27 +138,43 @@ describe("wallet recharge SUCCESS (resume guard: only cures when the post-rechar
 
 describe("core subscription FAILURE", () => {
   const cFail: DunningEvent = { kind: "core_failed" };
-  it("→ payment_failed with NO strike, and the core failure is now open", () => {
+  it("→ PAUSED (non_payment) at once with saas_pause, NO strike, and the core failure is now open", () => {
     const d = decide(snap(), cFail, ctx());
-    expect(d).toMatchObject({ nextState: "payment_failed", warningCount: 0, coreFailureOpen: true });
-    expect(stages(d)).toEqual(["payment_failed"]);
+    expect(d).toMatchObject({ nextState: "paused", pauseReason: "non_payment", warningCount: 0, coreFailureOpen: true, noop: false });
+    expect(effects(d)).toEqual(["saas_pause"]);
+    expect(stages(d)).toEqual(["paused"]);
+  });
+  it("never lands in payment_failed (that is for wallet strikes 1–2 and an expired subscription only)", () => {
+    for (const state of ["active", "trial", "payment_failed", null] as (BillingState | null)[]) expect(decide(snap({ state }), cFail, ctx()).nextState).toBe("paused");
+  });
+  it("from payment_failed (wallet strikes 1–2): pauses, keeps the strikes", () => {
+    expect(decide(snap({ state: "payment_failed", strikes: 2 }), cFail, ctx())).toMatchObject({ nextState: "paused", pauseReason: "non_payment", warningCount: 2 });
+  });
+  it("from payment_failed / subscription_expired: pauses and drops the expired reason", () => {
+    const d = decide(snap({ state: "payment_failed", pauseReason: "subscription_expired", coreFailureOpen: true }), cFail, ctx());
+    expect(d).toMatchObject({ nextState: "paused", pauseReason: "non_payment" });
+  });
+  it("for an onboarding member the intent is Onboarding \"Paused\"", () => {
+    const d = decide(snap(), cFail, ctx({ routing: { handedOff: false, onboardingProgress: "KYC Complete" } }));
+    expect(d.intents.map((i) => `${i.pipeline}:${i.stage}`)).toEqual(["onboarding:paused"]);
+    expect(effects(d)).toEqual(["saas_pause"]);
   });
   it("repeated core failures never add strikes", () => {
     let s = snap();
     for (let i = 0; i < 5; i++) { const d = decide(s, cFail, ctx()); s = { ...s, state: d.nextState, strikes: d.warningCount, coreFailureOpen: d.coreFailureOpen }; }
-    expect(s).toMatchObject({ state: "payment_failed", strikes: 0, coreFailureOpen: true });
+    expect(s).toMatchObject({ state: "paused", strikes: 0, coreFailureOpen: true });
   });
-  it("trial → payment_failed too", () => expect(decide(snap({ state: "trial" }), cFail, ctx()).nextState).toBe("payment_failed"));
-  it("while covered (now < coreCoveredUntil): recorded as 'covered, ignored', nothing changes", () => {
-    const d = decide(snap(), cFail, ctx({ coveredUntil: new Date("2026-11-21T07:00:00Z") }));
+  it("trial → paused too", () => expect(decide(snap({ state: "trial" }), cFail, ctx()).nextState).toBe("paused"));
+  it("while exempt (now < exemptUntil): recorded as 'exempt', nothing changes", () => {
+    const d = decide(snap(), cFail, ctx({ exemptUntil: new Date("2026-11-21T07:00:00Z") }));
     expect(d.noop).toBe(true);
     expect(d).toMatchObject({ nextState: "active", coreFailureOpen: false });
-    expect(d.reason).toMatch(/covered, ignored/);
+    expect(d.reason).toMatch(/^exempt/);
   });
-  it("coverage is evaluated at ctx.now: it protects until the end, not after", () => {
+  it("the exemption is evaluated at ctx.now: it protects until the end, not after", () => {
     const until = new Date("2026-11-21T07:00:00Z");
-    expect(decide(snap(), cFail, ctx({ now: new Date("2026-11-21T06:59:59Z"), coveredUntil: until })).noop).toBe(true);
-    expect(decide(snap(), cFail, ctx({ now: new Date("2026-11-21T07:00:00Z"), coveredUntil: until })).nextState).toBe("payment_failed"); // exclusive end
+    expect(decide(snap(), cFail, ctx({ now: new Date("2026-11-21T06:59:59Z"), exemptUntil: until })).noop).toBe(true);
+    expect(decide(snap(), cFail, ctx({ now: new Date("2026-11-21T07:00:00Z"), exemptUntil: until })).nextState).toBe("paused"); // exclusive end
   });
   it("an already-paused account just records the open failure", () => {
     const d = decide(snap({ state: "paused", pauseReason: "non_payment", strikes: 3 }), cFail, ctx());
@@ -178,10 +195,10 @@ describe("expired invoice", () => {
     expect(decide(snap({ state: "payment_failed", strikes: 2 }), inv, ctx())).toMatchObject({ nextState: "paused", warningCount: 2 });
     expect(decide(snap({ state: "trial" }), inv, ctx()).nextState).toBe("paused");
   });
-  it("coverage protects it too", () => {
-    const d = decide(snap(), inv, ctx({ coveredUntil: new Date("2026-11-21T07:00:00Z") }));
+  it("an exemption protects it too", () => {
+    const d = decide(snap(), inv, ctx({ exemptUntil: new Date("2026-11-21T07:00:00Z") }));
     expect(d.noop).toBe(true);
-    expect(d.reason).toMatch(/covered, ignored/);
+    expect(d.reason).toMatch(/^exempt/);
   });
   it("already paused: no change to the pause, no second side effect", () => {
     const d = decide(snap({ state: "paused", pauseReason: "manual_killswitch" }), inv, ctx());
@@ -368,40 +385,40 @@ describe("subscription events (nightly sweep)", () => {
     expect(d.noop).toBe(true);
     expect(d.reason).toBe("already churned");
   });
-  it("covered (now < coreCoveredUntil): churn is DEFERRED and recorded, nothing else", () => {
-    for (const [e, re] of [[canceled(false), /churn deferred: covered until 2026-11-21/], [{ kind: "subscription_expired" } as DunningEvent, /expiry deferred: covered until 2026-11-21/]] as const) {
-      const d = decide(snap(), e, ctx({ coveredUntil: cov }));
+  it("exempt (now < exemptUntil): churn / expiry is suppressed and recorded as exempt, nothing else", () => {
+    for (const [e, re] of [[canceled(false), /^exempt until 2026-11-21.*churn/], [{ kind: "subscription_expired" } as DunningEvent, /^exempt until 2026-11-21.*expired/]] as const) {
+      const d = decide(snap(), e, ctx({ exemptUntil: cov }));
       expect(d.noop).toBe(true);
       expect(d.nextState).toBe("active");
       expect(d.sideEffects).toEqual([]);
       expect(d.reason).toMatch(re);
     }
   });
-  it("…once coverage ends the same event churns", () => {
-    expect(decide(snap(), canceled(false), ctx({ now: new Date("2026-11-21T07:00:00Z"), coveredUntil: cov })).nextState).toBe("churned");
+  it("…once the exemption ends the same event churns", () => {
+    expect(decide(snap(), canceled(false), ctx({ now: new Date("2026-11-21T07:00:00Z"), exemptUntil: cov })).nextState).toBe("churned");
   });
-  it("a cancel DURING the trial churns immediately, even while covered", () => {
-    const d = decide(snap({ state: "trial" }), canceled(true), ctx({ coveredUntil: cov }));
-    expect(d).toMatchObject({ nextState: "churned" });
-    expect(effects(d)).toEqual(["saas_pause"]);
-    expect(d.reason).toMatch(/trial canceled before it ended/);
-  });
-  it("an expired subscription does not get the trial exemption", () => {
-    expect(decide(snap({ state: "trial" }), { kind: "subscription_expired" }, ctx({ coveredUntil: cov })).noop).toBe(true);
+  it("a cancel DURING the trial is suppressed too while exempt, and churns once it ends", () => {
+    const d = decide(snap({ state: "trial" }), canceled(true), ctx({ exemptUntil: cov }));
+    expect(d.noop).toBe(true);
+    expect(d.reason).toMatch(/^exempt/);
+    const after = decide(snap({ state: "trial" }), canceled(true), ctx({ exemptUntil: cov, now: cov }));
+    expect(after).toMatchObject({ nextState: "churned" });
+    expect(effects(after)).toEqual(["saas_pause"]);
+    expect(after.reason).toMatch(/trial canceled before it ended/);
   });
 
   const ended: DunningEvent = { kind: "trial_ended_unconverted" };
-  it("trial ended unconverted → payment_failed with the core failure open (no strike, no pause)", () => {
+  it("trial ended unconverted is a core failure → paused (non_payment) with saas_pause, core failure open, no strike", () => {
     const d = decide(snap({ state: "trial" }), ended, ctx());
-    expect(d).toMatchObject({ nextState: "payment_failed", coreFailureOpen: true, warningCount: 0 });
-    expect(d.sideEffects).toEqual([]);
-    expect(stages(d)).toEqual(["payment_failed"]);
+    expect(d).toMatchObject({ nextState: "paused", pauseReason: "non_payment", coreFailureOpen: true, warningCount: 0 });
+    expect(effects(d)).toEqual(["saas_pause"]);
+    expect(stages(d)).toEqual(["paused"]);
   });
-  it("…but only from trial, and never while covered", () => {
+  it("…but only from trial, and never while exempt", () => {
     for (const state of ["active", "payment_failed", "paused", "inactive", "churned", null] as (BillingState | null)[]) expect(decide(snap({ state }), ended, ctx()).noop).toBe(true);
-    const d = decide(snap({ state: "trial" }), ended, ctx({ coveredUntil: cov }));
+    const d = decide(snap({ state: "trial" }), ended, ctx({ exemptUntil: cov }));
     expect(d.noop).toBe(true);
-    expect(d.reason).toMatch(/covered, ignored/);
+    expect(d.reason).toMatch(/^exempt/);
   });
 
   const sub = { name: "7 Day Trial", trialEndsAt: new Date("2026-10-05T00:00:00Z") };
@@ -448,5 +465,72 @@ describe("purity", () => {
     const b = decide(s, wFail, c);
     expect(a).toEqual(b);
     expect(s).toEqual(snap({ state: "payment_failed", strikes: 2 }));
+  });
+});
+
+describe("core failure pauses immediately; a paid core payment cures (rule change)", () => {
+  const cFail: DunningEvent = { kind: "core_failed" };
+  const cOk: DunningEvent = { kind: "core_succeeded" };
+  const onboarding = (p: string | null) => ({ routing: { handedOff: false, onboardingProgress: p } });
+  it("handed-off member: Clients Paused intent + saas_pause; cure → Clients Active Member + saas_resume", () => {
+    const p = decide(snap(), cFail, ctx());
+    expect(p.intents.map((i) => `${i.pipeline}:${i.stage}`)).toEqual(["active_client:paused"]);
+    const c = decide(snap({ state: "paused", pauseReason: "non_payment", coreFailureOpen: true }), cOk, ctx());
+    expect(c).toMatchObject({ nextState: "active", pauseReason: null, coreFailureOpen: false });
+    expect(c.intents.map((i) => `${i.pipeline}:${i.stage}`)).toEqual(["active_client:active"]);
+    expect(effects(c)).toEqual(["saas_resume"]);
+  });
+  it("onboarding member: core failure → Onboarding Paused; cure → back to the onboarding progress stage", () => {
+    const c = decide(snap({ state: "paused", pauseReason: "non_payment", coreFailureOpen: true }), cOk, ctx(onboarding("KYC Complete")));
+    expect(c.nextState).toBe("active");
+    expect(c.intents.map((i) => `${i.pipeline}:${i.stage}`)).toEqual(["onboarding:kyc_complete"]);
+    expect(effects(c)).toEqual(["saas_resume"]);
+  });
+  it("a paid core payment also cures an expired subscription (payment_failed / subscription_expired → active)", () => {
+    const c = decide(snap({ state: "payment_failed", pauseReason: "subscription_expired", coreFailureOpen: true }), cOk, ctx());
+    expect(c).toMatchObject({ nextState: "active", pauseReason: null, coreFailureOpen: false });
+  });
+  it("payment_failed is only produced by wallet strikes 1–2 and an expired subscription", () => {
+    expect(decide(snap(), wFail, ctx({ walletBalance: neg })).nextState).toBe("payment_failed");
+    expect(decide(snap(), { kind: "subscription_expired" }, ctx())).toMatchObject({ nextState: "payment_failed", pauseReason: "subscription_expired" });
+    for (const e of [cFail, { kind: "invoice_expired" } as DunningEvent, { kind: "trial_ended_unconverted" } as DunningEvent]) {
+      expect(decide(snap({ state: e.kind === "trial_ended_unconverted" ? "trial" : "active" }), e, ctx()).nextState).toBe("paused");
+    }
+  });
+});
+
+describe("EXEMPTION (now < exemptUntil): no adverse automatic action, still recorded, payments cure, commands apply", () => {
+  const until = new Date("2026-12-31T07:00:00Z");
+  const ex = (o: Partial<Context> = {}) => ctx({ exemptUntil: until, ...o });
+  const adverse: [string, Snapshot, DunningEvent, Partial<Context>][] = [
+    ["wallet failure (negative balance)", snap(), wFail, { walletBalance: neg }],
+    ["3rd wallet strike", snap({ state: "payment_failed", strikes: 2 }), wFail, { walletBalance: neg }],
+    ["core failure", snap(), { kind: "core_failed" }, {}],
+    ["invoice expired", snap(), { kind: "invoice_expired" }, {}],
+    ["trial ended unconverted", snap({ state: "trial" }), { kind: "trial_ended_unconverted" }, {}],
+    ["subscription expired (expired-sub move)", snap(), { kind: "subscription_expired" }, {}],
+    ["subscription canceled (churn)", snap(), { kind: "subscription_canceled", duringTrial: false }, {}],
+    ["subscription canceled during trial", snap({ state: "trial" }), { kind: "subscription_canceled", duringTrial: true }, {}],
+  ];
+  for (const [name, s, e, c] of adverse) {
+    it(`${name}: recorded with reason "exempt…", state/strikes/pause untouched, no side effect, no intent`, () => {
+      const d = decide(s, e, ex(c));
+      expect(d.reason).toMatch(/^exempt/);
+      expect(d).toMatchObject({ noop: true, nextState: s.state, warningCount: s.strikes, pauseReason: s.pauseReason, coreFailureOpen: s.coreFailureOpen, sideEffects: [], intents: [] });
+    });
+    it(`${name}: acts normally once the exemption ends (exclusive end)`, () => {
+      expect(decide(s, e, ex({ ...c, now: until })).noop).toBe(false);
+    });
+  }
+  it("payments still cure while exempt", () => {
+    const c = decide(snap({ state: "paused", pauseReason: "non_payment", coreFailureOpen: true }), { kind: "core_succeeded" }, ex());
+    expect(c).toMatchObject({ nextState: "active" });
+    expect(effects(c)).toEqual(["saas_resume"]);
+    expect(decide(snap({ state: "payment_failed", strikes: 1 }), wOk, ex({ walletBalance: pos })).nextState).toBe("active");
+  });
+  it("manual stage commands still apply while exempt", () => {
+    expect(decide(snap(), { kind: "command", stage: "paused" }, ex())).toMatchObject({ nextState: "paused", pauseReason: "manual_killswitch" });
+    expect(decide(snap(), { kind: "command", stage: "churned" }, ex()).nextState).toBe("churned");
+    expect(decide(snap(), { kind: "command", stage: "expired_sub" }, ex()).nextState).toBe("payment_failed");
   });
 });

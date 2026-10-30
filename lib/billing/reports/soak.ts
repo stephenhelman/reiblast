@@ -50,7 +50,7 @@ export const COVERAGE_CHECKS: Check[] = [
   { key: "uncounted", label: "uncounted wallet failure (balance >= 0)", test: (d) => d.eventKind === "wallet_recharge_failed" && /is not negative, no strike/.test(d.reason) },
   { key: "strike2", label: "2nd strike", test: (d) => strikeUp(d) && d.toStrikes === 2 },
   { key: "strike3", label: "3rd strike -> paused", test: (d) => strikeUp(d) && d.toStrikes >= 3 && d.toState === "paused" },
-  { key: "core_failed", label: "core subscription failure", test: (d) => d.eventKind === "core_failed" && !/covered/i.test(d.reason) },
+  { key: "core_failed", label: "core subscription failure", test: (d) => d.eventKind === "core_failed" && !/^exempt/.test(d.reason) },
   { key: "expired", label: "expired invoice -> paused", test: (d) => d.eventKind === "invoice_expired" && d.toState === "paused" && d.fromState !== "paused" },
   { key: "cure_pf", label: "cure from payment_failed", test: (d) => d.fromState === "payment_failed" && d.toState === "active" && d.eventKind !== "command" },
   { key: "cure_paused", label: "cure from paused", test: (d) => d.fromState === "paused" && (d.toState === "active" || d.toState === "payment_failed") && d.eventKind !== "command" && sideEffectTypes(d).includes("saas_resume") },

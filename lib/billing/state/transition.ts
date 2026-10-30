@@ -13,8 +13,11 @@ import { STRIKE_LIMIT, TRIAL_OFFER_RE, type BillingState, type Context, type Dec
  *  - Wallet recharge success → strikes = 0. It only CURES the account (payment_failed → active, or paused/non_payment → resume) when the
  *    post-recharge balance is ≥ 0; otherwise strikes reset but the state stays ("recharge succeeded, balance still negative").
  *    An unpaid core failure keeps payment_failed regardless.
- *  - Core failure → payment_failed, NO strike — unless covered (now < coreCoveredUntil). Expired invoice → paused/expired_invoice
- *    (same coverage protection). Core success → active from trial / payment_failed / paused(expired_invoice|non_payment).
+ *  - Core failure → paused (non_payment) at once with saas_pause, NO strike (payment_failed is only for wallet strikes 1–2 and an expired
+ *    subscription). Expired invoice → paused/expired_invoice. Core success (incl. a paid GHL invoice) → active from trial / payment_failed /
+ *    paused(expired_invoice|non_payment) and resumes.
+ *  - EXEMPTION (now < exemptUntil): no adverse automatic action at all — no strike, no payment_failed, no pause, no churn, no expired-sub move.
+ *    The decision is still recorded, with a reason starting "exempt". Payments still cure; manual commands still apply.
  *  - trial_auth success → trial, only from null/trial. inactive & churned: payments change nothing ("state excludes action").
  *  - saas_pause is part of the decision that pauses: the 3rd strike, an expired invoice, a manual move to Paused, and the deliberate
  *    inactive/churned commands / sweep-driven churn. (Still executed only in live mode.) There is no 15-minute debounce any more;
@@ -22,8 +25,8 @@ import { STRIKE_LIMIT, TRIAL_OFFER_RE, type BillingState, type Context, type Dec
  *  - Intent routing (routeIntents): a handed-off member (activeClientSince) gets Clients-pipeline intents; a member still in onboarding gets
  *    onboarding intents instead — payment_failed / paused, and on a cure (payment_failed|paused → active) a return to the stage matching
  *    onboardingProgress (never forward, never a side stage). Nothing else is sent for them.
- *  - Subscription events (nightly sweep): canceled/expired → churned (deferred while covered, except a cancel during the trial);
- *    trial ended unconverted → payment_failed (core failure open); newly trialing → trial.
+ *  - Subscription events (nightly sweep): canceled → churned; expired → payment_failed (subscription_expired); trial ended unconverted →
+ *    a core failure (paused, non_payment); newly trialing → trial. All adverse ones are suppressed while exempt.
  *  - Commands (manual stage moves) apply from any state; a command whose stage already matches is a confirmation that
  *    re-asserts its side effect idempotently.
  */
@@ -56,7 +59,9 @@ function moveTo(s: Snapshot, d: Decision, to: BillingState): Decision {
   return { ...d, nextState: to, intents: changed ? [...d.intents, intent(to, d)] : d.intents };
 }
 
-const covered = (ctx: Context): boolean => !!ctx.coveredUntil && ctx.now.getTime() < ctx.coveredUntil.getTime();
+const exempt = (ctx: Context): boolean => !!ctx.exemptUntil && ctx.now.getTime() < ctx.exemptUntil.getTime();
+/** The recorded reason for an adverse event swallowed by an exemption. Always starts with "exempt". */
+const exemptReason = (ctx: Context, what: string): string => `exempt until ${(ctx.exemptUntil as Date).toISOString().slice(0, 10)}: ${what}; no automatic action`;
 const isNoopResult = (s: Snapshot, d: Decision): boolean =>
   d.nextState === s.state && d.pauseReason === s.pauseReason && d.warningCount === s.strikes && d.coreFailureOpen === s.coreFailureOpen && !d.trialChanged && d.sideEffects.length === 0 && d.intents.length === 0;
 /** subscription_expired is a payment_failed-only reason: leaving payment_failed (cure, pause, churn…) drops it. */
@@ -117,6 +122,7 @@ function decideCore(s: Snapshot, e: DunningEvent, ctx: Context): Decision {
 
   switch (e.kind) {
     case "wallet_recharge_failed": {
+      if (exempt(ctx)) return noop(s, exemptReason(ctx, `failed ${e.wallet} recharge, no strike counted`));
       if (st === "paused") return noop(s, `already paused (${s.pauseReason ?? "no reason recorded"}); no strike`);
       const b = ctx.walletBalance;
       if (!b || b.status !== "ok") return noop(s, `balance unknown${b && b.status === "unknown" ? ` (${b.why})` : ""}; strike not counted`);
@@ -144,8 +150,10 @@ function decideCore(s: Snapshot, e: DunningEvent, ctx: Context): Decision {
         if (s.pauseReason === "non_payment") {
           if (!cured) return finish(s, { ...cleanBase(s), warningCount: 0, reason: notCured("stays paused (non_payment)") });
           // The account was paused for wallet strikes; a recharge that clears the balance cures it. An open core failure keeps payment_failed.
+          // An unpaid core failure is what keeps (or put) the account in this pause: a wallet recharge alone does not lift it.
+          if (s.coreFailureOpen) return finish(s, { ...cleanBase(s), warningCount: 0, reason: "wallet recharge succeeded: strikes reset; unpaid core failure still open → stays paused (non_payment)" });
           const d: Decision = { ...cleanBase(s), warningCount: 0, pauseReason: null, sideEffects: [{ type: "saas_resume" }], reason: `wallet recharge succeeded: strikes reset; balance ${b && b.status === "ok" ? b.value : ""}${est} is not negative; paused (non_payment) → resume` };
-          return finish(s, moveTo(s, { ...d, reason: s.coreFailureOpen ? `${d.reason}; core failure still open → payment_failed` : d.reason }, s.coreFailureOpen ? "payment_failed" : "active"));
+          return finish(s, moveTo(s, d, "active"));
         }
         return finish(s, { ...cleanBase(s), warningCount: 0, reason: `wallet recharge succeeded: strikes reset; paused (${s.pauseReason ?? "no reason recorded"}) is not resumed by payments` });
       }
@@ -159,10 +167,10 @@ function decideCore(s: Snapshot, e: DunningEvent, ctx: Context): Decision {
     }
 
     case "core_failed": {
-      if (covered(ctx)) return noop(s, "covered, ignored (core failure while now < coreCoveredUntil)");
+      if (exempt(ctx)) return noop(s, exemptReason(ctx, "core subscription failed"));
       if (st === "paused") return finish(s, { ...cleanBase(s), coreFailureOpen: true, reason: `core failure recorded; already paused (${s.pauseReason ?? "no reason recorded"})` });
-      const d: Decision = { ...cleanBase(s), coreFailureOpen: true, reason: "core subscription failed (no strike) → payment_failed" };
-      return finish(s, moveTo(s, d, "payment_failed"));
+      const d: Decision = { ...cleanBase(s), coreFailureOpen: true, pauseReason: "non_payment", sideEffects: [{ type: "saas_pause" }], reason: "core subscription failed (no strike) → paused (non_payment), pause location" };
+      return finish(s, moveTo(s, d, "paused"));
     }
 
     case "core_succeeded": {
@@ -188,7 +196,7 @@ function decideCore(s: Snapshot, e: DunningEvent, ctx: Context): Decision {
       return trialDecision(s, ctx, "subscription trialing");
 
     case "invoice_expired": {
-      if (covered(ctx)) return noop(s, "covered, ignored (expired invoice while now < coreCoveredUntil)");
+      if (exempt(ctx)) return noop(s, exemptReason(ctx, "invoice expired"));
       if (st === "paused") return finish(s, { ...cleanBase(s), coreFailureOpen: true, reason: `expired invoice recorded; already paused (${s.pauseReason ?? "no reason recorded"})` });
       const d: Decision = { ...cleanBase(s), coreFailureOpen: true, pauseReason: "expired_invoice", sideEffects: [{ type: "saas_pause" }], reason: "invoice expired → paused (expired_invoice), pause location" };
       return finish(s, moveTo(s, d, "paused"));
@@ -220,11 +228,11 @@ function decidePauseConfirmed(s: Snapshot): Decision {
   return noop(s, "pause_confirmed ignored: the pause is part of the paused decision (no confirmation step)");
 }
 
-/** canceled / expired subscription → churned. Deferred while covered — except a cancel DURING the trial, which churns immediately. */
+/** canceled subscription → churned. Suppressed while exempt (a cancel during the trial is no exception). */
 function decideSubscriptionEnd(s: Snapshot, e: Extract<DunningEvent, { kind: "subscription_canceled" }>, ctx: Context): Decision {
   if (s.state === "churned") return noop(s, "already churned");
   const duringTrial = e.duringTrial;
-  if (!duringTrial && covered(ctx)) return noop(s, `churn deferred: covered until ${(ctx.coveredUntil as Date).toISOString().slice(0, 10)} (subscription canceled)`);
+  if (exempt(ctx)) return noop(s, exemptReason(ctx, duringTrial ? "trial canceled, churn" : "subscription canceled, churn"));
   const what = duringTrial ? "trial canceled before it ended" : "subscription canceled";
   const d: Decision = { ...cleanBase(s), pauseReason: null, coreFailureOpen: false, sideEffects: [{ type: "saas_pause" }], reason: `${what} → churned, pause location, billing stopped` };
   return finish(s, moveTo(s, d, "churned"));
@@ -233,11 +241,11 @@ function decideSubscriptionEnd(s: Snapshot, e: Extract<DunningEvent, { kind: "su
 /**
  * An EXPIRED subscription (GHL failed to charge/invoice, the member did not leave) is a billing failure, not a departure: → payment_failed
  * with reason subscription_expired and a core failure open (so only a core payment cures it), shown as the Clients "Expired Sub" stage.
- * Deferred while covered, like any core failure. Only a canceled subscription churns.
+ * Suppressed while exempt. Only a canceled subscription churns.
  */
 function decideSubscriptionExpired(s: Snapshot, ctx: Context): Decision {
   if (s.state === "churned" || s.state === "inactive") return noop(s, `state excludes action (${s.state})`);
-  if (covered(ctx)) return noop(s, `expiry deferred: covered until ${(ctx.coveredUntil as Date).toISOString().slice(0, 10)} (subscription expired)`);
+  if (exempt(ctx)) return noop(s, exemptReason(ctx, "subscription expired"));
   if (s.state === "paused") return finish(s, { ...cleanBase(s), coreFailureOpen: true, reason: `subscription expired recorded; already paused (${s.pauseReason ?? "no reason recorded"})` });
   if (s.state === "payment_failed" && s.pauseReason === "subscription_expired") return noop(s, "subscription expired: already payment_failed (subscription_expired)");
   return finish(s, expiredSubDecision(s, "subscription expired → payment_failed (subscription_expired), not churned"));
@@ -249,12 +257,12 @@ function expiredSubDecision(s: Snapshot, reason: string): Decision {
   return { ...d, intents: [intent(EXPIRED_SUB_KEY, d)] };
 }
 
-/** A trial ended (+2 days) with no paid core subscription: a core failure (payment_failed), unless covered. Only from trial. */
+/** A trial ended (+2 days) with no paid core subscription: a core failure (paused, non_payment), unless exempt. Only from trial. */
 function decideTrialEnded(s: Snapshot, ctx: Context): Decision {
   if (s.state !== "trial") return noop(s, `trial ended: account is not in trial (state ${s.state ?? "unseeded"})`);
-  if (covered(ctx)) return noop(s, "covered, ignored (trial ended unconverted while now < coreCoveredUntil)");
-  const d: Decision = { ...cleanBase(s), coreFailureOpen: true, reason: "trial ended without a paid core subscription → payment_failed (core failure open)" };
-  return finish(s, moveTo(s, d, "payment_failed"));
+  if (exempt(ctx)) return noop(s, exemptReason(ctx, "trial ended without a paid core subscription"));
+  const d: Decision = { ...cleanBase(s), coreFailureOpen: true, pauseReason: "non_payment", sideEffects: [{ type: "saas_pause" }], reason: "trial ended without a paid core subscription → paused (non_payment), pause location" };
+  return finish(s, moveTo(s, d, "paused"));
 }
 
 function decideCommand(s: Snapshot, stage: BillingState | typeof EXPIRED_SUB_KEY): Decision {
