@@ -185,6 +185,18 @@ routes deployed and inert.
 **9. After.** Remove the old routes **2 weeks after the last account goes live**, along with the `Transaction` dedupe path; keep `User.status`
 mirroring until the tools app reads `GhlAccount`, then drop the mirror and the `User.warningCount` writes.
 
+## After cutover (backlog)
+
+- **Discord restore on resume (currently manual).** `saas_pause` revokes Discord by deleting the member's `DiscordLink` and telling the bot to remove the role; `saas_resume`
+  restores nothing, so a resumed member re-links through the Discord verify flow. Proposal: (1) add a bot **`POST /grant`** (same auth header, body `{ discordUserId }`,
+  always HTTP 200 with `{ result, reason }`, idempotent: adds the REIblast role if the member is in the guild) to the bot contract; (2) on engine pause, keep the Discord id
+  in a **"paused link"** (e.g. a `DiscordLink.pausedAt` marker or a separate table keyed by `ghlAccountId`) instead of deleting the link outright, while still revoking the role;
+  (3) make `saas_resume` call `/grant` through an outbox like the revoke (same backoff ladder, idempotent, superseded if the member re-links), then clear the paused link; a
+  member who is removed or churned keeps today's delete. Until then the manual re-verify is the path.
+- **Drop `coreCoveredUntil` / `coreCoverageNote`** (unused since the exemption migration) in a cleanup migration.
+- **Review `trial_unresolved_review` events** after the first weeks of live running: each one is a trial the engine got no failure/expiry signal for.
+- Remove the old routes two weeks after the last account goes live (§3 step 9).
+
 ## 4. Rollback
 At any point: set `DUNNING_MODE=shadow` (or empty `DUNNING_LIVE_ACCOUNTS`) — the engine stops persisting and acting immediately; then
 re-enable the old workflows and disable the new ones. Effects already executed (a pause, a stage move) are not undone automatically:

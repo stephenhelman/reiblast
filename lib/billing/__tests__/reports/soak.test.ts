@@ -26,7 +26,7 @@ describe("coverage checklist", () => {
     dec({ eventKind: "wallet_recharge_succeeded", fromState: "paused", toState: "active", sideEffects: [{ type: "saas_resume" }] }),
     dec({ eventKind: "wallet_recharge_succeeded", fromState: "payment_failed", toState: "payment_failed", reason: "recharge succeeded, balance still negative (-1.2) — stays payment_failed" }),
     dec({ eventKind: "core_succeeded", fromState: "trial", toState: "active" }),
-    dec({ eventKind: "trial_ended_unconverted", fromState: "trial", toState: "payment_failed" }),
+    dec({ eventKind: "trial_ended_unconverted", fromState: "trial", toState: "trial", reason: "trial ended; awaiting payment-failure or expiry signal" }),
     dec({ eventKind: "subscription_canceled", toState: "churned" }),
     dec({ eventKind: "command", toState: "paused" }),
     dec({ eventKind: "wallet_recharge_failed", intents: [{ pipeline: "onboarding", stage: "payment_failed" }] }),

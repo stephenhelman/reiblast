@@ -196,7 +196,7 @@ describe("sub_sweep job", () => {
     expect(e).toMatchObject({ trigger: "sub:S5a:expired", toState: "payment_failed", pauseReason: "subscription_expired", coreFailureOpen: true });
   });
 
-  it("TRIAL EXPIRY: > trial end + 2 days with no paid core since the trial began → paused (non_payment, core failure open); a converted trial is left alone; runs once", async () => {
+  it("TRIAL ENDED (+2 days, no paid core since the trial began) is RECORD-ONLY: a decision, no transition, no side effect, no intent; a converted trial is left alone; runs once", async () => {
     const db = makeFake(accounts(), ledger());
     setSubs(baseSubs());
     await run(db); // seed
@@ -204,23 +204,85 @@ describe("sub_sweep job", () => {
     expect((r.summary as any)).toMatchObject({ trialUnconverted: 1, trialConverted: 1 });
     const d = db.decisions.filter((x: any) => x.eventKind === "trial_ended_unconverted");
     expect(d).toHaveLength(1);
-    expect(d[0]).toMatchObject({ trigger: "sub:S3:trial_ended", ghlAccountId: "A3", fromState: "trial", toState: "paused", pauseReason: "non_payment", coreFailureOpen: true, toStrikes: 0 });
-    expect(db.decisions.find((x: any) => x.ghlAccountId === "A3").sideEffects).toEqual([{ type: "saas_pause" }]);
+    expect(d[0]).toMatchObject({ trigger: "sub:S3:trial_ended", ghlAccountId: "A3", fromState: "trial", toState: "trial", reason: "trial ended; awaiting payment-failure or expiry signal", sideEffects: [], intents: [], toStrikes: 0 });
+    expect(db.intents.filter((i: any) => i.ghlAccountId === "A3")).toEqual([]);
     await run(db);
     expect(db.decisions.filter((x: any) => x.eventKind === "trial_ended_unconverted")).toHaveLength(1); // idempotent
   });
-  it("trial expiry is suppressed while exempt, and decided for real once the exemption ends", async () => {
+  it("a trial ended while exempt is recorded under the exempt trigger and again (record-only) once the exemption ends", async () => {
     const acc = accounts();
     acc[2].exemptUntil = D("2026-12-01T00:00:00Z");
     const db = makeFake(acc, ledger());
     setSubs(baseSubs());
     await run(db);
     await run(db);
-    expect(db.decisions.find((x: any) => x.ghlAccountId === "A3")).toMatchObject({ toState: "trial" });
-    expect(db.decisions.find((x: any) => x.ghlAccountId === "A3").reason).toMatch(/^exempt/);
-    expect(db.decisions.find((x: any) => x.ghlAccountId === "A3").trigger).toBe("sub:S3:trial_ended:exempt:2026-12-01");
+    expect(db.decisions.find((x: any) => x.ghlAccountId === "A3")).toMatchObject({ toState: "trial", trigger: "sub:S3:trial_ended:exempt:2026-12-01" });
     await run(db, { now: D("2026-12-02T00:00:00Z") });
-    expect(db.decisions.filter((x: any) => x.ghlAccountId === "A3").map((x: any) => x.toState)).toEqual(["trial", "paused"]);
+    expect(db.decisions.filter((x: any) => x.ghlAccountId === "A3").map((x: any) => x.toState)).toEqual(["trial", "trial"]);
+  });
+
+  describe("SAFETY NET: trial_unresolved_review", () => {
+    const reviews = (db: any) => db.events.filter((e: any) => e.source === "trial_unresolved_review");
+    it("a trial that ended > 3 days ago with no core failure / subscription_expired is flagged ONCE per subscription, with no state change", async () => {
+      const db = makeFake(accounts(), ledger());
+      setSubs(baseSubs());
+      await run(db); // seed
+      const r = await run(db);
+      expect(reviews(db)).toHaveLength(1);
+      expect(reviews(db)[0]).toMatchObject({ source: "trial_unresolved_review", externalId: "S3", processedAt: null });
+      expect(reviews(db)[0].payload).toMatchObject({ ghlAccountId: "A3", subscriptionId: "S3" });
+      expect((r.summary as any).trialUnresolvedFlagged).toBe(1);
+      expect(db.decisions.filter((x: any) => x.ghlAccountId === "A3").every((x: any) => x.toState === "trial" && x.sideEffects.length === 0)).toBe(true);
+      expect(db.intents.filter((i: any) => i.ghlAccountId === "A3")).toEqual([]);
+      await run(db, { now: D("2026-09-30T00:00:00Z") });
+      expect(reviews(db)).toHaveLength(1); // never twice
+    });
+    it("not flagged within 3 days of the trial's end (but the record-only decision is still written)", async () => {
+      const db = makeFake(accounts(), ledger());
+      setSubs(baseSubs().map((x) => (x.subscriptionId === "S3" ? { ...x, trialEnd: "2026-09-26T00:00:00Z" } : x))); // ended 2.5 days before NOW
+      await run(db);
+      await run(db);
+      expect(db.decisions.some((x: any) => x.eventKind === "trial_ended_unconverted")).toBe(true);
+      expect(reviews(db)).toHaveLength(0);
+    });
+    it("not flagged when a core failure was recorded since the trial ended (decision or failed ledger row)", async () => {
+      const a = makeFake(accounts(), ledger());
+      setSubs(baseSubs());
+      await run(a);
+      a.decisions.push({ id: "dx", ghlAccountId: "A3", mode: "shadow", trigger: "ledger:cf", eventKind: "core_failed", eventAt: D("2026-09-22T00:00:00Z"), createdAt: D("2026-09-22T00:00:00Z"), toState: "paused", sideEffects: [] });
+      await run(a);
+      expect(reviews(a)).toHaveLength(0);
+      const b = makeFake(accounts(), [...ledger(), { ghlTransactionId: "f3", ghlAccountId: "A3", classification: "core_subscription", status: "failed", occurredAt: D("2026-09-22T00:00:00Z"), subscriptionId: "S3" }]);
+      setSubs(baseSubs());
+      await run(b);
+      await run(b);
+      expect(reviews(b)).toHaveLength(0);
+    });
+    it("not flagged when a subscription_expired was recorded since; a failure from BEFORE the trial ended does not count", async () => {
+      const a = makeFake(accounts(), ledger());
+      setSubs(baseSubs());
+      await run(a);
+      a.decisions.push({ id: "dy", ghlAccountId: "A3", mode: "shadow", trigger: "sub:S3:expired", eventKind: "subscription_expired", eventAt: D("2026-09-23T00:00:00Z"), createdAt: D("2026-09-23T00:00:00Z"), toState: "payment_failed", sideEffects: [] });
+      await run(a);
+      expect(reviews(a)).toHaveLength(0);
+      const b = makeFake(accounts(), ledger());
+      await run(b);
+      b.decisions.push({ id: "dz", ghlAccountId: "A3", mode: "shadow", trigger: "ledger:old", eventKind: "core_failed", eventAt: D("2026-09-10T00:00:00Z"), createdAt: D("2026-09-10T00:00:00Z"), toState: "paused", sideEffects: [] });
+      await run(b);
+      expect(reviews(b)).toHaveLength(1);
+    });
+    it("a dry-run reports it but writes nothing", async () => {
+      const db = makeFake(accounts(), ledger());
+      setSubs(baseSubs());
+      await run(db);
+      const r = await run(db, { apply: false });
+      expect((r.summary as any).wouldFlagTrialUnresolved).toBe(1);
+      expect(reviews(db)).toHaveLength(0);
+    });
+    it("review rows are never replayed (not a replayable source)", async () => {
+      const { REPLAYABLE_SOURCES } = await import("../../processPaymentEvent");
+      expect(REPLAYABLE_SOURCES as readonly string[]).not.toContain("trial_unresolved_review");
+    });
   });
 
   it("a NEW trialing subscription → trial with the offer and end date; a repeat run does nothing", async () => {

@@ -158,8 +158,12 @@ upserts `GhlSubscriptionState`, and feeds the engine:
   each run re-checks and decides it for real once the exemption has ended (trigger `sub:<id>:canceled`). A cancel during the trial is suppressed too.
 - **Other live subscription:** a canceled/expired subscription never churns an account whose contact still holds another live one
   (trialing / active / unpaid) — common after a processor migration (old subscription canceled, new one live).
-- **Trial expiry:** a trial ended more than 2 days ago (subscription not canceled/expired) with **no succeeded `core_subscription` since
-  the trial began** → a core failure: **paused (`non_payment`)** with `saas_pause`, core failure open (an exemption protects it). Once per subscription.
+- **Trial ended:** a trial ended more than 2 days ago (subscription not canceled/expired) with **no succeeded `core_subscription` since
+  the trial began** is **recorded only** (decision *"trial ended; awaiting payment-failure or expiry signal"*, no transition, side effect or intent), once per
+  subscription: the failed core payment (→ paused) or the expired subscription (→ `payment_failed` / `subscription_expired`) that follows does the acting.
+  **Safety net:** if it is still unresolved more than **3 days** after the trial ended — no `core_failed` / `subscription_expired` decision and no failed
+  `core_subscription` ledger row since — the sweep writes a `GhlEvent` of source **`trial_unresolved_review`** (externalId = subscriptionId, once per subscription,
+  `processedAt` null for a human to look at, never replayed). No state change. A dry-run reports `wouldFlagTrialUnresolved` and writes nothing.
 - **Invoice backstop:** lists invoices and emits `invoice_expired` for unpaid, past-due (or void) core recovery invoices, because GHL has
   no native "expired" invoice status.
 - Resumable like the other jobs (the cursor carries what it read). Events run through the same write path as everything else, so in

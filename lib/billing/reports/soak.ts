@@ -56,7 +56,7 @@ export const COVERAGE_CHECKS: Check[] = [
   { key: "cure_paused", label: "cure from paused", test: (d) => d.fromState === "paused" && (d.toState === "active" || d.toState === "payment_failed") && d.eventKind !== "command" && sideEffectTypes(d).includes("saas_resume") },
   { key: "no_cure", label: "recharge succeeded, balance still negative (no cure)", test: (d) => d.eventKind === "wallet_recharge_succeeded" && REASON_NO_CURE.test(d.reason) },
   { key: "trial_conv", label: "trial converted", test: (d) => d.eventKind === "core_succeeded" && d.fromState === "trial" && d.toState === "active" },
-  { key: "trial_end", label: "trial ended unconverted", test: (d) => d.eventKind === "trial_ended_unconverted" && d.toState === "payment_failed" },
+  { key: "trial_end", label: "trial ended unconverted (recorded, no action)", test: (d) => d.eventKind === "trial_ended_unconverted" },
   { key: "churn", label: "subscription canceled -> churned", test: (d) => (d.eventKind === "subscription_canceled" || d.eventKind === "subscription_expired") && d.toState === "churned" && d.fromState !== "churned" },
   { key: "command", label: "manual stage command", test: (d) => d.eventKind === "command" },
   { key: "ob_failed", label: "onboarding member: payment failure", test: (d) => intentStages(d, "onboarding").includes("payment_failed") },

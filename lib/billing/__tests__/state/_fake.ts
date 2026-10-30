@@ -66,6 +66,7 @@ export function makeFake(accounts: FakeAccount[], ledger: Row[] = [], opts: { wr
         return row;
       },
       findUnique: async ({ where }: any) => events.find((e) => e.id === where.id) ?? null,
+      findFirst: async ({ where }: any) => events.find((e) => Object.entries(where).every(([k, v]) => e[k] === v)) ?? null,
       findMany: async ({ where, take, orderBy }: any) => {
         const f = events.filter((e) => matches(e, { ...where, id: undefined, receivedAt: undefined }) && (!where.id?.not || e.id !== where.id.not) && (!where.receivedAt?.gte || e.receivedAt >= where.receivedAt.gte));
         if (orderBy?.receivedAt === "desc") f.sort((a, b) => b.receivedAt - a.receivedAt || (a.id < b.id ? 1 : -1));
@@ -114,7 +115,7 @@ export function makeFake(accounts: FakeAccount[], ledger: Row[] = [], opts: { wr
         return decisions.find((d) => key(d) === `${w.trigger}|${w.ghlAccountId}|${w.mode}`) ?? null;
       },
       findFirst: async ({ where }: any) => {
-        const found = decisions.filter((d) => d.ghlAccountId === where.ghlAccountId && d.mode === where.mode);
+        const found = decisions.filter((d) => d.ghlAccountId === where.ghlAccountId && (where.mode === undefined || d.mode === where.mode) && (!where.eventKind?.in || where.eventKind.in.includes(d.eventKind)) && (!where.eventAt?.gte || d.eventAt >= where.eventAt.gte));
         found.sort((a, b) => b.eventAt - a.eventAt || b.createdAt - a.createdAt);
         return found[0] ?? null;
       },

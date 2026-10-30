@@ -408,17 +408,14 @@ describe("subscription events (nightly sweep)", () => {
   });
 
   const ended: DunningEvent = { kind: "trial_ended_unconverted" };
-  it("trial ended unconverted is a core failure → paused (non_payment) with saas_pause, core failure open, no strike", () => {
-    const d = decide(snap({ state: "trial" }), ended, ctx());
-    expect(d).toMatchObject({ nextState: "paused", pauseReason: "non_payment", coreFailureOpen: true, warningCount: 0 });
-    expect(effects(d)).toEqual(["saas_pause"]);
-    expect(stages(d)).toEqual(["paused"]);
-  });
-  it("…but only from trial, and never while exempt", () => {
-    for (const state of ["active", "payment_failed", "paused", "inactive", "churned", null] as (BillingState | null)[]) expect(decide(snap({ state }), ended, ctx()).noop).toBe(true);
-    const d = decide(snap({ state: "trial" }), ended, ctx({ exemptUntil: cov }));
-    expect(d.noop).toBe(true);
-    expect(d.reason).toMatch(/^exempt/);
+  it("trial ended unconverted is RECORD-ONLY: no transition, no side effect, no intent, from any state, exempt or not", () => {
+    for (const state of ["trial", "active", "payment_failed", "paused", "inactive", "churned", null] as (BillingState | null)[]) {
+      for (const c of [ctx(), ctx({ exemptUntil: cov }), ctx({ routing: { handedOff: false, onboardingProgress: "KYC Complete" } })]) {
+        const s = snap({ state, strikes: 1, coreFailureOpen: false });
+        const d = decide(s, ended, c);
+        expect(d).toMatchObject({ noop: true, nextState: state, warningCount: 1, pauseReason: null, coreFailureOpen: false, sideEffects: [], intents: [], reason: "trial ended; awaiting payment-failure or expiry signal" });
+      }
+    }
   });
 
   const sub = { name: "7 Day Trial", trialEndsAt: new Date("2026-10-05T00:00:00Z") };
@@ -493,9 +490,8 @@ describe("core failure pauses immediately; a paid core payment cures (rule chang
   it("payment_failed is only produced by wallet strikes 1–2 and an expired subscription", () => {
     expect(decide(snap(), wFail, ctx({ walletBalance: neg })).nextState).toBe("payment_failed");
     expect(decide(snap(), { kind: "subscription_expired" }, ctx())).toMatchObject({ nextState: "payment_failed", pauseReason: "subscription_expired" });
-    for (const e of [cFail, { kind: "invoice_expired" } as DunningEvent, { kind: "trial_ended_unconverted" } as DunningEvent]) {
-      expect(decide(snap({ state: e.kind === "trial_ended_unconverted" ? "trial" : "active" }), e, ctx()).nextState).toBe("paused");
-    }
+    for (const e of [cFail, { kind: "invoice_expired" } as DunningEvent]) expect(decide(snap(), e, ctx()).nextState).toBe("paused");
+    expect(decide(snap({ state: "trial" }), { kind: "trial_ended_unconverted" }, ctx()).nextState).toBe("trial"); // record-only
   });
 });
 
@@ -507,7 +503,6 @@ describe("EXEMPTION (now < exemptUntil): no adverse automatic action, still reco
     ["3rd wallet strike", snap({ state: "payment_failed", strikes: 2 }), wFail, { walletBalance: neg }],
     ["core failure", snap(), { kind: "core_failed" }, {}],
     ["invoice expired", snap(), { kind: "invoice_expired" }, {}],
-    ["trial ended unconverted", snap({ state: "trial" }), { kind: "trial_ended_unconverted" }, {}],
     ["subscription expired (expired-sub move)", snap(), { kind: "subscription_expired" }, {}],
     ["subscription canceled (churn)", snap(), { kind: "subscription_canceled", duringTrial: false }, {}],
     ["subscription canceled during trial", snap({ state: "trial" }), { kind: "subscription_canceled", duringTrial: true }, {}],

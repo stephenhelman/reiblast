@@ -26,7 +26,7 @@ import { STRIKE_LIMIT, TRIAL_OFFER_RE, type BillingState, type Context, type Dec
  *    onboarding intents instead — payment_failed / paused, and on a cure (payment_failed|paused → active) a return to the stage matching
  *    onboardingProgress (never forward, never a side stage). Nothing else is sent for them.
  *  - Subscription events (nightly sweep): canceled → churned; expired → payment_failed (subscription_expired); trial ended unconverted →
- *    a core failure (paused, non_payment); newly trialing → trial. All adverse ones are suppressed while exempt.
+ *    record-only (the failed core payment / expiry that follows decides); newly trialing → trial. The adverse ones are suppressed while exempt.
  *  - Commands (manual stage moves) apply from any state; a command whose stage already matches is a confirmation that
  *    re-asserts its side effect idempotently.
  */
@@ -114,7 +114,7 @@ function decideCore(s: Snapshot, e: DunningEvent, ctx: Context): Decision {
   if (e.kind === "pause_confirmed") return decidePauseConfirmed(s);
   if (e.kind === "subscription_expired") return decideSubscriptionExpired(s, ctx);
   if (e.kind === "subscription_canceled") return decideSubscriptionEnd(s, e, ctx);
-  if (e.kind === "trial_ended_unconverted") return decideTrialEnded(s, ctx);
+  if (e.kind === "trial_ended_unconverted") return decideTrialEnded(s);
   const st = s.state;
 
   // inactive (voluntary) and churned: never struck, never auto-resumed — payments are recorded and change nothing.
@@ -257,12 +257,13 @@ function expiredSubDecision(s: Snapshot, reason: string): Decision {
   return { ...d, intents: [intent(EXPIRED_SUB_KEY, d)] };
 }
 
-/** A trial ended (+2 days) with no paid core subscription: a core failure (paused, non_payment), unless exempt. Only from trial. */
-function decideTrialEnded(s: Snapshot, ctx: Context): Decision {
-  if (s.state !== "trial") return noop(s, `trial ended: account is not in trial (state ${s.state ?? "unseeded"})`);
-  if (exempt(ctx)) return noop(s, exemptReason(ctx, "trial ended without a paid core subscription"));
-  const d: Decision = { ...cleanBase(s), coreFailureOpen: true, pauseReason: "non_payment", sideEffects: [{ type: "saas_pause" }], reason: "trial ended without a paid core subscription → paused (non_payment), pause location" };
-  return finish(s, moveTo(s, d, "paused"));
+/**
+ * A trial ended (+2 days) with no paid core subscription: RECORD ONLY. A trial that does not convert always resolves into an existing signal — a
+ * failed core payment (→ paused, per the core-failure rule) or an expired subscription from sub_sweep (→ payment_failed / subscription_expired) —
+ * so this event itself changes nothing: no transition, no side effects, no intents. (sub_sweep's safety net flags a trial that stays unresolved.)
+ */
+function decideTrialEnded(s: Snapshot): Decision {
+  return noop(s, "trial ended; awaiting payment-failure or expiry signal");
 }
 
 function decideCommand(s: Snapshot, stage: BillingState | typeof EXPIRED_SUB_KEY): Decision {

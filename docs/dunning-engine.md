@@ -23,7 +23,7 @@ stage keys equal `BillingState` values).
 | `pause_confirmed` (legacy `paused_confirm` stage) | **removed as a step**: still parsed, but always a no-op ("no confirmation step"). Nothing depends on it |
 | sweep: subscription **canceled** | → churned + `saas_pause` (suppressed while exempt, a cancel during the trial included; decided for real by a later run once the exemption has ended); nothing if the contact has another live subscription |
 | sweep: subscription **expired** | → `payment_failed` with `pauseReason` **`subscription_expired`**, core failure open, no pause, Clients intent **`expired_sub`** ("Expired Sub"); onboarding members get Onboarding Payment Failed. Suppressed while exempt; paused/inactive/churned are not moved. A succeeded core payment cures it to active (reason cleared); a wallet recharge does not. Does not churn |
-| sweep: trial ended unconverted | a core failure: trial → **paused (`non_payment`)** + `saas_pause`, core failure open (suppressed while exempt) |
+| sweep: trial ended unconverted | **record-only** — decision reason *"trial ended; awaiting payment-failure or expiry signal"*, no transition, no side effect, no intent, any state, exempt or not. A trial that does not convert always resolves into an existing signal: a failed core payment (→ paused) or an expired subscription (→ `payment_failed` / `subscription_expired`). Safety net: see below |
 | sweep: subscription trialing | null/trial → trial with offer and end date |
 
 A failure is tracked by kind: wallet strikes (counter) and `coreFailureOpen` (flag). **`payment_failed` is used only for wallet strikes 1–2 and for `subscription_expired`;** a core subscription failure pauses at once. A wallet recharge never lifts a pause while a core failure is open (only a core payment does).
@@ -181,13 +181,13 @@ The 15-minute `paused_confirm` requirement is gone — see *Pausing* above. The 
 
 - A payment event never moves an **inactive** or **churned** account ("state excludes action").
 - A **manual_killswitch** pause (and a voluntary one) is never auto-resumed by a payment: core success and a recharge with balance ≥ 0 both leave it paused, with no `saas_resume`.
-- **trial_ended_unconverted** → paused (`non_payment`) with `saas_pause`, core failure open (only from trial; an exemption still protects).
+- **trial_ended_unconverted** takes no action (record-only, see the rule table). `sub_sweep` flags a trial that is still unresolved 3 days after it ended with a `trial_unresolved_review` GhlEvent (once per subscription; no state change; never replayed) — it fires when neither a core failure (a recorded `core_failed` decision or a failed `core_subscription` ledger row) nor a `subscription_expired` decision exists for the account since the trial ended.
 
 ## Soak-gap fixes
 
 - **Starting-state seeding in shadow** (`state/seedStart.ts`). Shadow never writes `GhlAccount` — except that a member whose `billingState` is **null** gets its starting
   state written (trial with `trialOffer`/`trialEndsAt`, active, or payment_failed) when `applyDunning` handles `trial_auth`, `subscription_trialing`, a core
-  success or `subscription_expired` (a core failure / unconverted trial now decides *paused*, which is a decision, not a starting state, so it seeds nothing), and when `sub_sweep` (phase "seed") finds a null-state member whose best live subscription is
+  success or `subscription_expired` (a core failure now decides *paused*, which is a decision, not a starting state, so it seeds nothing; an unconverted trial is record-only), and when `sub_sweep` (phase "seed") finds a null-state member whose best live subscription is
   trialing / active / unpaid. Conditional on `billingState IS NULL`, so a non-null state is never overwritten; no side effects, no intents. Paused / canceled /
   expired / incomplete_expired subscriptions are left unseeded by the sweep pass (the event path or the seed script decides those).
 - **Handoff catch-up** (`scripts/billing/handoff-catchup.ts`). Members who reached A2P Approved with a null state are the `client_handoff_review` events. After seeding,

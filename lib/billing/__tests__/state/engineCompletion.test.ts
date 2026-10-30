@@ -143,11 +143,11 @@ describe("confirmed rules (payments never move parked accounts; killswitch; tria
     const d = decide(snap({ state: "inactive", pauseReason: "voluntary" }), coreOk, ctx());
     expect(d.nextState).toBe("inactive");
   });
-  it("trial_ended_unconverted → paused (non_payment, core failure open, saas_pause); only from trial", () => {
+  it("trial_ended_unconverted is record-only (no pause, no intent, whichever pipeline)", () => {
     const d = decide(snap({ state: "trial" }), { kind: "trial_ended_unconverted" }, ctx({ routing: HANDED }));
-    expect(d).toMatchObject({ nextState: "paused", pauseReason: "non_payment", coreFailureOpen: true });
-    expect(pipes(d)).toEqual(["active_client:paused"]);
-    expect(pipes(decide(snap({ state: "trial" }), { kind: "trial_ended_unconverted" }, ctx({ routing: ONB("A2P Pending") })))).toEqual(["onboarding:paused"]);
+    expect(d).toMatchObject({ nextState: "trial", noop: true, sideEffects: [] });
+    expect(pipes(d)).toEqual([]);
+    expect(pipes(decide(snap({ state: "trial" }), { kind: "trial_ended_unconverted" }, ctx({ routing: ONB("A2P Pending") })))).toEqual([]);
     expect(decide(snap({ state: "active" }), { kind: "trial_ended_unconverted" }, ctx()).noop).toBe(true);
   });
 });

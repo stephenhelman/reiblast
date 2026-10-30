@@ -1,4 +1,4 @@
-import type { PrismaClient } from "@prisma/client";
+import type { Prisma, PrismaClient } from "@prisma/client";
 import { applyInvoice } from "../events/invoiceEvent";
 import { invoiceExpiry, listInvoicesPage } from "../invoices";
 import { listSubscriptionsPage, type SubRow } from "../subscriptions";
@@ -16,13 +16,17 @@ import type { JobFn } from "./types";
  *
  *  - FIRST RUN (GhlSubscriptionState empty): seeds the state table WITHOUT emitting any event, and reports what it would have emitted.
  *  - Later runs: emit on a status change — canceled → churned, expired → payment_failed (subscription_expired); both suppressed while the account is exempt,
- *    newly trialing → trial. Every run also (a) settles churns/expiries recorded as "exempt" whose exemption has ended, (b) flags trials that ended
- *    (+2 days) with no succeeded core payment since the trial began, and (c) backstops invoice expiry (GHL has no "expired" status).
+ *    newly trialing → trial. Every run also (a) settles churns/expiries recorded as "exempt" whose exemption has ended, (b) records trials that ended
+ *    (+2 days) with no succeeded core payment since the trial began (record-only; one that is still unresolved after 3 days gets a trial_unresolved_review event), and (c) backstops invoice expiry (GHL has no "expired" status).
  *  - A canceled/expired subscription NEVER churns an account whose contact still holds another live subscription (trialing/active/unpaid).
  *  - `unpaid`, `paused`, `incomplete_expired` never emit (unpaid is shown on Health).
  *  - Dry-run (no --apply) writes nothing at all and reports what it would emit.
  */
 const PAGE = 100;
+/** Days after trialEndsAt before a trial with no core failure / subscription_expired is flagged for review. */
+export const TRIAL_REVIEW_DAYS = 3;
+/** GhlEvent source of the review record (never replayed: not in REPLAYABLE_SOURCES). */
+export const TRIAL_REVIEW_SOURCE = "trial_unresolved_review";
 
 type Phase = "list" | "events" | "seed" | "settle" | "trial" | "invoices";
 /** Everything phase 1 read, so the later phases (and a dry-run / seed, which write no state) all work from one consistent listing. */
@@ -158,7 +162,26 @@ export const runSubSweep: JobFn = async (ctx) => {
       const paid = await db.billingLedgerEntry.findFirst({ where: { ghlAccountId: acct.id, classification: "core_subscription", status: "succeeded", occurredAt: { gte: since } }, select: { ghlTransactionId: true } });
       if (paid) { bump("trialConverted"); continue; }
       bump("trialUnconverted");
-      await fire(s.contactId, { kind: "trial_ended_unconverted" }, trialEndedTrigger(s.id)); // applyDunning suffixes the trigger while the account is exempt
+      await fire(s.contactId, { kind: "trial_ended_unconverted" }, trialEndedTrigger(s.id)); // record-only decision; applyDunning suffixes the trigger while the account is exempt
+      // Safety net: a trial that ended more than 3 days ago and has produced NEITHER a core failure NOR a subscription_expired since is flagged for
+      // review (once per subscription). No state change, no intent — the review record is a GhlEvent that a human looks at.
+      if (ctx.now.getTime() > (trialEndsAt as Date).getTime() + TRIAL_REVIEW_DAYS * 864e5) {
+        const resolved =
+          (await db.dunningDecision.findFirst({ where: { ghlAccountId: acct.id, eventKind: { in: ["core_failed", "subscription_expired"] }, eventAt: { gte: trialEndsAt as Date } }, select: { id: true } })) ||
+          (await db.billingLedgerEntry.findFirst({ where: { ghlAccountId: acct.id, classification: "core_subscription", status: "failed", occurredAt: { gte: trialEndsAt as Date } }, select: { ghlTransactionId: true } }));
+        if (!resolved) {
+          const flagged = await db.ghlEvent.findFirst({ where: { source: TRIAL_REVIEW_SOURCE, externalId: s.id }, select: { id: true } });
+          if (flagged) bump("trialReviewAlreadyFlagged");
+          else if (!emitting) bump("wouldFlagTrialUnresolved");
+          else {
+            await db.ghlEvent.create({
+              data: { source: TRIAL_REVIEW_SOURCE, externalId: s.id, payload: { ghlAccountId: acct.id, subscriptionId: s.id, trialEndsAt: s.trialEndsAt, reason: `trial ended more than ${TRIAL_REVIEW_DAYS} days ago; no core failure or subscription_expired recorded since` } as Prisma.InputJsonObject },
+            });
+            bump("trialUnresolvedFlagged");
+            note(`${last4(s.contactId)} trial unresolved >${TRIAL_REVIEW_DAYS}d: flagged for review (trial_unresolved_review)`);
+          }
+        }
+      }
     }
     st.phase = "invoices";
   }
