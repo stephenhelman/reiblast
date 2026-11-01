@@ -146,7 +146,7 @@ export async function buildExport(view: ExportView, db: PrismaClient, p: Params,
       } catch (e) {
         return fail(400, e instanceof Error ? e.message : "Cannot build that statement.");
       }
-      return { ok: true, filename: file(month), spec: spec(view, { month, status: st.closed ? "closed" : "open (to date)" }, STATEMENT_COLUMNS, ["label", "source", "detail"], fromArray(statementRows(st))) };
+      return { ok: true, filename: file(month), spec: { ...spec(view, { month, status: st.closed ? "closed" : "open (to date)" }, STATEMENT_COLUMNS, ["label", "source", "detail"], fromArray(statementRows(st))), disclaimer: null } };
     }
 
     case "margin": {
