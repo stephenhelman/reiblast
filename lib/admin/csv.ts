@@ -12,7 +12,7 @@ export type Row = Record<string, Cell>;
 
 const fmtDenverFull = (d: Date): string => d.toLocaleString("en-US", { timeZone: REPORTING_TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23", timeZoneName: "short" });
 
-export function metadataRows(o: { view: string; filters: Record<string, string>; now: Date; classifierVersion: number }): string[][] {
+export function metadataRows(o: { view: string; filters: Record<string, string>; now: Date; classifierVersion: number; /** Null omits the line (the statement states its own basis). Default: EXPORT_DISCLAIMER. */ disclaimer?: string | null }): string[][] {
   const filters = Object.entries(o.filters).map(([k, v]) => `${k}=${v}`).join("; ") || "(none)";
   return [
     ["REIblast admin export"],
@@ -22,7 +22,7 @@ export function metadataRows(o: { view: string; filters: Record<string, string>;
     ["Generated (UTC)", o.now.toISOString()],
     ["Classifier version", String(o.classifierVersion)],
     ["Reporting timezone", REPORTING_TZ],
-    [EXPORT_DISCLAIMER],
+    ...(o.disclaimer === null ? [] : [[o.disclaimer ?? EXPORT_DISCLAIMER]]),
     [],
   ];
 }
@@ -35,6 +35,8 @@ export type CsvSpec = {
   textColumns: string[];
   chunks: AsyncIterable<Row[]>;
   classifierVersion: number;
+  /** Overrides the metadata disclaimer line; null drops it. */
+  disclaimer?: string | null;
 };
 export type FinishInfo = { rowCount: number; partial: boolean };
 
@@ -68,7 +70,7 @@ export function csvStream(spec: CsvSpec, now: Date, onFinish: (i: FinishInfo) =>
       try {
         if (!started) {
           started = true;
-          controller.enqueue(enc.encode(`${Papa.unparse([...metadataRows({ view: spec.view, filters: spec.filters, now, classifierVersion: spec.classifierVersion }), spec.columns])}\r\n`));
+          controller.enqueue(enc.encode(`${Papa.unparse([...metadataRows({ view: spec.view, filters: spec.filters, now, classifierVersion: spec.classifierVersion, disclaimer: spec.disclaimer }), spec.columns])}\r\n`));
           return;
         }
         const n = await it.next();

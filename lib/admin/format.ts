@@ -1,5 +1,5 @@
 export const REPORTING_TZ = "America/Denver";
-export const FOOTER_NOTE = "Gross collected via GHL — processor fees, chargebacks and payouts not included. Reporting timezone: America/Denver.";
+export const FOOTER_NOTE = "Reporting timezone: America/Denver.";
 
 export function fmtDenver(d: Date | string | null | undefined): string {
   if (!d) return "—";

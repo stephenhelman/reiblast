@@ -72,7 +72,7 @@ export default async function PartnerStatementPage({ searchParams }: { searchPar
         <PageTitle sub="What REIblast owes Stephen: 50% of Kurv bank deposits less processor and platform costs. Starts 2026-10-01; no opening balance. Stephen's own costs are not on the statement.">Partner Statement</PageTitle>
         <div className="flex items-center gap-2 print:hidden">
           <ExportButton view="statement" params={{ month }} label="Export CSV" />
-          <PrintButton />
+          <PrintButton href={adminHref(base, `/statement/${month}/print`, { autoprint: 1 })} />
         </div>
       </div>
 

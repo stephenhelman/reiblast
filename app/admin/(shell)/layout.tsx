@@ -1,6 +1,7 @@
 import NavLinks from "@/components/admin/NavLinks";
 import { adminBase } from "@/lib/admin/cookie";
 import { requireOwnerOrRedirect } from "@/lib/admin/requireOwner";
+import { FOOTER_NOTE } from "@/lib/admin/format";
 import { logoutAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -22,6 +23,7 @@ export default async function ShellLayout({ children }: { children: React.ReactN
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
+      <footer className="border-t border-border-default px-6 py-4 text-center text-xs text-white/40 print:hidden">{FOOTER_NOTE}</footer>
     </>
   );
 }
