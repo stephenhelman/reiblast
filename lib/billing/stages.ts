@@ -35,7 +35,7 @@ export type OnboardingSideStage = (typeof ONBOARDING_SIDE_STAGES)[number];
 export const ONBOARDING_STAGE_NAMES: readonly string[] = [...ONBOARDING_PROGRESS_STAGES, ...ONBOARDING_SIDE_STAGES];
 
 /** Clients ("active_client") pipeline stage names. */
-export const CLIENTS_STAGES = ["Trial", "Active Member", "Payment Failed", "Paused", "Inactive", "Churned"] as const;
+export const CLIENTS_STAGES = ["Trial", "Active Member", "Payment Failed", "Expired Sub", "Paused", "Inactive", "Churned"] as const;
 export type ClientsStage = (typeof CLIENTS_STAGES)[number];
 
 /** Clients stage NAME → BillingState key (docs/ghl-server-contract.md: stage keys equal BillingState values). Exact-name matching only. */
@@ -43,10 +43,18 @@ export const CLIENTS_STAGE_NAME_TO_STATE: Record<ClientsStage, BillingState> = {
   Trial: "trial",
   "Active Member": "active",
   "Payment Failed": "payment_failed",
+  // Not a BillingState of its own: payment_failed with pauseReason subscription_expired (see EXPIRED_SUB_KEY).
+  "Expired Sub": "payment_failed",
   Paused: "paused",
   Inactive: "inactive",
   Churned: "churned",
 };
+
+/** Intent/command key for the Clients "Expired Sub" stage: payment_failed whose reason is subscription_expired. */
+export const EXPIRED_SUB_KEY = "expired_sub";
+export const EXPIRED_SUB_STAGE_NAME = "Expired Sub";
+/** Exact "Expired Sub" stage name or its lowercase key. */
+export const isExpiredSubStage = (stage: string): boolean => stage === EXPIRED_SUB_STAGE_NAME || stage === EXPIRED_SUB_KEY;
 
 /** The BillingState a Clients stage NAME or lowercase key means (exact match, case and spacing included), or null. Never guesses. */
 export function billingStateForClientsStage(stage: string): BillingState | null {

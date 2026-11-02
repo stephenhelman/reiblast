@@ -1,7 +1,55 @@
-# Cutover (Task 8) — plan v2 (docs only; nothing here is built or done)
+# Cutover (Task 8) — plan v2
+
+> **Start with §0 — the exact switchover order (branch `billing/cutover-ready`).** Sections 1–6 below are the background plan; where they disagree with §0 (the
+> core-failure rule, the exemption flag, the canary, `DUNNING_LIVE_ACCOUNTS="*"`), §0 wins.
 
 Status: **plan.** Nothing in here has been done. Until cutover the old routes and their GHL workflows stay in charge and the engine runs in
 shadow mode (`DUNNING_MODE` unset/`shadow`): it records decisions and `skipped_shadow` intents only.
+
+## 0. Exact switchover order
+
+Rules this build ships (details in `docs/dunning-engine.md`): a failed **core** subscription payment **pauses at once** (`non_payment`, `saas_pause`; Onboarding
+"Paused" for members still onboarding) and a succeeded core payment (incl. a paid GHL invoice) cures; `payment_failed` is only for wallet strikes 1–2 and an
+expired subscription ("Expired Sub"); `saas_pause` also **revokes Discord**; `GhlAccount.exemptUntil` suppresses every adverse action for special members;
+`DUNNING_LIVE_ACCOUNTS="*"` = every member account. Every script below is dry-run by default; production needs `BILLING_DB_TARGET=prod`, `--i-mean-production` and the
+typed host confirmation (A1). Take the Neon snapshot + named branch (A2.1) before step 1.
+
+1. **Migrate.** `prisma migrate deploy` (never `migrate dev`) applies, in this order after `20261029130000_wallet_month_refresh`:
+   - `20261030120000_pause_reason_subscription_expired` — `ALTER TYPE "PauseReason" ADD VALUE 'subscription_expired'` (re-timestamped from `20261016…`; nothing else
+     references the old name).
+   - `20261030130000_ghl_account_exemption` — adds `GhlAccount.exemptUntil` / `exemptReason` and copies every `coreCoveredUntil` / `coreCoverageNote` into them (old
+     columns stay, unused).
+   Verify `prisma migrate diff` shows no drift. Env stays `DUNNING_MODE=shadow`, `ONBOARDING_INTENTS` as is, `CLIENT_HANDOFF=off`, `DUNNING_LIVE_ACCOUNTS` empty.
+2. **Merge** `billing/cutover-ready` to `main` and deploy. Nothing acts yet (shadow). The replay job now retries only `payment` / `stage_change` / `invoice` /
+   `op_invoice` events; run `scripts/billing/mark-nonpayment-retries-processed.ts` (dry-run, then `--apply`) once to close out review rows that were wrongly retried.
+3. **Set exemptions for special members** — anyone the engine must never pause/charge/churn (comped, partners, prepaid, test). Per member:
+   `npx tsx scripts/billing/set-exemption.ts --location-id=<id> --until=YYYY-MM-DD --reason="…"` (dry-run), then `--apply`. Check Members → "Exempt until". The old
+   `set-coverage.ts` is gone; members who had a coverage date were carried over by the migration (confirm each is intended).
+4. **Mark manually created Clients cards as placed.** `scripts/billing/backfill-active-client-since.ts` with `--estimate-only`, then dry-run, then `--apply`
+   (sets `activeClientSince` for members who already have a Clients-pipeline opportunity, so the engine routes them to Clients and the handoff skips them).
+5. **Seed starting states.** Run `sub_sweep --apply` (`scripts/billing/run-sub-sweep.ts`) so `GhlSubscriptionState` is populated and its "seed" phase fills null
+   states for trialing/active/unpaid members; then `scripts/billing/seed-billing-state.ts` (dry-run, then `--apply`) for the legacy paused/expired/canceled ones.
+   Review the unseeded list — nothing is guessed. Shadow mode now keeps new members seeded too (trial / first core payment / expired subscription).
+6. **Handoff catch-up.** Set `CLIENT_HANDOFF=live` (needs `GHL_INTENT_URL_ACTIVE_CLIENT` and the workflow of step 7 to exist first — do step 7 before this if it
+   isn't built yet). `scripts/billing/handoff-catchup.ts` dry-run (lists who goes to which Clients stage; unseeded ones are listed, not moved), then `--apply`.
+7. **GHL Active Client intent workflow gets an `expired_sub` branch** (stage name "Expired Sub", key `expired_sub`; see `docs/ghl-workflows.md` A1). Also confirm the
+   Onboarding workflow has `payment_failed` and `paused`, and that the stage-changed workflows send "Expired Sub". An unmatched key silently does nothing, so send one
+   test payload per key.
+8. **Canary on one test account** (a dedicated sub-account you own, with a linked Discord, not a real member): `DUNNING_LIVE_ACCOUNTS=<that account>`,
+   `DUNNING_MODE=live`. Drive it through and check the decision row, intent (`sent`), GHL stage, location pause state, `User.status` and Discord at each step:
+   - **pause:** a failed core payment (or 3 failed wallet recharges with a negative balance) → `paused`/`non_payment`, `saas_pause` executed, **Discord role revoked**
+     (outbox row `done`, `DiscordLink` gone);
+   - **resume:** a succeeded core payment (pay the GHL invoice) → `active`, `saas_resume` executed, location unpaused. **Discord is not restored automatically** — the
+     member re-verifies through the Discord verify flow (this is expected; see dunning-engine.md);
+   - an exempt canary (set `exemptUntil` first): a failed core payment records `exempt…` and changes nothing;
+   - a manual stage move, a canceled subscription, an expired subscription (→ Expired Sub), an expired invoice.
+9. **Go live for everyone.** `DUNNING_LIVE_ACCOUNTS="*"` (internal accounts are never acted on), `DUNNING_MODE=live`. Watch Health (failed intents, failed events, failed
+   side effects, unexpected decisions) for the first hour.
+10. **Disable the legacy workflows the same day** — Payment Failure (→ `/payment-failed`), Pause Sub Account (→ `/pause`), Active Member (→ `/active`), plus GHL's raw
+    payment-failed → Failed Payment stage workflow (section 2). Record their configuration first so rollback is exact. Confirm no double action on a test payment. The old
+    routes stay deployed and inert for two weeks (they are the only other code that revokes Discord; the engine now does).
+
+Rollback at any point: §4. Everything in steps 1–7 is additive or dry-run-first and safe to leave in place while still in shadow.
 
 ## 1. What changes
 
@@ -137,6 +185,18 @@ routes deployed and inert.
 **9. After.** Remove the old routes **2 weeks after the last account goes live**, along with the `Transaction` dedupe path; keep `User.status`
 mirroring until the tools app reads `GhlAccount`, then drop the mirror and the `User.warningCount` writes.
 
+## After cutover (backlog)
+
+- **Discord restore on resume (currently manual).** `saas_pause` revokes Discord by deleting the member's `DiscordLink` and telling the bot to remove the role; `saas_resume`
+  restores nothing, so a resumed member re-links through the Discord verify flow. Proposal: (1) add a bot **`POST /grant`** (same auth header, body `{ discordUserId }`,
+  always HTTP 200 with `{ result, reason }`, idempotent: adds the REIblast role if the member is in the guild) to the bot contract; (2) on engine pause, keep the Discord id
+  in a **"paused link"** (e.g. a `DiscordLink.pausedAt` marker or a separate table keyed by `ghlAccountId`) instead of deleting the link outright, while still revoking the role;
+  (3) make `saas_resume` call `/grant` through an outbox like the revoke (same backoff ladder, idempotent, superseded if the member re-links), then clear the paused link; a
+  member who is removed or churned keeps today's delete. Until then the manual re-verify is the path.
+- **Drop `coreCoveredUntil` / `coreCoverageNote`** (unused since the exemption migration) in a cleanup migration.
+- **Review `trial_unresolved_review` events** after the first weeks of live running: each one is a trial the engine got no failure/expiry signal for.
+- Remove the old routes two weeks after the last account goes live (§3 step 9).
+
 ## 4. Rollback
 At any point: set `DUNNING_MODE=shadow` (or empty `DUNNING_LIVE_ACCOUNTS`) — the engine stops persisting and acting immediately; then
 re-enable the old workflows and disable the new ones. Effects already executed (a pause, a stage move) are not undone automatically:
@@ -154,3 +214,10 @@ re-enable the old workflows and disable the new ones. Effects already executed (
   after paying is the costly failure); an exhausted `saas_pause` raises a WARNING. Idempotent: a retry never fires once a later live decision
   for the account supersedes it. **Built** — `lib/billing/state/effects.ts` (see Phase B step 4).
 - **Old routes** are removed **2 weeks after the last account goes live**.
+
+## 6. Migration ordering notes (admin partner statement)
+- **`fix/soak-gaps` is merged (on `billing/cutover-ready`) with its migration re-timestamped to `20261030120000_pause_reason_subscription_expired`.** The original `20261016120000_pause_reason_subscription_expired` has never been applied anywhere
+  (checked on a copy of production: no `_prisma_migrations` row, and `PauseReason` has no `subscription_expired` value). When that
+  branch is merged it must be **re-timestamped to sort after `20261029120000_partner_statement`** (and anything else already on main),
+  never merged with its original `20261016…` name. `migrate deploy` would technically apply an earlier-dated unapplied migration, but
+  main is the trunk and new migrations sort chronologically last.

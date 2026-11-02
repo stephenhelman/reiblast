@@ -1,13 +1,15 @@
 # Nightly billing data jobs
 
-Six jobs, triggered by a GHL scheduled workflow (no Vercel Cron). The data jobs never change billing state, tags, or stages, and
+Eight jobs (`wallet_retention` ships disabled), triggered by a GHL scheduled workflow (no Vercel Cron). The data jobs never change billing state, tags, or stages, and
 never write to GHL; `sub_sweep` feeds the dunning engine, which in shadow mode only records decisions. See `docs/ghl-server-contract.md`.
 
 | job | what it does |
 |---|---|
 | `replay` | Re-runs `GhlEvent` rows that failed (unprocessed, `attempts < 5`, received > 5 min ago) through `processPaymentEvent`. |
 | `tx_sweep` | Rolling 35-day window of `GET /payments/transactions` through `ingestTransaction` (catches missed webhooks). |
-| `wallet_usage` | Previous 2 UTC days of agency wallet transactions → `WalletTransaction` (every raw row, insert-or-ignore on GHL id) and `UsageRollup` (per location incl. HQ, plus `_agency` / `_unattributed`; replaces per (scopeKey, day)). On **UTC day 3 only** it also refreshes the whole previous calendar month as ≤7-day windows. Each finished window runs the rollup-vs-rows check (below). |
+| `wallet_usage` | Previous 2 UTC days of agency wallet transactions → `WalletTransaction` (every raw row, insert-or-ignore on GHL id) and `UsageRollup` (per location incl. HQ, plus `_agency` / `_unattributed`; replaces per (scopeKey, day)). Each finished window runs the rollup-vs-rows check (below). |
+| `wallet_month_refresh` | Re-pulls every agency wallet transaction of a **finished Denver month** (UTC day 1 of the month through UTC day 1 of the next, in 3-day windows) so the Partner Statement's wallet line is the whole month. **Resumable across scheduled runs**: progress is `WalletMonthRefresh.windowsDone`, so a run that is out of budget or hits the continuation cap resumes at the next window on the next trigger. Eligible from UTC day 2 of the next month; records `completedAt` per month; a no-op (no GHL calls) once every finished month is complete — schedule it every couple of hours. **Close Month on the Partner Statement is blocked until the month's row is complete.** Counts rollup-vs-row mismatches in `mismatchCount`. |
+| `wallet_retention` | **Disabled** unless `WALLET_RETENTION_ENABLED=true`. Deletes raw `WalletTransaction` rows older than `WALLET_RETENTION_DAYS` (default 90, floor 60), one UTC day at a time, only where the month's `wallet_month_refresh` is complete and `UsageRollup` matches the raw rows for that day. `UsageRollup` is never pruned. Not shown in Health (so not "stale") until enabled. |
 | `balances` | Wallet balance per location (incl. HQ) → `WalletBalanceSnapshot`, one row per location per UTC day. |
 | `discord_outbox` | **Every 15 minutes.** Delivers due `DiscordRevokeOutbox` rows to the Discord bot (`docs/revoke-contract.md`), re-arms `config_error` rows once `DISCORD_BOT_URL` + `DISCORD_BOT_OUTBOUND_SECRET` are both set (each re-arm is an attempt, so a still-broken config ends `exhausted` after 5), and purges `done`/`superseded` rows older than 30 days. JobRun summary: `delivered`, `retried`, `exhausted`, `config_error`, `superseded`, `purged` (this run) and `standingExhausted`, `standingConfigError` (rows currently in those states — what an alert should watch); numbers only. Health marks it stale after 1 hour, not 26. |
 | `sub_sweep` | Nightly subscription sweep: lists GHL subscriptions → `GhlSubscriptionState`, and feeds status changes the ledger never shows to the dunning engine (see below). |
@@ -15,7 +17,7 @@ never write to GHL; `sub_sweep` feeds the dunning engine, which in shadow mode o
 ## Trigger
 
 `POST /api/webhooks/ghl/jobs` with header `x-reiblast-jobs-secret: <GHL_JOBS_SECRET>` and body
-`{ "job": "replay" | "tx_sweep" | "wallet_usage" | "balances" | "sub_sweep" | "discord_outbox" }`. Always answers 200 `{ accepted, job }`; the work runs in
+`{ "job": "replay" | "tx_sweep" | "wallet_usage" | "wallet_month_refresh" | "balances" | "sub_sweep" | "discord_outbox" | "wallet_retention" }`. Always answers 200 `{ accepted, job }`; the work runs in
 the background (`waitUntil`). Create one GHL scheduled workflow per job.
 
 ## Plan limit assumed
@@ -126,19 +128,22 @@ current version on **every row it evaluates**, so after a run the whole ledger c
 classifier would ignore are reported and re-stamped, never reclassified; rows that fail to normalize are left untouched.
 Rows written by `ingestTransaction` after a classifier bump already carry the new version.
 
-## Core coverage override (`GhlAccount.coreCoveredUntil` / `coreCoverageNote`)
+## Exemption (`GhlAccount.exemptUntil` / `exemptReason`) — replaces the core coverage override
 
-A manual override for members who are covered for the core subscription without a matching payment on record (for example
-prepaid during a processor migration). `scripts/billing/set-coverage.ts` (dry-run default, `--apply`, refuses the production
-host) sets it: `--location-id`, `--until=YYYY-MM-DD` (a Denver date, **exclusive**: covered while now < 00:00
-America/Denver on that date), `--note`, and optionally `--state`, `--pause-reason=none|…` and `--legacy-unreconciled=true|false`
-to correct the account at the same time. It prints a before/after table. **DB only — it never writes to GHL, so the GHL
-pipeline stage is not moved; keep the stage consistent by hand.**
+For special members the engine must never act against (comped, partners, prepaid during a processor migration…). `scripts/billing/set-exemption.ts`
+(dry-run default, `--apply`, production guard: `BILLING_DB_TARGET=prod` + `--i-mean-production` + typed host) sets it:
+`--location-id=<id> --until=YYYY-MM-DD --reason="…"` (a Denver date, **exclusive**: exempt while now < 00:00 America/Denver on that date), or `--clear`.
+Prints a before/after table. **DB only — it never writes to GHL and does not change the account's state or stage.**
 
-**Dunning rule:** while `now < coreCoveredUntil`, a missing or failed core payment must not be treated as delinquency
-(see `docs/payments-webhook-system.md`). The dashboard shows "Covered until" and the note next to the estimated next charge
-(latest succeeded core payment + 1 month); if the override is later than that estimate the member list marks
-"override applies".
+Migration `20261030130000_ghl_account_exemption` added the two columns and copied every existing `coreCoveredUntil` / `coreCoverageNote` into them; the old
+columns are unused (drop them in a later cleanup migration).
+
+**Dunning rule and the dashboard fields:** see `docs/dunning-engine.md` → *Exemption*. For the dashboard project:
+- `exemptUntil` (`DateTime?`, UTC instant of Denver midnight; null = not exempt). Exempt right now ⇔ `exemptUntil != null && now < exemptUntil`.
+- `exemptReason` (`String?`, ≤ 500 chars, free text shown to staff).
+- Evidence of the exemption working: `DunningDecision.reason` starts with `exempt until <YYYY-MM-DD>:` and `trigger` ends `:exempt:<YYYY-MM-DD>`.
+- The Members page/CSV export show "Exempt until" / `exempt_until` and `exempt_reason`, and the "override applies" badge compares `exemptUntil` with the
+  estimated next charge (latest succeeded core payment + 1 month).
 
 ## `sub_sweep` (nightly subscription sweep)
 
@@ -148,14 +153,17 @@ upserts `GhlSubscriptionState`, and feeds the engine:
 
 - **First run** (state table empty) **seeds without emitting** and reports what it would have emitted. A dry-run (no `--apply`) writes
   nothing at all, ever.
-- **Status changes:** `canceled` / `expired` → churned (`subscription_canceled` / `subscription_expired`); a cancel **during the trial**
-  churns immediately; newly `trialing` → trial (offer and end date). `paused`, `unpaid` and `incomplete_expired` never emit.
-- **Coverage:** a non-trial churn while `now < coreCoveredUntil` is recorded as *deferred* (trigger `sub:<id>:canceled:deferred:<date>`);
-  each run re-checks and churns once coverage has ended (trigger `sub:<id>:canceled`).
+- **Status changes:** `canceled` → churned; `expired` → `payment_failed` / `subscription_expired` (Expired Sub, no pause); newly `trialing` → trial (offer and end date). `paused`, `unpaid` and `incomplete_expired` never emit.
+- **Exemption:** while the account is exempt a churn/expiry is recorded as an `exempt` no-op (trigger `sub:<id>:canceled:exempt:<date>`);
+  each run re-checks and decides it for real once the exemption has ended (trigger `sub:<id>:canceled`). A cancel during the trial is suppressed too.
 - **Other live subscription:** a canceled/expired subscription never churns an account whose contact still holds another live one
   (trialing / active / unpaid) — common after a processor migration (old subscription canceled, new one live).
-- **Trial expiry:** a trial ended more than 2 days ago (subscription not canceled/expired) with **no succeeded `core_subscription` since
-  the trial began** → `payment_failed` with the core failure open (coverage protects it). Once per subscription.
+- **Trial ended:** a trial ended more than 2 days ago (subscription not canceled/expired) with **no succeeded `core_subscription` since
+  the trial began** is **recorded only** (decision *"trial ended; awaiting payment-failure or expiry signal"*, no transition, side effect or intent), once per
+  subscription: the failed core payment (→ paused) or the expired subscription (→ `payment_failed` / `subscription_expired`) that follows does the acting.
+  **Safety net:** if it is still unresolved more than **3 days** after the trial ended — no `core_failed` / `subscription_expired` decision and no failed
+  `core_subscription` ledger row since — the sweep writes a `GhlEvent` of source **`trial_unresolved_review`** (externalId = subscriptionId, once per subscription,
+  `processedAt` null for a human to look at, never replayed). No state change. A dry-run reports `wouldFlagTrialUnresolved` and writes nothing.
 - **Invoice backstop:** lists invoices and emits `invoice_expired` for unpaid, past-due (or void) core recovery invoices, because GHL has
   no native "expired" invoice status.
 - Resumable like the other jobs (the cursor carries what it read). Events run through the same write path as everything else, so in

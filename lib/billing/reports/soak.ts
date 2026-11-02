@@ -1,4 +1,4 @@
-import { billingStateForClientsStage, isKnownOnboardingStage } from "../stages";
+import { billingStateForClientsStage, isExpiredSubStage, isKnownOnboardingStage } from "../stages";
 
 /**
  * Pure logic behind scripts/billing/soak-report.ts (the shadow-period soak report). No db access here: the script reads rows and hands
@@ -50,13 +50,13 @@ export const COVERAGE_CHECKS: Check[] = [
   { key: "uncounted", label: "uncounted wallet failure (balance >= 0)", test: (d) => d.eventKind === "wallet_recharge_failed" && /is not negative, no strike/.test(d.reason) },
   { key: "strike2", label: "2nd strike", test: (d) => strikeUp(d) && d.toStrikes === 2 },
   { key: "strike3", label: "3rd strike -> paused", test: (d) => strikeUp(d) && d.toStrikes >= 3 && d.toState === "paused" },
-  { key: "core_failed", label: "core subscription failure", test: (d) => d.eventKind === "core_failed" && !/covered/i.test(d.reason) },
+  { key: "core_failed", label: "core subscription failure", test: (d) => d.eventKind === "core_failed" && !/^exempt/.test(d.reason) },
   { key: "expired", label: "expired invoice -> paused", test: (d) => d.eventKind === "invoice_expired" && d.toState === "paused" && d.fromState !== "paused" },
   { key: "cure_pf", label: "cure from payment_failed", test: (d) => d.fromState === "payment_failed" && d.toState === "active" && d.eventKind !== "command" },
   { key: "cure_paused", label: "cure from paused", test: (d) => d.fromState === "paused" && (d.toState === "active" || d.toState === "payment_failed") && d.eventKind !== "command" && sideEffectTypes(d).includes("saas_resume") },
   { key: "no_cure", label: "recharge succeeded, balance still negative (no cure)", test: (d) => d.eventKind === "wallet_recharge_succeeded" && REASON_NO_CURE.test(d.reason) },
   { key: "trial_conv", label: "trial converted", test: (d) => d.eventKind === "core_succeeded" && d.fromState === "trial" && d.toState === "active" },
-  { key: "trial_end", label: "trial ended unconverted", test: (d) => d.eventKind === "trial_ended_unconverted" && d.toState === "payment_failed" },
+  { key: "trial_end", label: "trial ended unconverted (recorded, no action)", test: (d) => d.eventKind === "trial_ended_unconverted" },
   { key: "churn", label: "subscription canceled -> churned", test: (d) => (d.eventKind === "subscription_canceled" || d.eventKind === "subscription_expired") && d.toState === "churned" && d.fromState !== "churned" },
   { key: "command", label: "manual stage command", test: (d) => d.eventKind === "command" },
   { key: "ob_failed", label: "onboarding member: payment failure", test: (d) => intentStages(d, "onboarding").includes("payment_failed") },
@@ -186,7 +186,7 @@ export type StageVerdict = "known" | "unknown";
 /** Whether the stage-changed handler (lib/billing/events/stageChanged.ts) recognizes a stage string: onboarding names; Clients names or lowercase keys (+ legacy "paused_confirm"). */
 export function classifyStageName(pipeline: string, stage: string): StageVerdict {
   if (pipeline === "onboarding") return isKnownOnboardingStage(stage) ? "known" : "unknown";
-  if (pipeline === "active_client") return stage === "paused_confirm" || billingStateForClientsStage(stage) ? "known" : "unknown";
+  if (pipeline === "active_client") return stage === "paused_confirm" || isExpiredSubStage(stage) || billingStateForClientsStage(stage) ? "known" : "unknown";
   return "unknown";
 }
 

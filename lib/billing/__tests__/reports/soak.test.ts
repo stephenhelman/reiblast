@@ -26,7 +26,7 @@ describe("coverage checklist", () => {
     dec({ eventKind: "wallet_recharge_succeeded", fromState: "paused", toState: "active", sideEffects: [{ type: "saas_resume" }] }),
     dec({ eventKind: "wallet_recharge_succeeded", fromState: "payment_failed", toState: "payment_failed", reason: "recharge succeeded, balance still negative (-1.2) — stays payment_failed" }),
     dec({ eventKind: "core_succeeded", fromState: "trial", toState: "active" }),
-    dec({ eventKind: "trial_ended_unconverted", fromState: "trial", toState: "payment_failed" }),
+    dec({ eventKind: "trial_ended_unconverted", fromState: "trial", toState: "trial", reason: "trial ended; awaiting payment-failure or expiry signal" }),
     dec({ eventKind: "subscription_canceled", toState: "churned" }),
     dec({ eventKind: "command", toState: "paused" }),
     dec({ eventKind: "wallet_recharge_failed", intents: [{ pipeline: "onboarding", stage: "payment_failed" }] }),
@@ -40,8 +40,8 @@ describe("coverage checklist", () => {
   it("an empty period shows everything unseen", () => {
     expect(coverageChecklist([], 0).every((r) => r.count === 0)).toBe(true);
   });
-  it("a covered core failure and an unknown-balance failure are not counted as the situations they resemble", () => {
-    const rows = coverageChecklist([dec({ eventKind: "core_failed", reason: "covered, ignored" }), dec({ reason: "balance unknown; strike not counted" })], 0);
+  it("an exempt core failure and an unknown-balance failure are not counted as the situations they resemble", () => {
+    const rows = coverageChecklist([dec({ eventKind: "core_failed", reason: "exempt until 2026-12-31: core subscription failed; no automatic action" }), dec({ reason: "balance unknown; strike not counted" })], 0);
     const c = (k: string) => rows.find((r) => r.key === k)!.count;
     expect(c("core_failed")).toBe(0);
     expect(c("uncounted")).toBe(0);

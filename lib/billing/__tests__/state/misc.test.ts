@@ -91,7 +91,7 @@ describe("replay core", () => {
   const pos: BalanceReading = { status: "ok", value: "6.000000", estimated: true };
   // failures happen while the balance is negative; the recharge that follows clears it
   const balanceByKind = (e: ReplayEvent) => (e.event.kind === "wallet_recharge_succeeded" ? pos : neg);
-  const run = (events: ReplayEvent[], over: Partial<Parameters<typeof replayAccount>[1]> = {}) => replayAccount(events, { seed: { state: "active", strikes: 0, pauseReason: null, coreFailureOpen: false }, coveredUntil: null, balanceFor: balanceByKind, subscriptionFor: () => null, ...over });
+  const run = (events: ReplayEvent[], over: Partial<Parameters<typeof replayAccount>[1]> = {}) => replayAccount(events, { seed: { state: "active", strikes: 0, pauseReason: null, coreFailureOpen: false }, exemptUntil: null, balanceFor: balanceByKind, subscriptionFor: () => null, ...over });
 
   it("seed: trial when the first core-related row is trial_auth, else active", () => {
     const r = (c: BillingClass, at: string) => ({ classification: c, occurredAt: D(at) });
@@ -111,9 +111,9 @@ describe("replay core", () => {
       ev("core_failed", "2026-08-10T00:00:00Z", "e"),
       ev("core_succeeded", "2026-08-12T00:00:00Z", "f"),
     ]);
-    expect(out.steps.map((s) => [s.decision.nextState, s.decision.warningCount])).toEqual([["payment_failed", 1], ["payment_failed", 2], ["paused", 3], ["active", 0], ["payment_failed", 0], ["active", 0]]);
+    expect(out.steps.map((s) => [s.decision.nextState, s.decision.warningCount])).toEqual([["payment_failed", 1], ["payment_failed", 2], ["paused", 3], ["active", 0], ["paused", 0], ["active", 0]]);
     expect(out.final).toMatchObject({ state: "active", strikes: 0, pauseReason: null, coreFailureOpen: false });
-    expect(milestones(out.steps).map((m) => m.kind)).toEqual(["strike", "payment_failed", "strike", "strike", "paused", "resumed", "payment_failed", "recovered"]);
+    expect(milestones(out.steps).map((m) => m.kind)).toEqual(["strike", "payment_failed", "strike", "strike", "paused", "resumed", "paused", "resumed"]);
   });
 
   it("the resume guard in replay: a recharge that leaves the estimated balance negative does not resume", () => {
@@ -129,13 +129,13 @@ describe("replay core", () => {
     expect(out.steps.map((s) => s.trigger)).toEqual(["ledger:a", "ledger:d"]);
   });
 
-  it("coverage is checked at each event's own time", () => {
+  it("the exemption is checked at each event's own time", () => {
     const cov = D("2026-08-15T00:00:00Z");
-    const out = run([ev("core_failed", "2026-08-10T00:00:00Z", "in"), ev("core_failed", "2026-08-20T00:00:00Z", "out")], { coveredUntil: cov });
-    expect(out.steps[0].decision.reason).toMatch(/covered, ignored/);
+    const out = run([ev("core_failed", "2026-08-10T00:00:00Z", "in"), ev("core_failed", "2026-08-20T00:00:00Z", "out")], { exemptUntil: cov });
+    expect(out.steps[0].decision.reason).toMatch(/^exempt/);
     expect(out.steps[0].decision.nextState).toBe("active");
-    expect(out.steps[1].decision.nextState).toBe("payment_failed");
-    expect(milestones(out.steps).some((m) => m.kind === "covered_ignored")).toBe(true);
+    expect(out.steps[1].decision.nextState).toBe("paused");
+    expect(milestones(out.steps).some((m) => m.kind === "exempt_ignored")).toBe(true);
   });
 
   it("unknown balances never count strikes; balance is only requested when needed", () => {

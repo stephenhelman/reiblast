@@ -16,10 +16,12 @@ export type JobHealth = {
 };
 
 /** Read-only. One entry per job, including jobs that have never run. */
-export async function getJobHealth(db: PrismaClient, now = new Date()): Promise<JobHealth[]> {
-  const rows = await db.jobRun.findMany({ where: { job: { in: [...JOB_NAMES] } } });
+export async function getJobHealth(db: PrismaClient, now = new Date(), env: Record<string, string | undefined> = process.env): Promise<JobHealth[]> {
+  // wallet_retention ships disabled: until WALLET_RETENTION_ENABLED=true it is neither scheduled nor expected, so it isn't "stale".
+  const names = JOB_NAMES.filter((j) => j !== "wallet_retention" || env.WALLET_RETENTION_ENABLED === "true");
+  const rows = await db.jobRun.findMany({ where: { job: { in: [...names] } } });
   const byJob = new Map(rows.map((r) => [r.job, r]));
-  return JOB_NAMES.map((job) => {
+  return names.map((job) => {
     const r = byJob.get(job);
     const lastOkAt = r?.lastOkAt ?? null;
     const hoursSinceOk = lastOkAt ? (now.getTime() - lastOkAt.getTime()) / 36e5 : null;

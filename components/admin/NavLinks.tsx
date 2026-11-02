@@ -4,7 +4,10 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const ITEMS = [
-  { href: "/", label: "Overview" },
+  { href: "/", label: "Partner Statement" },
+  { href: "/cash", label: "Cash & Processor" },
+  { href: "/settings", label: "Settings" },
+  { href: "/overview", label: "Overview" },
   { href: "/revenue", label: "Revenue" },
   { href: "/costs", label: "Costs" },
   { href: "/margin", label: "Margin" },

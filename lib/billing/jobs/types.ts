@@ -1,6 +1,6 @@
 import type { PrismaClient } from "@prisma/client";
 
-export const JOB_NAMES = ["replay", "tx_sweep", "wallet_usage", "balances", "sub_sweep", "discord_outbox"] as const;
+export const JOB_NAMES = ["replay", "tx_sweep", "wallet_usage", "wallet_month_refresh", "balances", "sub_sweep", "discord_outbox", "wallet_retention"] as const;
 export type JobName = (typeof JOB_NAMES)[number];
 export const isJobName = (v: unknown): v is JobName => typeof v === "string" && (JOB_NAMES as readonly string[]).includes(v);
 

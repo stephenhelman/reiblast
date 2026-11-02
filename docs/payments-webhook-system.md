@@ -1,10 +1,9 @@
 # Payment Dunning Webhook System
 
-> **Core coverage override.** If `GhlAccount.coreCoveredUntil` is set, then while `now < coreCoveredUntil` a missing or failed
-> core-subscription payment must **not** be treated as delinquency: no `warningCount` increment, no `payment_failed`
-> escalation and no pause on the core subscription's account. Once the date passes, normal dunning resumes. See
-> `docs/billing-jobs.md` ("Core coverage override"). (This file describes the live webhooks; the rule applies to the
-> replacement pipeline as it takes over dunning.)
+> **Exemption.** If `GhlAccount.exemptUntil` is set, then while `now < exemptUntil` a failed core-subscription payment, an expired invoice or a
+> wallet strike must **not** cause any adverse automatic action (no `warningCount` increment, no `payment_failed`, no pause, no churn); the engine records
+> the decision as "exempt". Payments still cure. Once the date passes, normal dunning resumes. See `docs/billing-jobs.md` ("Exemption") and
+> `docs/dunning-engine.md`. (This file describes the live webhooks; the rule applies to the replacement pipeline as it takes over dunning.)
 
 Three GHL webhooks drive payment-failure dunning. GHL owns the move into
 Failed Payment on its own (via its own workflow on the raw payment-failed

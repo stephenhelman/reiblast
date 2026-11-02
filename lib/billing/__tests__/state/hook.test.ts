@@ -15,7 +15,7 @@ import { processPaymentEvent } from "../../processPaymentEvent";
 function fakeDb(opts: { dunningExplodes?: boolean } = {}) {
   const ledger: Record<string, any> = {};
   const decisions: any[] = [];
-  const events: Record<string, any> = { ev1: { id: "ev1", externalId: TXN_ID, processedAt: null, attempts: 0 } };
+  const events: Record<string, any> = { ev1: { id: "ev1", source: "payment", externalId: TXN_ID, processedAt: null, attempts: 0 } };
   const jobRuns = new Map<string, any>();
   const db: any = {
     ledger, decisions, events, jobRuns,
@@ -26,7 +26,7 @@ function fakeDb(opts: { dunningExplodes?: boolean } = {}) {
     },
     ghlAccount: {
       findFirst: async ({ where }: any) => (where.contactId === "cccccccccccccccccc01" ? { id: "A1" } : null),
-      findUnique: async () => ({ id: "A1", accountType: "member", contactId: "cccccccccccccccccc01", locationId: "LOC1", coreCoveredUntil: null, trialOffer: null, trialEndsAt: null, userId: "U1", billingState: "active", warningCount: 0, pauseReason: null }),
+      findUnique: async () => ({ id: "A1", accountType: "member", contactId: "cccccccccccccccccc01", locationId: "LOC1", exemptUntil: null, trialOffer: null, trialEndsAt: null, userId: "U1", billingState: "active", warningCount: 0, pauseReason: null }),
     },
     billingLedgerEntry: {
       findUnique: async ({ where, select }: any) => {

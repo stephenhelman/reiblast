@@ -7,7 +7,7 @@ const c = (o = {}, shape: "list" | "single" = "list") =>
   classify(normalizeTransaction(shape === "list" ? listTxn(o) : singleTxn(o))).classification;
 
 describe("classify", () => {
-  it("exports version 2", () => expect(CLASSIFIER_VERSION).toBe(2));
+  it("exports version 3", () => expect(CLASSIFIER_VERSION).toBe(3));
 
   it("rule 1: test-mode is ignored (even a would-be subscription)", () => {
     expect(c({ liveMode: false, subscriptionId: "sub00000000000000001" })).toBe("ignore");
@@ -100,5 +100,31 @@ describe("classify", () => {
 
   it("returns a reason", () => {
     expect(classify(normalizeTransaction(listTxn({ amount: 0 }))).reason).toMatch(/0/);
+  });
+
+  describe("v3", () => {
+    it("authOnly is trial_auth regardless of amount (even a $1 hold, a $57 hold, or a subscription row)", () => {
+      expect(c({ transactionType: "authOnlyTransaction", amount: 1 })).toBe("trial_auth");
+      expect(c({ transactionType: "authOnlyTransaction", amount: 57, subscriptionId: "sub00000000000000001" })).toBe("trial_auth");
+      expect(c({ transactionType: "authOnlyTransaction", amount: 25, subType: "saas_one_time", description: AUTO_DESC })).toBe("trial_auth");
+    });
+
+    it('chargeId "0" is non_gateway', () => {
+      expect(c({ chargeId: "0", amount: 57, subscriptionId: "sub00000000000000001" })).toBe("non_gateway");
+      expect(c({ chargeId: "0", subType: "saas_one_time", description: AUTO_DESC })).toBe("non_gateway");
+    });
+
+    it("a row with no chargeSnapshot is non_gateway (both shapes)", () => {
+      expect(c({ snapshot: false, amount: 57, subscriptionId: "sub00000000000000001" })).toBe("non_gateway");
+      expect(c({ snapshot: false }, "single")).toBe("non_gateway");
+    });
+
+    it("an 11-digit chargeId is a valid gateway charge (no ID-length rule)", () => {
+      expect(c({ chargeId: "12345678901", amount: 57, subscriptionId: "sub00000000000000001" })).toBe("core_subscription");
+    });
+
+    it("test mode still wins over everything", () => {
+      expect(c({ liveMode: false, chargeId: "0" })).toBe("ignore");
+    });
   });
 });

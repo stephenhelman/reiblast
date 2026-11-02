@@ -59,6 +59,6 @@ describe("known-stage helpers", () => {
     for (const s of ONBOARDING_PROGRESS_STAGES) expect(isOnboardingSideStage(s)).toBe(false);
   });
   it("Clients pipeline stage list is exactly as specified", () => {
-    expect(CLIENTS_STAGES).toEqual(["Trial", "Active Member", "Payment Failed", "Paused", "Inactive", "Churned"]);
+    expect(CLIENTS_STAGES).toEqual(["Trial", "Active Member", "Payment Failed", "Expired Sub", "Paused", "Inactive", "Churned"]);
   });
 });

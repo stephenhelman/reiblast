@@ -1,12 +1,13 @@
 import Link from "next/link";
 import { ExportButton, Mono, Money, Pager } from "@/components/admin/controls";
-import { PageTitle, Section, Table } from "@/components/admin/ui";
+import { Banner, PageTitle, Section, Table } from "@/components/admin/ui";
 import { definedOnly, paramsOf, parseCostFilters, parseCursor } from "@/lib/admin/filters";
 import { adminHref } from "@/lib/admin/links";
 import { fmtDenver } from "@/lib/admin/format";
 import { pageCtx } from "@/lib/admin/pageCtx";
 import { costDetailPage, costGroupOf, GROUP_LABEL } from "@/lib/billing/reports/costs";
-import { addMonths, currentDenverMonth, monthsBetween } from "@/lib/billing/reports/denver";
+import { retentionDays, retentionEnabled } from "@/lib/billing/jobs/walletRetention";
+import { addMonths, currentDenverMonth, denverMonthStart, monthsBetween } from "@/lib/billing/reports/denver";
 import { accountInfo, scopeLabelOf } from "@/lib/billing/reports/labels";
 import { fmtMoney } from "@/lib/billing/reports/money";
 
@@ -40,8 +41,12 @@ export default async function CostRowsPage({ searchParams }: { searchParams: Rec
   const labelOf = scopeLabelOf(info, hq);
   const monthLinks = [addMonths(f.month, -1), addMonths(f.month, 1)].filter((m) => m >= f.fromMonth && m <= cur);
 
+  // Only when the (disabled-by-default) wallet_retention job is switched on: raw rows older than the window are pruned; the rollups remain.
+  const pruned = retentionEnabled() && denverMonthStart(addMonths(f.month, 1)).getTime() < now.getTime() - retentionDays() * 864e5;
+
   return (
     <div>
+      {pruned && <Banner tone="warn">Raw wallet rows older than {retentionDays()} days are pruned by the retention job; this month may be empty or partial here. Totals by day, scope and category remain in the usage rollups (Costs summary).</Banner>}
       <div className="flex flex-wrap items-start justify-between gap-4">
         <PageTitle sub={`Raw wallet transactions, ${f.month} (Denver), newest first. Amounts are signed as stored: charges negative, recharges positive.`}>Costs — rows</PageTitle>
         <ExportButton view="costs" params={{ ...filters, detail: 1 }} label="Export this month’s raw rows CSV" />

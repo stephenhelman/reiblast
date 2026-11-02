@@ -5,6 +5,7 @@ import { readBalance } from "./balance";
 import { eventFromLedger } from "./events";
 import { loadProjection, seedFromAccount, type Projection } from "./projection";
 import { fetchSubscription } from "./subscription";
+import { seedStartingState, SEEDING_EVENTS } from "./seedStart";
 import { decide, needsBalance, needsSubscription } from "./transition";
 import type { BalanceReading, BillingState, Context, Decision, DunningEvent, SubscriptionInfo } from "./types";
 
@@ -28,13 +29,15 @@ export function dunningMode(env: Record<string, string | undefined> = process.en
   return m;
 }
 
-/** DUNNING_LIVE_ACCOUNTS: comma-separated GhlAccount ids and/or locationIds live mode may act on. Empty (default) = nobody. */
+/** DUNNING_LIVE_ACCOUNTS: comma-separated GhlAccount ids and/or locationIds live mode may act on, or "*" for all member accounts. Empty (default) = nobody. */
 export function liveAllowlist(env: Record<string, string | undefined> = process.env): string[] {
   return (env.DUNNING_LIVE_ACCOUNTS ?? "").split(",").map((s) => s.trim()).filter(Boolean);
 }
+/** "*" in DUNNING_LIVE_ACCOUNTS means every MEMBER account. Internal accounts never reach this check: applyDunning skips them first. */
+export const LIVE_ALL = "*";
 export const isLiveAllowed = (a: { id: string; locationId: string | null }, env: Record<string, string | undefined> = process.env): boolean => {
   const list = liveAllowlist(env);
-  return list.includes(a.id) || (!!a.locationId && list.includes(a.locationId));
+  return list.includes(LIVE_ALL) || list.includes(a.id) || (!!a.locationId && list.includes(a.locationId));
 };
 
 /** User.status while User remains the live gate (removable after the tools repoint): paused → suspended; inactive/churned → inactive. */
@@ -54,6 +57,8 @@ export type ApplyDeps = {
   /** live only */
   pause?: (locationId: string) => Promise<void>;
   unpause?: (locationId: string) => Promise<void>;
+  /** saas_pause also revokes Discord access: queue the revoke (and deliver it) for the account. Default: lib/discord/revoke.revokeDiscordForEngine. */
+  revokeDiscord?: (accountId: string) => Promise<void>;
   send?: SendDeps;
   env?: Record<string, string | undefined>;
 };
@@ -122,7 +127,7 @@ export async function applyDunning(db: Db, input: ApplyInput, opts: { mode?: Mod
 
   const account = await db.ghlAccount.findUnique({
     where: { id: input.ghlAccountId },
-    select: { id: true, accountType: true, contactId: true, locationId: true, coreCoveredUntil: true, trialOffer: true, trialEndsAt: true, userId: true, activeClientSince: true, onboardingProgress: true },
+    select: { id: true, accountType: true, contactId: true, locationId: true, exemptUntil: true, trialOffer: true, trialEndsAt: true, userId: true, activeClientSince: true, onboardingProgress: true, billingState: true },
   });
   if (!account) return { status: "skipped", why: "account not found" };
   if (account.accountType !== "member") return { status: "skipped", why: "not a member account" };
@@ -131,7 +136,11 @@ export async function applyDunning(db: Db, input: ApplyInput, opts: { mode?: Mod
   const live = requested === "live" && isLiveAllowed(account, env);
   const mode: Mode = requested === "live" && !live ? "shadow" : requested;
 
-  const dupWhere = { trigger_ghlAccountId_mode: { trigger: input.trigger, ghlAccountId: input.ghlAccountId, mode } };
+  // While exempt, an adverse event is recorded as a no-op; its trigger carries the exemption date so the SAME event (a churn, a trial that
+  // ended, an expired invoice) can still be decided for real by a later run once the exemption has ended.
+  const exemptNow = mode !== "replay" && !!account.exemptUntil && now.getTime() < account.exemptUntil.getTime();
+  const trigger = exemptNow ? `${input.trigger}:exempt:${(account.exemptUntil as Date).toISOString().slice(0, 10)}` : input.trigger;
+  const dupWhere = { trigger_ghlAccountId_mode: { trigger, ghlAccountId: input.ghlAccountId, mode } };
   if (await db.dunningDecision.findUnique({ where: dupWhere, select: { id: true } })) return { status: "duplicate" };
 
   if (mode !== "replay" && now.getTime() - input.eventAt.getTime() > (deps.maxAgeMs ?? SHADOW_MAX_AGE_MS)) {
@@ -167,10 +176,10 @@ export async function applyDunning(db: Db, input: ApplyInput, opts: { mode?: Mod
       // The projection may have moved while we were reading; a read we didn't make degrades to "unknown", never to a guess.
       let reading = balance;
       if (needsBalance(cur, input.event) && !reading) reading = { status: "unknown", why: "state changed while processing" };
-      const ctx: Context = { now: mode === "replay" ? input.eventAt : now, coveredUntil: account.coreCoveredUntil, walletBalance: reading, subscription, routing: { handedOff: !!account.activeClientSince, onboardingProgress: account.onboardingProgress } };
+      const ctx: Context = { now: mode === "replay" ? input.eventAt : now, exemptUntil: account.exemptUntil, walletBalance: reading, subscription, routing: { handedOff: !!account.activeClientSince, onboardingProgress: account.onboardingProgress } };
       const decision = decide(cur, input.event, ctx);
       const row = await tx.dunningDecision.create({
-        data: decisionRow({ ghlAccountId: input.ghlAccountId, trigger: input.trigger, eventAt: input.eventAt, event: input.event, from: cur, decision, mode, balance: reading }),
+        data: decisionRow({ ghlAccountId: input.ghlAccountId, trigger, eventAt: input.eventAt, event: input.event, from: cur, decision, mode, balance: reading }),
         select: { id: true },
       });
 
@@ -185,8 +194,17 @@ export async function applyDunning(db: Db, input: ApplyInput, opts: { mode?: Mod
         await tx.user.updateMany({ where: { id: account.userId }, data: { warningCount: decision.warningCount } });
         if (userStatus) await tx.user.updateMany({ where: { id: account.userId, status: { in: [...MANAGED_USER_STATUSES] } }, data: { status: userStatus } });
       }
+      // Shadow never writes the account — except to give a member with NO billing state its starting state (conditional on still-null, so a
+      // non-null state is never overwritten). Seeding only: no side effects, no extra intents. Live already wrote the account above.
+      if (mode === "shadow" && account.billingState === null && SEEDING_EVENTS.includes(input.event.kind) && decision.nextState) {
+        await seedStartingState(tx as unknown as PrismaClient, input.ghlAccountId, {
+          billingState: decision.nextState,
+          pauseReason: decision.pauseReason,
+          ...(decision.trialChanged ? { trialOffer: decision.trialOffer, trialEndsAt: decision.trialEndsAt } : {}),
+        });
+      }
       if (mode === "shadow" || mode === "live") {
-        intentIds = await enqueueIntents(tx, { account, trigger: input.trigger, mode, decision, sendable: live });
+        intentIds = await enqueueIntents(tx, { account, trigger, mode, decision, sendable: live });
       }
       return { decision, balance: reading, decisionId: row.id, intentIds };
     });
@@ -199,7 +217,7 @@ export async function applyDunning(db: Db, input: ApplyInput, opts: { mode?: Mod
   let executed: SideEffectResult[] | undefined;
   if (live) {
     if (committed.decision.sideEffects.length) {
-      executed = await executeEffects(committed.decision.sideEffects, account.locationId, deps);
+      executed = await executeEffects(committed.decision.sideEffects, account.locationId, deps, account.id);
       await db.dunningDecision.update({ where: { id: committed.decisionId }, data: { sideEffects: executed as unknown as Prisma.InputJsonValue } });
     }
     if (committed.intentIds.length) await sendPendingIntents(db, { onlyIds: committed.intentIds, deps: { ...deps.send, env } });

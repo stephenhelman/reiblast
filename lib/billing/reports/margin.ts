@@ -1,5 +1,5 @@
 import { monthsBetween } from "./denver";
-import { add, cmp, norm, pctOf, sub, sumOf, ZERO, type Money } from "./money";
+import { add, cmp, norm, sub, sumOf, ZERO, type Money } from "./money";
 import { netOf, isRevenue, monthOf, revenueClassOf, type LedgerRow, type RevenueMonth } from "./revenue";
 import type { summarizeCosts } from "./costs";
 
@@ -7,34 +7,28 @@ import type { summarizeCosts } from "./costs";
 
 export type AgencyMarginRow = { month: string; netRevenue: Money; agencyCash: Money; tax: Money; margin: Money; feeEstimate: Money | null; marginAfterFeeEstimate: Money | null };
 
-/** A valid ADMIN_PROCESSOR_FEE_PCT (0 < pct < 100), else null → the estimate line is hidden. */
-export function parseFeePct(v: string | undefined | null): string | null {
-  if (!v || !/^\d+(\.\d+)?$/.test(v.trim())) return null;
-  const n = Number(v);
-  return n > 0 && n < 100 ? v.trim() : null;
-}
-
 /**
  * Pure. Gross cash margin = net revenue collected (revenue rule) − agency recharges paid to GHL (auto + manual)
  * − wallet sales tax. Months are Denver months; every month in the range appears.
  */
-export function buildAgencyMargin(revenue: RevenueMonth[], costMonths: ReturnType<typeof summarizeCosts>["byMonth"], feePct: string | null): { rows: AgencyMarginRow[]; totals: Omit<AgencyMarginRow, "month"> } {
+export function buildAgencyMargin(revenue: RevenueMonth[], costMonths: ReturnType<typeof summarizeCosts>["byMonth"], feeByMonth: ReadonlyMap<string, Money> | null): { rows: AgencyMarginRow[]; totals: Omit<AgencyMarginRow, "month"> } {
   const costBy = new Map(costMonths.map((m) => [m.month, m.byGroup]));
   const rows = revenue.map((r): AgencyMarginRow => {
     const g = costBy.get(r.month);
     const agencyCash = norm(g?.agency_cash ?? ZERO);
     const tax = norm(g?.tax ?? ZERO);
     const margin = sub(sub(r.net, agencyCash), tax);
-    const feeEstimate = feePct ? pctOf(r.net, feePct) : null;
-    return { month: r.month, netRevenue: r.net, agencyCash, tax, margin, feeEstimate, marginAfterFeeEstimate: feeEstimate ? sub(margin, feeEstimate) : null };
+    // Modeled Kurv fees (lib/billing/statement) for months the statement covers; null before it starts.
+    const feeEstimate = feeByMonth?.get(r.month) ?? null;
+    return { month: r.month, netRevenue: r.net, agencyCash, tax, margin, feeEstimate, marginAfterFeeEstimate: feeEstimate !== null ? sub(margin, feeEstimate) : null };
   });
   const t = {
     netRevenue: sumOf(rows.map((r) => r.netRevenue)),
     agencyCash: sumOf(rows.map((r) => r.agencyCash)),
     tax: sumOf(rows.map((r) => r.tax)),
     margin: sumOf(rows.map((r) => r.margin)),
-    feeEstimate: feePct ? sumOf(rows.map((r) => r.feeEstimate as Money)) : null,
-    marginAfterFeeEstimate: feePct ? sumOf(rows.map((r) => r.marginAfterFeeEstimate as Money)) : null,
+    feeEstimate: feeByMonth ? sumOf(rows.map((r) => r.feeEstimate ?? ZERO)) : null,
+    marginAfterFeeEstimate: feeByMonth ? sumOf(rows.map((r) => r.marginAfterFeeEstimate ?? r.margin)) : null,
   };
   return { rows, totals: t };
 }

@@ -43,6 +43,11 @@ describe("metadata block", () => {
     expect(EXPORT_DISCLAIMER).toBe("Gross collected via GHL — processor fees, chargebacks and payouts not included. Not a bank reconciliation.");
     expect(meta[meta.length - 1]).toEqual([]); // blank line before the header
   });
+  it("omits the disclaimer line when asked (statement export)", () => {
+    const meta = metadataRows({ view: "statement", filters: {}, now: NOW, classifierVersion: 2, disclaimer: null });
+    expect(meta.flat().join("|")).not.toMatch(/Gross collected via GHL/);
+    expect(meta[meta.length - 1]).toEqual([]);
+  });
   it("says (none) when there are no filters", () => expect(metadataRows({ view: "members", filters: {}, now: NOW, classifierVersion: 2 })[2]).toEqual(["Filters", "(none)"]));
 });
 

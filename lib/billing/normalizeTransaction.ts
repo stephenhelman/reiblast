@@ -24,6 +24,18 @@ export type NormalizedTransaction = {
   subscriptionId: string | null;
   provider: string | null;
   occurredAt: Date;
+  /** Gateway fields (Authorize.net chargeSnapshot). `chargeId` is the processor's id; "0" means no gateway charge happened. */
+  chargeId: string | null;
+  hasChargeSnapshot: boolean;
+  transactionType: string | null;
+  cardBrand: string | null;
+  /** Integer cents of chargeSnapshot.settleAmount / authAmount (never the fractional GHL `amount`). */
+  settleAmountCents: number | null;
+  authAmountCents: number | null;
+  submitTimeUtc: Date | null;
+  avsCode: string | null;
+  responseCode: number | null;
+  isAuthorizeNet: boolean;
 };
 
 type Obj = Record<string, unknown>;
@@ -60,6 +72,17 @@ export function normalizeTransaction(input: unknown): NormalizedTransaction {
   const amount = num(r.amount);
   if (amount === null) throw new Error("normalizeTransaction: missing amount");
 
+  const snap = isObj(r.chargeSnapshot) ? r.chargeSnapshot : null;
+  const card = snap && isObj(snap.payment) && isObj(snap.payment.creditCard) ? snap.payment.creditCard : null;
+  const cents = (v: unknown): number | null => {
+    const n = num(v);
+    return n === null ? null : Math.round(n * 100);
+  };
+  const submit = snap ? str(snap.submitTimeUTC) : null;
+  const submitTimeUtc = submit && !Number.isNaN(new Date(submit).getTime()) ? new Date(submit) : null;
+  // chargeId can arrive as a string or a number.
+  const chargeId = typeof r.chargeId === "number" ? String(r.chargeId) : str(r.chargeId);
+
   return {
     id,
     contactId: str(r.contactId),
@@ -75,5 +98,15 @@ export function normalizeTransaction(input: unknown): NormalizedTransaction {
     subscriptionId: str(r.subscriptionId),
     provider,
     occurredAt,
+    chargeId,
+    hasChargeSnapshot: snap !== null,
+    transactionType: snap ? str(snap.transactionType) : null,
+    cardBrand: card ? str(card.cardType) : null,
+    settleAmountCents: snap ? cents(snap.settleAmount) : null,
+    authAmountCents: snap ? cents(snap.authAmount) : null,
+    submitTimeUtc,
+    avsCode: snap ? str(snap.AVSResponse) : null,
+    responseCode: snap ? num(snap.responseCode) : null,
+    isAuthorizeNet: provider === "authorize-net",
   };
 }

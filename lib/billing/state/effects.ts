@@ -36,22 +36,39 @@ export function dueForRetry(e: SideEffectResult, now: Date): boolean {
   return !e.nextRetryAt || new Date(e.nextRetryAt) <= now;
 }
 
-async function runOneEffect(e: SideEffect, locationId: string | null, deps: ApplyDeps): Promise<{ executedAt: string } | { error: string }> {
-  try {
-    if (!locationId) throw new Error("account has no locationId");
-    if (e.type === "saas_pause") await (deps.pause ?? (await import("@/lib/ghl/client")).pauseLocation)(locationId);
-    else await (deps.unpause ?? (await import("@/lib/ghl/client")).unpauseLocation)(locationId);
-    return { executedAt: new Date().toISOString() };
-  } catch (err) {
-    return { error: (err instanceof Error ? err.message : String(err)).slice(0, 300) };
+async function runOneEffect(e: SideEffect, locationId: string | null, deps: ApplyDeps, accountId?: string): Promise<{ executedAt: string } | { error: string }> {
+  const errors: string[] = [];
+  const attempt = async (fn: () => Promise<void>) => {
+    try {
+      await fn();
+    } catch (err) {
+      errors.push(err instanceof Error ? err.message : String(err));
+    }
+  };
+  if (e.type === "saas_pause") {
+    // Pausing ends Discord access too (the legacy pause route did the same). The two steps are independent and both idempotent: a failure of
+    // either fails the effect, and the retry re-runs both (re-pausing a paused location and re-revoking an unlinked member are no-ops).
+    await attempt(async () => {
+      if (!locationId) throw new Error("account has no locationId");
+      await (deps.pause ?? (await import("@/lib/ghl/client")).pauseLocation)(locationId);
+    });
+    if (accountId) await attempt(() => (deps.revokeDiscord ?? (async (id: string) => (await import("@/lib/discord/revoke")).revokeDiscordForEngine(id)))(accountId));
+  } else {
+    // Resume lifts the location pause only. Discord access is NOT restored here: the revoke deleted the member's DiscordLink and the bot has no
+    // grant endpoint — the member re-links through the normal Discord verify flow, which is eligible again once User.status is back to active.
+    await attempt(async () => {
+      if (!locationId) throw new Error("account has no locationId");
+      await (deps.unpause ?? (await import("@/lib/ghl/client")).unpauseLocation)(locationId);
+    });
   }
+  return errors.length ? { error: errors.join("; ").slice(0, 300) } : { executedAt: new Date().toISOString() };
 }
 
 /** The FIRST attempt, called synchronously right after a live decision's transaction commits (from applyDunning). */
-export async function executeEffects(effects: SideEffect[], locationId: string | null, deps: ApplyDeps): Promise<SideEffectResult[]> {
+export async function executeEffects(effects: SideEffect[], locationId: string | null, deps: ApplyDeps, accountId?: string): Promise<SideEffectResult[]> {
   const out: SideEffectResult[] = [];
   for (const e of effects) {
-    const r = await runOneEffect(e, locationId, deps);
+    const r = await runOneEffect(e, locationId, deps, accountId);
     out.push("executedAt" in r ? { ...e, executedAt: r.executedAt } : { ...e, error: r.error, attempts: 1, nextRetryAt: new Date(Date.now() + backoffMs(1)).toISOString() });
   }
   return out;
@@ -101,7 +118,7 @@ export async function retrySideEffects(
         continue;
       }
       stats.attempted++;
-      const r = await runOneEffect(e, account?.locationId ?? null, deps);
+      const r = await runOneEffect(e, account?.locationId ?? null, deps, d.ghlAccountId);
       if ("executedAt" in r) {
         next.push({ ...e, executedAt: r.executedAt, error: undefined, nextRetryAt: undefined });
         stats.succeeded++;

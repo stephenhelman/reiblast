@@ -64,7 +64,7 @@ describe("retrySideEffects", () => {
     const accounts = [{ id: "a1", locationId: "loc1" }];
     const unpause = vi.fn(async () => {});
     const pause = vi.fn(async () => {});
-    const stats = await retrySideEffects(makeDb(decisions, accounts) as any, { now, deps: { pause, unpause } });
+    const stats = await retrySideEffects(makeDb(decisions, accounts) as any, { now, deps: { revokeDiscord: async () => {}, pause, unpause } });
     expect(stats).toMatchObject({ attempted: 1, succeeded: 1, stillFailing: 0, exhausted: 0, superseded: 0 });
     expect(pause).toHaveBeenCalledWith("loc1");
     const [d] = decisions;
@@ -77,7 +77,7 @@ describe("retrySideEffects", () => {
     const decisions = [decision({ sideEffects: [due({ attempts: 2 })] })];
     const accounts = [{ id: "a1", locationId: "loc1" }];
     const pause = vi.fn(async () => { throw new Error("still down"); });
-    const stats = await retrySideEffects(makeDb(decisions, accounts) as any, { now, deps: { pause } });
+    const stats = await retrySideEffects(makeDb(decisions, accounts) as any, { now, deps: { revokeDiscord: async () => {}, pause } });
     expect(stats).toMatchObject({ attempted: 1, succeeded: 0, stillFailing: 1, exhausted: 0 });
     expect(decisions[0].sideEffects[0]).toMatchObject({ attempts: 3, error: "still down" });
     expect(decisions[0].sideEffects[0].exhausted).toBeUndefined();
@@ -88,7 +88,7 @@ describe("retrySideEffects", () => {
     const decisions = [decision({ sideEffects: [due({ attempts: MAX_EFFECT_ATTEMPTS - 1 })] })];
     const accounts = [{ id: "a1", locationId: "loc1" }];
     const pause = vi.fn(async () => { throw new Error("still down"); });
-    const stats = await retrySideEffects(makeDb(decisions, accounts) as any, { now, deps: { pause } });
+    const stats = await retrySideEffects(makeDb(decisions, accounts) as any, { now, deps: { revokeDiscord: async () => {}, pause } });
     expect(stats).toMatchObject({ exhausted: 1, stillFailing: 0 });
     expect(decisions[0].sideEffects[0]).toMatchObject({ attempts: MAX_EFFECT_ATTEMPTS, exhausted: true, nextRetryAt: undefined });
   });
@@ -99,7 +99,7 @@ describe("retrySideEffects", () => {
     const decisions = [newer, older]; // findMany pool order (createdAt desc) — newer first
     const accounts = [{ id: "a1", locationId: "loc1" }];
     const pause = vi.fn(async () => {});
-    const stats = await retrySideEffects(makeDb(decisions, accounts) as any, { now, deps: { pause } });
+    const stats = await retrySideEffects(makeDb(decisions, accounts) as any, { now, deps: { revokeDiscord: async () => {}, pause } });
     expect(pause).not.toHaveBeenCalled();
     expect(stats.superseded).toBe(1);
     expect(older.sideEffects[0]).toMatchObject({ superseded: true });
@@ -133,5 +133,46 @@ describe("getFailedSideEffects (Health)", () => {
     const decisions = [decision({ sideEffects: [{ type: "saas_pause", executedAt: "x" }, { type: "saas_pause", error: "e", superseded: true }] })];
     const rows = await getFailedSideEffects(makeDb(decisions, []) as any);
     expect(rows).toEqual([]);
+  });
+});
+
+describe("Discord rides the pause (saas_pause also revokes; saas_resume does not restore)", () => {
+  const now = () => new Date("2026-09-27T00:00:00Z");
+  it("saas_pause pauses the location AND revokes Discord for the account", async () => {
+    const pause = vi.fn(async () => {});
+    const revokeDiscord = vi.fn(async () => {});
+    const out = await executeEffects([{ type: "saas_pause" }], "loc1", { pause, revokeDiscord }, "acct1");
+    expect(pause).toHaveBeenCalledWith("loc1");
+    expect(revokeDiscord).toHaveBeenCalledWith("acct1");
+    expect(out[0]).toMatchObject({ executedAt: expect.any(String) });
+  });
+  it("saas_resume unpauses only — it never revokes", async () => {
+    const unpause = vi.fn(async () => {});
+    const revokeDiscord = vi.fn(async () => {});
+    const out = await executeEffects([{ type: "saas_resume" }], "loc1", { unpause, revokeDiscord }, "acct1");
+    expect(unpause).toHaveBeenCalledWith("loc1");
+    expect(revokeDiscord).not.toHaveBeenCalled();
+    expect(out[0].executedAt).toBeDefined();
+  });
+  it("a failed Discord revoke fails the effect (so the retry ladder re-runs it) even though the location pause succeeded", async () => {
+    const pause = vi.fn(async () => {});
+    const out = await executeEffects([{ type: "saas_pause" }], "loc1", { pause, revokeDiscord: async () => { throw new Error("db down"); } }, "acct1");
+    expect(pause).toHaveBeenCalled();
+    expect(out[0]).toMatchObject({ error: "db down", attempts: 1 });
+    expect(out[0].executedAt).toBeUndefined();
+  });
+  it("a failed location pause still revokes Discord (access ends regardless) and the effect is retried", async () => {
+    const revokeDiscord = vi.fn(async () => {});
+    const out = await executeEffects([{ type: "saas_pause" }], "loc1", { pause: async () => { throw new Error("GHL down"); }, revokeDiscord }, "acct1");
+    expect(revokeDiscord).toHaveBeenCalled();
+    expect(out[0]).toMatchObject({ error: "GHL down" });
+  });
+  it("the retry path revokes too (idempotent: the revoke hook is safe to run again), then marks the effect executed", async () => {
+    const decisions = [decision({ sideEffects: [{ type: "saas_pause", error: "db down", attempts: 1, nextRetryAt: new Date("2026-09-26").toISOString() }] })];
+    const revokeDiscord = vi.fn(async () => {});
+    const stats = await retrySideEffects(makeDb(decisions, [{ id: "a1", locationId: "loc1" }]) as any, { now, deps: { pause: async () => {}, revokeDiscord } });
+    expect(revokeDiscord).toHaveBeenCalledWith("a1");
+    expect(stats).toMatchObject({ attempted: 1, succeeded: 1 });
+    expect(decisions[0].sideEffects[0].executedAt).toBeDefined();
   });
 });

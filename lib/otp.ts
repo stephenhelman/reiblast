@@ -6,7 +6,7 @@ const OTP_EXPIRY_MS = 10 * 60 * 1000;
 const MAX_ATTEMPTS = 3;
 const GHL_BASE_URL = "https://services.leadconnectorhq.com";
 
-export type OtpFlow = "onboarding" | "tools" | "discord";
+export type OtpFlow = "onboarding" | "tools" | "discord" | "founders";
 
 function hqHeaders() {
   return {
@@ -123,7 +123,7 @@ async function deliverOtp(
   const result =
     flow === "onboarding"
       ? await deliverViaOnboardingWebhook(code, { contactId, phone })
-      : flow === "discord"
+      : flow === "discord" || flow === "founders" // founders reuses the Discord verification wording exactly
         ? await deliverViaDiscordSms(code, { contactId })
         : await deliverViaToolsSms(code, { contactId });
 

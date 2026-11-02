@@ -25,15 +25,10 @@ export function transitionEvents(sub: Pick<SubRow, "status" | "trialEndsAt" | "c
 }
 
 /**
- * The trigger for a churn event. While covered (now < coreCoveredUntil) a non-trial churn is DEFERRED: it is recorded under a trigger that
- * includes the coverage date, so it is written once per coverage value and the real churn (the plain trigger) can still fire once
- * coverage ends. A cancel during the trial is never deferred.
+ * The trigger for a churn / expiry event: one per subscription and outcome. While the account is exempt (GhlAccount.exemptUntil) applyDunning
+ * suffixes the trigger with the exemption date, so the event is recorded as a no-op now and can still be decided for real once it ends.
  */
-export function churnTrigger(subscriptionId: string, suffix: "canceled" | "expired", opts: { duringTrial: boolean; coveredUntil: Date | null; now: Date }): string {
-  const base = `sub:${subscriptionId}:${suffix}`;
-  if (!opts.duringTrial && opts.coveredUntil && opts.now.getTime() < opts.coveredUntil.getTime()) return `${base}:deferred:${opts.coveredUntil.toISOString().slice(0, 10)}`;
-  return base;
-}
+export const churnTrigger = (subscriptionId: string, suffix: "canceled" | "expired"): string => `sub:${subscriptionId}:${suffix}`;
 
 /** Has a trial ended (+grace) on a subscription that is still live? (Whether it CONVERTED is a ledger question, checked by the job.) */
 export function trialEndedWithoutRelationshipEnd(sub: Pick<SubRow, "status" | "trialEndsAt">, now: Date): boolean {

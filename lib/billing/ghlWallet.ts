@@ -7,6 +7,9 @@ import type { WalletTxRow } from "./usageRollup";
 const BASE = "https://services.leadconnectorhq.com";
 export const apiStats = { calls: 0 };
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+export const RETRY_ATTEMPTS = 6;
+export const RETRY_BASE_MS = 2000; // 2s, 4s, 8s, 16s, 30s (capped)
+const RETRY_MAX_MS = 30_000;
 
 export class GhlScopeError extends Error {}
 
@@ -21,15 +24,26 @@ async function call(method: "GET" | "POST", path: string, body?: unknown, versio
   const { token, companyId } = creds();
   const okPost = method === "POST" && path === `/saas/companies/${companyId}/wallet-transactions`;
   if (method !== "GET" && !okPost) throw new Error(`blocked GHL call: ${method} ${path}`);
-  for (let attempt = 0; attempt < 6; attempt++) {
+  // Every call here is a read, so retrying is always safe. Retried: 429, any 5xx (incl. Cloudflare 520-524) and network errors,
+  // with exponential backoff; auth errors are never retried.
+  let last = "no attempt";
+  for (let attempt = 0; attempt < RETRY_ATTEMPTS; attempt++) {
     apiStats.calls++;
-    const res = await fetch(BASE + path, {
-      method,
-      headers: { Authorization: `Bearer ${token}`, Version: version, Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
-      body: body ? JSON.stringify(body) : undefined,
-    });
-    if (res.status === 429) {
-      await sleep(2000 * 2 ** attempt);
+    let res: Response;
+    try {
+      res = await fetch(BASE + path, {
+        method,
+        headers: { Authorization: `Bearer ${token}`, Version: version, Accept: "application/json", ...(body ? { "Content-Type": "application/json" } : {}) },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (e) {
+      last = `network error (${e instanceof Error ? e.message : "unknown"})`;
+      await sleep(Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS));
+      continue;
+    }
+    if (res.status === 429 || res.status >= 500) {
+      last = `HTTP ${res.status}`;
+      await sleep(Math.min(RETRY_BASE_MS * 2 ** attempt, RETRY_MAX_MS));
       continue;
     }
     if (res.status === 401 || res.status === 403) throw new GhlScopeError(`GHL ${res.status} on ${method} ${path.replace(companyId, "{companyId}")}`);
@@ -42,7 +56,7 @@ async function call(method: "GET" | "POST", path: string, body?: unknown, versio
     }
     return { status: res.status, json };
   }
-  throw new Error("GHL 429 retries exhausted");
+  throw new Error(`GHL retries exhausted after ${RETRY_ATTEMPTS} attempts (last: ${last})`);
 }
 
 /** One page (max 1000) of wallet transactions in a settlementTime window, optionally for one location. */

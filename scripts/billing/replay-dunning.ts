@@ -10,7 +10,7 @@
  * event, otherwise they are ESTIMATED by reconstructing back from the nearest snapshot (wallet usage + ledger recharge credits). The
  * balance is needed for a wallet FAILURE (strike only if negative) and for a recharge SUCCESS that could cure (resume/clear only if the
  * post-recharge balance is >= 0);
- * with no usable snapshot the balance is unknown and no strike is counted. coreCoveredUntil is checked at each event's own time.
+ * with no usable snapshot the balance is unknown and no strike is counted. exemptUntil is checked at each event's own time.
  * Reads from GHL (GET only): one subscription per trial_auth event. Refuses the production host.
  */
 import { Prisma } from "@prisma/client";
@@ -48,7 +48,7 @@ async function main() {
   const [members, ledger, snaps] = await Promise.all([
     db.ghlAccount.findMany({
       where: { accountType: "member" },
-      select: { id: true, locationId: true, billingState: true, warningCount: true, pauseReason: true, coreCoveredUntil: true, user: { select: { status: true, warningCount: true } } },
+      select: { id: true, locationId: true, billingState: true, warningCount: true, pauseReason: true, exemptUntil: true, user: { select: { status: true, warningCount: true } } },
     }),
     db.billingLedgerEntry.findMany({ orderBy: { occurredAt: "asc" }, select: { ghlTransactionId: true, classification: true, status: true, ghlAccountId: true, occurredAt: true, subscriptionId: true, amount: true, amountRefunded: true } }),
     db.walletBalanceSnapshot.findMany({ select: { locationId: true, status: true, balance: true, createdAt: true } }),
@@ -120,7 +120,7 @@ async function main() {
     }
     const out = replayAccount(evs, {
       seed: seedSnapshot(rows),
-      coveredUntil: m.coreCoveredUntil,
+      exemptUntil: m.exemptUntil,
       balanceFor: (e) => balances.get(e.trigger),
       subscriptionFor: (e) => (skipSubs ? null : e.subscriptionId ? (subMap.get(e.subscriptionId) ?? null) : null),
     });
@@ -131,7 +131,7 @@ async function main() {
 
   // ── report ────────────────────────────────────────────────────────────────
   const strikesTotal = new Map<string, number>();
-  let strikeEvents = 0, coveredIgnored = 0, pf = 0, resumes = 0, pausesTotal = 0, notCured = 0, cured = 0;
+  let strikeEvents = 0, exemptIgnored = 0, pf = 0, resumes = 0, pausesTotal = 0, notCured = 0, cured = 0;
   const pauses = new Map<string, number>();
   const finalStates = new Map<string, number>();
   const timeline: string[] = [];
@@ -141,7 +141,7 @@ async function main() {
     const ms = milestones(r.steps);
     for (const x of ms) {
       if (x.kind === "strike") strikeEvents++;
-      if (x.kind === "covered_ignored") coveredIgnored++;
+      if (x.kind === "exempt_ignored") exemptIgnored++;
       if (x.kind === "payment_failed") pf++;
       if (x.kind === "resumed") resumes++;
       if (x.kind === "paused") { pausesTotal++; tally(pauses, x.detail); }
@@ -158,7 +158,7 @@ async function main() {
 
   console.log("TOTALS");
   console.log(`  events replayed: ${[...results].reduce((n, r) => n + r.steps.length, 0)}   members: ${results.length}`);
-  console.log(`  counted strikes: ${strikeEvents}   pauses: ${pausesTotal} ${JSON.stringify(Object.fromEntries(pauses))}   resumes: ${resumes}   payment_failed episodes started: ${pf}   core failures ignored (covered): ${coveredIgnored}`);
+  console.log(`  counted strikes: ${strikeEvents}   pauses: ${pausesTotal} ${JSON.stringify(Object.fromEntries(pauses))}   resumes: ${resumes}   payment_failed episodes started: ${pf}   core failures ignored (covered): ${exemptIgnored}`);
   console.log(`  recharge successes that CURED (balance >= 0: resumed / cleared payment_failed): ${cured}   that did NOT cure (balance still negative / unknown → strikes reset, state stays): ${notCured}`);
   console.log(`  wallet-failure balances used — real snapshot: ${realBal}, ESTIMATED: ${est}, unknown (strike not counted): ${unknownBal}`);
   console.log("  replay final state distribution:", Object.fromEntries([...finalStates].sort()));

@@ -1,3 +1,6 @@
+import { prisma } from "@/lib/prisma";
+import { countSlotsTaken, slotsLeftFrom } from "./slots";
+
 /** Length of the free trial in Founder's Offer copy. Deliberately not lib/pricing.ts TRIAL_LENGTH_DAYS (7, the standard trial). */
 export const FOUNDER_TRIAL_DAYS = 14;
 
@@ -20,11 +23,9 @@ export function getFounderCheckoutLink(): string | null {
   return process.env.FOUNDER_CHECKOUT_LINK?.trim() || null;
 }
 
-/**
- * Founder REIsite slots still unclaimed, used only by the CLAIMS_OPEN promo copy.
- * TODO(task b): count FounderClaim rows and return TOTAL - claimed. Until then it is a fixed 10.
- */
-export const FOUNDER_SLOTS_TOTAL = 10;
+export { FOUNDER_SLOTS_TOTAL } from "./slots";
+
+/** Founder slots still open, from the live FounderClaim table (see slots.ts for the 25-hour hold rule). */
 export async function getFounderSlotsLeft(): Promise<number> {
-  return FOUNDER_SLOTS_TOTAL;
+  return slotsLeftFrom(await countSlotsTaken(prisma));
 }

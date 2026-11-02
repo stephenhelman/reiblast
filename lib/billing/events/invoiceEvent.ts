@@ -17,7 +17,7 @@ export async function applyInvoice(db: PrismaClient, inv: InvoiceInfo, opts: { d
   if (!inv.contactId) return { acted: false, why: "invoice has no contact" };
   const account = await db.ghlAccount.findFirst({ where: { contactId: inv.contactId, accountType: "member" }, select: { id: true } });
   if (!account) return { acted: false, why: "no member account for the invoice's contact" };
-  // Coverage (now < coreCoveredUntil) is honored inside decide(): the decision is recorded as "covered, ignored".
+  // An exemption (now < exemptUntil) is honored inside decide(): the decision is recorded as "exempt".
   const r = await applyDunning(db, { ghlAccountId: account.id, trigger: `invoice:${inv.id}`, event: { kind: "invoice_expired", invoiceId: inv.id }, eventAt: now }, { mode: dunningMode(opts.deps?.env), deps: opts.deps });
   return { acted: r.status === "recorded", why: `${exp.why} → ${r.status}${r.status === "recorded" ? `: ${r.decision.reason}` : r.status === "skipped" ? ` (${r.why})` : ""}` };
 }

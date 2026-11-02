@@ -232,12 +232,12 @@ describe("invoice-event route", () => {
     expect(db.events.every((e: any) => e.processedAt)).toBe(true);
     expect(db.events[3].lastError).toMatch(/not a core invoice/);
   });
-  it("coverage is honored: recorded as 'covered, ignored'", async () => {
+  it("an exemption is honored: recorded as 'exempt'", async () => {
     invoices.byId.INVOICE0000001 = inv();
-    const db = setup({ billingState: "active", coreCoveredUntil: new Date("2099-01-01T00:00:00Z") });
+    const db = setup({ billingState: "active", exemptUntil: new Date("2099-01-01T00:00:00Z") });
     await invoice({ invoiceId: "INVOICE0000001" });
     expect(db.decisions[0]).toMatchObject({ toState: "active", coreFailureOpen: false });
-    expect(db.decisions[0].reason).toMatch(/covered, ignored/);
+    expect(db.decisions[0].reason).toMatch(/^exempt/);
   });
   it("idempotent: the same invoice delivered twice decides once", async () => {
     invoices.byId.INVOICE0000001 = inv();

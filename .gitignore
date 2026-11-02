@@ -54,3 +54,6 @@ scripts/billing-audit/output/
 
 # local DealMachine payload samples
 deal-machine-*.txt
+
+# audit reports (local scratch)
+scratch/

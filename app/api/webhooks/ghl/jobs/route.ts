@@ -31,7 +31,7 @@ async function record(
   if (db) {
     try {
       // processedAt is set immediately: nothing ever "processes" a job_trigger row later, so it must never look unprocessed
-      // to the replay job or to Health's failed/pending event counts (NON_REPLAYABLE_SOURCES is the second line of defense).
+      // to the replay job or to Health's failed/pending event counts (the REPLAYABLE_SOURCES whitelist is the second line of defense).
       await db.ghlEvent.create({ data: { source: "job_trigger", externalId: job ?? null, payload: payload as Prisma.InputJsonObject, processedAt: new Date() } });
     } catch (err) {
       // The insert itself failed — log it, but still return the reason below; a logging failure must never mask it.

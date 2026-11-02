@@ -40,7 +40,8 @@ beforeEach(() => {
   fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: `msg${++n}` }), { status: 200 }));
   vi.stubGlobal("fetch", fetchMock);
   const f = fakePromoDb();
-  state.db = f.db.promoPost ? { promoPost: f.db.promoPost } : null;
+  // founderClaim/$queryRaw: the live slot count (getFounderSlotsLeft) reads an empty claims table at the test clock.
+  state.db = f.db.promoPost ? { promoPost: f.db.promoPost, founderClaim: { findMany: async () => [] }, $queryRaw: async () => [{ now: new Date() }] } : null;
   table = f.table;
   vi.spyOn(console, "log").mockImplementation(() => {});
   vi.spyOn(console, "error").mockImplementation(() => {});

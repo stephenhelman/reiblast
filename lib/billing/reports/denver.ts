@@ -47,6 +47,15 @@ export function denverDayStart(day: string): Date {
   return new Date(t);
 }
 
+/** The UTC instant at which Denver's wall clock reads `hour`:00 on the given day ("YYYY-MM-DD"). Valid for hours outside the 02:00 DST gap. */
+export function denverWallInstant(day: string, hour: number): Date {
+  const [y, m, d] = day.split("-").map(Number);
+  const guess = Date.UTC(y, m - 1, d, hour);
+  let t = guess - offsetMs(guess);
+  t = guess - offsetMs(t);
+  return new Date(t);
+}
+
 export const MONTH_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 export const isMonth = (s: unknown): s is string => typeof s === "string" && MONTH_RE.test(s);
 

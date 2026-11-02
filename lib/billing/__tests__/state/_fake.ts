@@ -19,7 +19,7 @@ export function matches(row: Row, where: Row = {}): boolean {
     return v === cond;
   });
 }
-export type FakeAccount = { id: string; accountType: "member" | "internal"; locationId: string | null; coreCoveredUntil: Date | null; billingState: any; warningCount: number; pauseReason: any; contactId?: string; trialOffer?: string | null; trialEndsAt?: Date | null; userId?: string; onboardingStage?: string | null; onboardingProgress?: string | null; activeClientSince?: Date | null };
+export type FakeAccount = { id: string; accountType: "member" | "internal"; locationId: string | null; exemptUntil: Date | null; billingState: any; warningCount: number; pauseReason: any; contactId?: string; trialOffer?: string | null; trialEndsAt?: Date | null; userId?: string; onboardingStage?: string | null; onboardingProgress?: string | null; activeClientSince?: Date | null };
 
 /**
  * In-memory stand-in for the delegates the engine touches. `ghlAccount` deliberately has NO update/updateMany/create: a shadow run
@@ -66,6 +66,7 @@ export function makeFake(accounts: FakeAccount[], ledger: Row[] = [], opts: { wr
         return row;
       },
       findUnique: async ({ where }: any) => events.find((e) => e.id === where.id) ?? null,
+      findFirst: async ({ where }: any) => events.find((e) => Object.entries(where).every(([k, v]) => e[k] === v)) ?? null,
       findMany: async ({ where, take, orderBy }: any) => {
         const f = events.filter((e) => matches(e, { ...where, id: undefined, receivedAt: undefined }) && (!where.id?.not || e.id !== where.id.not) && (!where.receivedAt?.gte || e.receivedAt >= where.receivedAt.gte));
         if (orderBy?.receivedAt === "desc") f.sort((a, b) => b.receivedAt - a.receivedAt || (a.id < b.id ? 1 : -1));
@@ -91,7 +92,13 @@ export function makeFake(accounts: FakeAccount[], ledger: Row[] = [], opts: { wr
       findMany: async ({ where }: any) => accounts.filter((a) => matches(a, where)),
       // read-only unless the test opts in (live mode): a shadow run that tried to write state would throw a TypeError here
       ...(opts.writable ? { update: async ({ where, data }: any) => { writes.push(`ghlAccount.update ${JSON.stringify(data)}`); Object.assign(accounts.find((a) => a.id === where.id)!, data); } } : {}),
-      ...(opts.writable ? { updateMany: async ({ where, data }: any) => { const hit = accounts.filter((x) => matches(x, where)); for (const x of hit) { writes.push(`ghlAccount.updateMany ${JSON.stringify(data)}`); Object.assign(x, data); } return { count: hit.length }; } } : {}),
+      // updateMany is always present but, unless writable, ONLY accepts the shadow starting-state seed (where billingState IS NULL; never overwrites)
+      updateMany: async ({ where, data }: any) => {
+        if (!opts.writable && where.billingState !== null) throw new TypeError("shadow may only seed a NULL billingState");
+        const hit = accounts.filter((x) => matches(x, where));
+        for (const x of hit) { writes.push(`ghlAccount.updateMany ${JSON.stringify(data)}`); Object.assign(x, data); }
+        return { count: hit.length };
+      },
     },
     ...(opts.writable ? { user: { updateMany: async ({ where, data }: any) => { writes.push(`user.updateMany ${JSON.stringify(data)}`); const u = users.find((x) => x.id === where.id); if (u && (!where.status || where.status.in.includes(u.status))) Object.assign(u, data); return { count: u ? 1 : 0 }; } } } : {}),
     billingLedgerEntry: {
@@ -108,7 +115,7 @@ export function makeFake(accounts: FakeAccount[], ledger: Row[] = [], opts: { wr
         return decisions.find((d) => key(d) === `${w.trigger}|${w.ghlAccountId}|${w.mode}`) ?? null;
       },
       findFirst: async ({ where }: any) => {
-        const found = decisions.filter((d) => d.ghlAccountId === where.ghlAccountId && d.mode === where.mode);
+        const found = decisions.filter((d) => d.ghlAccountId === where.ghlAccountId && (where.mode === undefined || d.mode === where.mode) && (!where.eventKind?.in || where.eventKind.in.includes(d.eventKind)) && (!where.eventAt?.gte || d.eventAt >= where.eventAt.gte));
         found.sort((a, b) => b.eventAt - a.eventAt || b.createdAt - a.createdAt);
         return found[0] ?? null;
       },
@@ -150,7 +157,7 @@ export function makeFake(accounts: FakeAccount[], ledger: Row[] = [], opts: { wr
   return db;
 }
 
-export const member = (o: Partial<FakeAccount> = {}): FakeAccount => ({ id: "A1", accountType: "member", locationId: "LOC_A1", coreCoveredUntil: null, billingState: "active", warningCount: 0, pauseReason: null, contactId: "CONTACT_A1", trialOffer: null, trialEndsAt: null, userId: "U1", onboardingStage: null, onboardingProgress: null, activeClientSince: new Date("2026-09-01T00:00:00Z"), ...o }); // handed off by default (Clients routing); pass activeClientSince: null for an onboarding member
+export const member = (o: Partial<FakeAccount> = {}): FakeAccount => ({ id: "A1", accountType: "member", locationId: "LOC_A1", exemptUntil: null, billingState: "active", warningCount: 0, pauseReason: null, contactId: "CONTACT_A1", trialOffer: null, trialEndsAt: null, userId: "U1", onboardingStage: null, onboardingProgress: null, activeClientSince: new Date("2026-09-01T00:00:00Z"), ...o }); // handed off by default (Clients routing); pass activeClientSince: null for an onboarding member
 export const NOW = new Date("2026-09-27T12:00:00.000Z");
 export const hoursAgo = (h: number, from = NOW) => new Date(from.getTime() - h * 3600 * 1000);
 export const negBal = async () => ({ status: "ok" as const, value: "-3.000000", estimated: false });

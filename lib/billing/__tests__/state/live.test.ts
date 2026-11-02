@@ -8,11 +8,12 @@ const user = (o: Record<string, unknown> = {}) => ({ id: "U1", status: "active",
 
 function rig(accountOver = {}, userOver = {}, extra: { ledger?: any[] } = {}) {
   const db = makeFake([member(accountOver)], extra.ledger ?? [], { writable: true, users: [user(userOver)] });
-  const calls = { pause: [] as string[], unpause: [] as string[], posts: [] as any[] };
+  const calls = { pause: [] as string[], unpause: [] as string[], revoked: [] as string[], posts: [] as any[] };
   const deps = (over: Record<string, unknown> = {}) => ({
     now: () => NOW, env: ENV, readBalance: negBal,
     pause: async (l: string) => void calls.pause.push(l),
     unpause: async (l: string) => void calls.unpause.push(l),
+    revokeDiscord: async (a: string) => void calls.revoked.push(a),
     send: { env: ENV, post: async (u: string, b: unknown) => (calls.posts.push([u, b]), { ok: true, status: 200 }) },
     ...over,
   });
@@ -134,10 +135,10 @@ describe("live branch (only reachable with DUNNING_MODE=live)", () => {
   it("live projects from the persisted account (not from shadow rows), and keeps the open-core-failure flag from its own decisions", async () => {
     const { db, deps } = rig({ billingState: "active" });
     await applyDunning(db, { ghlAccountId: "A1", trigger: "ledger:cf", event: { kind: "core_failed" }, eventAt: hoursAgo(2) }, { mode: "live", deps: deps() });
-    expect(db.decisions[0]).toMatchObject({ toState: "payment_failed", coreFailureOpen: true });
-    // a wallet recharge success with a positive balance must NOT clear payment_failed while the core failure is open
+    expect(db.decisions[0]).toMatchObject({ toState: "paused", toStrikes: 0, coreFailureOpen: true });
+    // a wallet recharge success with a positive balance must NOT lift the pause while the core failure is open
     await applyDunning(db, { ghlAccountId: "A1", trigger: "ledger:ws", event: { kind: "wallet_recharge_succeeded", wallet: "auto" }, eventAt: hoursAgo(1) }, { mode: "live", deps: deps({ readBalance: posBal }) });
-    expect(db.decisions[1]).toMatchObject({ fromState: "payment_failed", toState: "payment_failed", coreFailureOpen: true });
+    expect(db.decisions[1]).toMatchObject({ fromState: "paused", toState: "paused", coreFailureOpen: true });
   });
 
   it("userStatusFor maps states", () => {
@@ -159,5 +160,63 @@ describe("live is OFF by default", () => {
     } finally {
       if (prev !== undefined) process.env.DUNNING_MODE = prev;
     }
+  });
+});
+
+describe("live pause revokes Discord; resume does not restore it", () => {
+  it("the 3rd strike → saas_pause → pauseLocation AND a Discord revoke for the account", async () => {
+    const { db, calls, deps } = rig({ billingState: "payment_failed", warningCount: 2, locationId: "LOC_A1" });
+    await applyDunning(db, failed("p"), { mode: "live", deps: deps() });
+    expect(calls.pause).toEqual(["LOC_A1"]);
+    expect(calls.revoked).toEqual(["A1"]);
+  });
+  it("a core failure pauses the same way (pauseLocation + Discord revoke)", async () => {
+    const { db, calls, deps } = rig({ billingState: "active", locationId: "LOC_A1" });
+    await applyDunning(db, { ghlAccountId: "A1", trigger: "ledger:cf2", event: { kind: "core_failed" }, eventAt: hoursAgo(1) }, { mode: "live", deps: deps() });
+    expect(db.decisions[0]).toMatchObject({ toState: "paused", pauseReason: "non_payment" });
+    expect(calls.pause).toEqual(["LOC_A1"]);
+    expect(calls.revoked).toEqual(["A1"]);
+  });
+  it("a core payment resumes the location and never touches Discord", async () => {
+    const { db, calls, deps } = rig({ billingState: "paused", pauseReason: "non_payment", locationId: "LOC_A1" });
+    await applyDunning(db, { ghlAccountId: "A1", trigger: "ledger:cs", event: { kind: "core_succeeded" }, eventAt: hoursAgo(1) }, { mode: "live", deps: deps() });
+    expect(calls.unpause).toEqual(["LOC_A1"]);
+    expect(calls.revoked).toEqual([]);
+  });
+});
+
+describe('DUNNING_LIVE_ACCOUNTS="*" means every member account (internal accounts still excluded)', () => {
+  const STAR = { ...ENV, DUNNING_LIVE_ACCOUNTS: "*" };
+  const star = (db: ReturnType<typeof makeFake>, calls: { pause: string[] }, id = "A1") =>
+    applyDunning(db, { ...failed("star"), ghlAccountId: id }, { mode: "live", deps: { now: () => NOW, env: STAR, readBalance: negBal, pause: async (l: string) => void calls.pause.push(l), revokeDiscord: async () => {}, send: { env: STAR, post: async () => ({ ok: true, status: 200 }) } } });
+
+  it("isLiveAllowed: '*' allows any account id / location; an empty list still allows nobody; a named list is unchanged", () => {
+    expect(isLiveAllowed({ id: "ANY", locationId: null }, { DUNNING_LIVE_ACCOUNTS: "*" })).toBe(true);
+    expect(isLiveAllowed({ id: "ANY", locationId: "LOCX" }, { DUNNING_LIVE_ACCOUNTS: " * " })).toBe(true);
+    expect(isLiveAllowed({ id: "ANY", locationId: "LOCX" }, { DUNNING_LIVE_ACCOUNTS: "" })).toBe(false);
+    expect(isLiveAllowed({ id: "ANY", locationId: "LOCX" }, {})).toBe(false);
+    expect(isLiveAllowed({ id: "ANY", locationId: "LOCX" }, { DUNNING_LIVE_ACCOUNTS: "A1,LOCY" })).toBe(false);
+    expect(isLiveAllowed({ id: "A1", locationId: null }, { DUNNING_LIVE_ACCOUNTS: "A1,LOCY" })).toBe(true);
+    expect(liveAllowlist({ DUNNING_LIVE_ACCOUNTS: "*" })).toEqual(["*"]);
+  });
+  it("a member that is NOT named anywhere is acted on live (state written, location paused)", async () => {
+    const db = makeFake([member({ id: "SOMEONE", locationId: "LOC_S", billingState: "payment_failed", warningCount: 2 })], [], { writable: true, users: [user({ id: "U1" })] });
+    const calls = { pause: [] as string[] };
+    const r = await star(db, calls, "SOMEONE");
+    expect(r).toMatchObject({ status: "recorded", mode: "live" });
+    expect(calls.pause).toEqual(["LOC_S"]);
+    expect(db.decisions[0]).toMatchObject({ mode: "live", toState: "paused" });
+  });
+  it("an INTERNAL account is still skipped, even with '*'", async () => {
+    const db = makeFake([member({ id: "OWNER", accountType: "internal" })], [], { writable: true, users: [user()] });
+    const calls = { pause: [] as string[] };
+    expect(await star(db, calls, "OWNER")).toMatchObject({ status: "skipped", why: "not a member account" });
+    expect(calls.pause).toEqual([]);
+    expect(db.decisions).toHaveLength(0);
+  });
+  it("without '*' the same unnamed member stays shadow", async () => {
+    const db = makeFake([member({ id: "SOMEONE", locationId: "LOC_S", billingState: "payment_failed", warningCount: 2 })], [], { writable: true, users: [user()] });
+    const r = await applyDunning(db, { ...failed("nostar"), ghlAccountId: "SOMEONE" }, { mode: "live", deps: { now: () => NOW, env: ENV, readBalance: negBal } });
+    expect(r).toMatchObject({ status: "recorded", mode: "shadow" });
   });
 });

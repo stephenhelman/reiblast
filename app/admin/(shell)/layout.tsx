@@ -1,6 +1,7 @@
 import NavLinks from "@/components/admin/NavLinks";
 import { adminBase } from "@/lib/admin/cookie";
 import { requireOwnerOrRedirect } from "@/lib/admin/requireOwner";
+import { FOOTER_NOTE } from "@/lib/admin/format";
 import { logoutAction } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -10,7 +11,7 @@ export default async function ShellLayout({ children }: { children: React.ReactN
   const base = await adminBase();
   return (
     <>
-      <header className="border-b border-border-default bg-surface">
+      <header className="border-b border-border-default bg-surface print:hidden">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-6 py-3">
           <div className="flex flex-wrap items-center gap-6">
             <span className="text-sm font-bold text-gold">REIblast Admin</span>
@@ -22,6 +23,7 @@ export default async function ShellLayout({ children }: { children: React.ReactN
         </div>
       </header>
       <main className="mx-auto max-w-6xl px-6 py-8">{children}</main>
+      <footer className="border-t border-border-default px-6 py-4 text-center text-xs text-white/40 print:hidden">{FOOTER_NOTE}</footer>
     </>
   );
 }

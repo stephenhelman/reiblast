@@ -102,19 +102,9 @@ export function toWalletTransactionData(row: WalletTxRow, scopeKey: string, ghlA
 export type UsageWindow = { from: string; to: string };
 
 /**
- * Windows the nightly wallet_usage job works through, in order: the previous 2 UTC days, plus — on UTC day-of-month 3
- * only — the whole previous calendar month as ≤7-day windows (keeps each window's cursor and page count bounded).
+ * Windows the nightly wallet_usage job works through: the previous 2 UTC days. The whole-month re-pull is its own
+ * resumable job (wallet_month_refresh), not part of this one.
  */
 export function planUsageWindows(now: Date): UsageWindow[] {
-  const windows: UsageWindow[] = [previousUtcWindow(now, 2)];
-  if (now.getUTCDate() !== 3) return windows;
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth();
-  const monthStart = Date.UTC(y, m - 1, 1); // Date.UTC normalizes m-1 = -1 to December of the previous year
-  const nextMonthStart = Date.UTC(y, m, 1);
-  for (let start = monthStart; start < nextMonthStart; start += 7 * 864e5) {
-    const end = Math.min(start + 7 * 864e5, nextMonthStart) - 1;
-    windows.push({ from: new Date(start).toISOString(), to: new Date(end).toISOString() });
-  }
-  return windows;
+  return [previousUtcWindow(now, 2)];
 }

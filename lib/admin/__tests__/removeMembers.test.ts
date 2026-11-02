@@ -104,6 +104,8 @@ const base = (): Record<string, Row[]> => ({
   ],
   discordLink: [{ id: "DL1", ghlAccountId: "A1", discordUserId: "111" }, { id: "DL2", ghlAccountId: "A2", discordUserId: "222" }],
   discordVerifyAttempt: [{ id: "DV1", ghlAccountId: "A1", discordUserId: "111" }, { id: "DV2", ghlAccountId: null, discordUserId: "111" }, { id: "DV3", ghlAccountId: "A2", discordUserId: "222" }],
+  founderClaim: [{ id: "FC1", ghlAccountId: "A1", status: "RELEASED" }, { id: "FC2", ghlAccountId: "A2", status: "PAID" }],
+  founderVerifyAttempt: [{ id: "FV1", ghlAccountId: "A1" }, { id: "FV2", ghlAccountId: "A2" }],
   ghlSubscriptionState: [{ id: "SS1", subscriptionId: "SUB1", contactId: C }, { id: "SS2", subscriptionId: "SUB2", contactId: "OTHERCONTACT9" }],
   ghlEvent: [
     { id: "E1", externalId: C, payload: { stage: "x" } },
@@ -123,7 +125,7 @@ describe("planRemoval — dry-run counts every dependent row, across tables with
     const want: Record<string, number> = {
       CreditHold: 1, ApiCall: 2, LedgerEntry: 1, ToolUse: 1, MemberAction: 1, CartLine: 1, Cart: 1, Subscription: 1, Wallet: 1, Transaction: 1,
       Deal: 1, LandDeal: 1, GhlToken: 1, WalletBalanceSnapshot: 2, UsageRollup: 2, WalletTransaction: 1, DunningDecision: 1, GhlIntent: 1,
-      BillingLedgerEntry: 2, DiscordLink: 1, DiscordVerifyAttempt: 1, GhlSubscriptionState: 1, [EVENT_TABLE]: 3, GhlAccount: 1, User: 1,
+      BillingLedgerEntry: 2, DiscordLink: 1, DiscordVerifyAttempt: 1, FounderClaim: 1, FounderVerifyAttempt: 1, GhlSubscriptionState: 1, [EVENT_TABLE]: 3, GhlAccount: 1, User: 1,
     };
     for (const [t, n] of Object.entries(want)) expect(count(p, t), t).toBe(n);
     expect(p.total).toBe(Object.values(want).reduce((a, b) => a + b, 0));
@@ -157,6 +159,20 @@ describe("planRemoval — refusals", () => {
   });
   it("failed / zero-amount / refunded-to-zero-status rows alone do not block removal", async () => {
     expect((await planRemoval(fakeDb(base()), C) as any).ok).toBe(true);
+  });
+  it("a member with a FREE_WINNER or PAID founder claim is refused; RELEASED / PENDING_PAYMENT are not", async () => {
+    for (const status of ["FREE_WINNER", "PAID"]) {
+      const seed = base();
+      seed.founderClaim[0].status = status;
+      const p: any = await planRemoval(fakeDb(seed), C);
+      expect(p.ok, status).toBe(false);
+      expect(p.refusal.reason).toMatch(/Founder's Offer claim/);
+    }
+    for (const status of ["RELEASED", "PENDING_PAYMENT"]) {
+      const seed = base();
+      seed.founderClaim[0].status = status;
+      expect(((await planRemoval(fakeDb(seed), C)) as any).ok, status).toBe(true);
+    }
   });
   it("unknown contact, bad id, ambiguous User, admin role, internal account, and a User/GhlAccount mismatch are all refused", async () => {
     const reasons = async (mut: (s: Record<string, Row[]>) => void, id = C) => { const s = base(); mut(s); const p: any = await planRemoval(fakeDb(s), id); return p.ok ? "OK" : p.refusal.reason; };

@@ -9,7 +9,7 @@ const row = (at: string, cls: BillingClass, amount: string, o: Partial<LedgerRow
 });
 const facts = (o: Partial<MemberFacts> = {}): MemberFacts => ({
   accountId: "A", locationId: "LA", locationName: "Acme", businessName: null, billingState: "active", pauseReason: null, legacyUnreconciled: false, strikes: 0, trialOffer: null, trialEndsAt: null,
-  coveredUntil: null, coverageNote: null, balance: null, lastCorePaymentAt: null, usage30: "0.000000", recharges30: "0.000000", ...o,
+  exemptUntil: null, exemptReason: null, balance: null, lastCorePaymentAt: null, usage30: "0.000000", recharges30: "0.000000", ...o,
 });
 
 describe("expected next charge (≈) and the coverage override", () => {
@@ -23,12 +23,12 @@ describe("expected next charge (≈) and the coverage override", () => {
     expect(withEstimates(facts({ lastCorePaymentAt: new Date("2026-08-21T12:00:00Z") })).expectedNextCharge?.toISOString()).toBe("2026-09-21T12:00:00.000Z");
     expect(withEstimates(facts()).expectedNextCharge).toBeNull();
   });
-  it("the override applies when coveredUntil is later than the estimate — or when there is no estimate", () => {
+  it("the override applies when exemptUntil is later than the estimate — or when there is no estimate", () => {
     const last = new Date("2026-08-21T12:00:00Z");
-    expect(withEstimates(facts({ lastCorePaymentAt: last, coveredUntil: new Date("2026-10-15T00:00:00Z") })).coverageOverrideApplies).toBe(true);
-    expect(withEstimates(facts({ lastCorePaymentAt: last, coveredUntil: new Date("2026-09-10T00:00:00Z") })).coverageOverrideApplies).toBe(false);
-    expect(withEstimates(facts({ lastCorePaymentAt: last, coveredUntil: null })).coverageOverrideApplies).toBe(false);
-    expect(withEstimates(facts({ coveredUntil: new Date("2026-10-15T00:00:00Z") })).coverageOverrideApplies).toBe(true);
+    expect(withEstimates(facts({ lastCorePaymentAt: last, exemptUntil: new Date("2026-10-15T00:00:00Z") })).coverageOverrideApplies).toBe(true);
+    expect(withEstimates(facts({ lastCorePaymentAt: last, exemptUntil: new Date("2026-09-10T00:00:00Z") })).coverageOverrideApplies).toBe(false);
+    expect(withEstimates(facts({ lastCorePaymentAt: last, exemptUntil: null })).coverageOverrideApplies).toBe(false);
+    expect(withEstimates(facts({ exemptUntil: new Date("2026-10-15T00:00:00Z") })).coverageOverrideApplies).toBe(true);
   });
 });
 
@@ -84,28 +84,28 @@ describe("filters and sorting", () => {
 });
 
 describe("loadMembers reads the coverage override from the typed columns", () => {
-  const account = (id: string, o: Record<string, unknown> = {}) => ({ id, locationId: `LOC_${id}`, locationName: id, billingState: "active", pauseReason: null, legacyUnreconciled: false, trialOffer: null, trialEndsAt: null, coreCoveredUntil: null, coreCoverageNote: null, user: { businessName: null, warningCount: 0 }, ...o });
+  const account = (id: string, o: Record<string, unknown> = {}) => ({ id, locationId: `LOC_${id}`, locationName: id, billingState: "active", pauseReason: null, legacyUnreconciled: false, trialOffer: null, trialEndsAt: null, exemptUntil: null, exemptReason: null, user: { businessName: null, warningCount: 0 }, ...o });
   const ledgerRow = (acct: string, at: string) => ({ ghlTransactionId: `L${acct}`, occurredAt: new Date(at), classification: "core_subscription", status: "succeeded", amount: new Prisma.Decimal("57"), amountRefunded: new Prisma.Decimal("0"), provider: "authorize-net", ghlAccountId: acct, refundDetectedAt: null, subscriptionId: null, classifierVersion: 2 });
 
-  it("maps coreCoveredUntil / coreCoverageNote onto the row and computes the override badge against the estimate", async () => {
+  it("maps exemptUntil / exemptReason onto the row and computes the override badge against the estimate", async () => {
     const selects: Record<string, unknown>[] = [];
     const db: any = {
       ghlAccount: { findMany: async ({ select }: { select: Record<string, unknown> }) => (selects.push(select), [
-        account("A", { coreCoveredUntil: new Date("2026-11-21T07:00:00.000Z"), coreCoverageNote: "Prepaid during processor migration" }),
-        account("B", { coreCoveredUntil: new Date("2026-09-10T06:00:00.000Z") }),
+        account("A", { exemptUntil: new Date("2026-11-21T07:00:00.000Z"), exemptReason: "Prepaid during processor migration" }),
+        account("B", { exemptUntil: new Date("2026-09-10T06:00:00.000Z") }),
         account("C"),
       ]) },
       billingLedgerEntry: { findMany: async () => [ledgerRow("A", "2026-08-21T12:00:00Z"), ledgerRow("B", "2026-08-21T12:00:00Z")] },
       $queryRaw: async () => [],
     };
     const { rows } = await loadMembers(db, "HQ", new Date("2026-09-27T12:00:00Z"));
-    expect(selects[0]).toMatchObject({ coreCoveredUntil: true, coreCoverageNote: true }); // typed fields are selected, no raw lookup
+    expect(selects[0]).toMatchObject({ exemptUntil: true, exemptReason: true }); // typed fields are selected, no raw lookup
     const by = Object.fromEntries(rows.map((r) => [r.accountId, r]));
-    expect(by.A.coveredUntil?.toISOString()).toBe("2026-11-21T07:00:00.000Z");
-    expect(by.A.coverageNote).toBe("Prepaid during processor migration");
+    expect(by.A.exemptUntil?.toISOString()).toBe("2026-11-21T07:00:00.000Z");
+    expect(by.A.exemptReason).toBe("Prepaid during processor migration");
     expect(by.A.expectedNextCharge?.toISOString()).toBe("2026-09-21T12:00:00.000Z");
     expect(by.A.coverageOverrideApplies).toBe(true); // Nov 21 is later than the ≈ Sep 21 estimate
     expect(by.B.coverageOverrideApplies).toBe(false); // Sep 10 is earlier than the estimate
-    expect(by.C).toMatchObject({ coveredUntil: null, coverageNote: null, coverageOverrideApplies: false });
+    expect(by.C).toMatchObject({ exemptUntil: null, exemptReason: null, coverageOverrideApplies: false });
   });
 });
