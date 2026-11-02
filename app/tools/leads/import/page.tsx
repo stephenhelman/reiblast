@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useRef, Suspense } from 'react'
+import { useState, useRef, useEffect, Suspense } from 'react'
 import Papa from 'papaparse'
 import * as XLSX from 'xlsx'
 import MinimalHeader from '@/components/tools/MinimalHeader'
@@ -17,6 +17,14 @@ import {
   type DealMachineContact,
   type DealMachineResult,
 } from '@/lib/leadCleaner'
+import {
+  EXTENSION_BROWSERS,
+  EXTENSION_BROWSER_LABEL,
+  EXTENSION_VERSION,
+  EXTENSION_ZIP_PATH,
+  extensionsUrl,
+  type ExtensionBrowser,
+} from '@/lib/extension'
 
 const GOLD = '#F5C842'
 const ROWS_PER_PAGE = 25
@@ -459,6 +467,226 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
   )
 }
 
+// ─── Extension install modal (paste screen of the DealMachine tab only) ───────
+
+const EXT_DISMISSED_KEY = 'reiscrub.extension.dismissed'
+const EXT_BROWSER_KEY = 'reiscrub.extension.browser'
+
+function ExtensionModal() {
+  const [open, setOpen] = useState(false)
+  const [confirmingClose, setConfirmingClose] = useState(false)
+  const [dismissed, setDismissed] = useState(true) // assume dismissed until storage says otherwise (no flash for returning users)
+  const [browser, setBrowser] = useState<ExtensionBrowser>('chrome')
+  const [copied, setCopied] = useState(false)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
+
+  useEffect(() => {
+    let wasDismissed = false
+    try {
+      wasDismissed = localStorage.getItem(EXT_DISMISSED_KEY) === '1'
+      const b = localStorage.getItem(EXT_BROWSER_KEY)
+      if (b && (EXTENSION_BROWSERS as readonly string[]).includes(b)) setBrowser(b as ExtensionBrowser)
+    } catch {
+      // storage unavailable — treat as first visit
+    }
+    setDismissed(wasDismissed)
+    if (!wasDismissed || window.location.hash === '#extension') setOpen(true)
+
+    function openIfHash() {
+      if (window.location.hash === '#extension') setOpen(true)
+    }
+    window.addEventListener('hashchange', openIfHash)
+    return () => window.removeEventListener('hashchange', openIfHash)
+  }, [])
+
+  // Escape asks to close (same path as the X button); body scroll locked while open.
+  useEffect(() => {
+    if (!open) return
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    dialogRef.current?.focus()
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') requestClose()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => {
+      document.body.style.overflow = prevOverflow
+      window.removeEventListener('keydown', onKey)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, dismissed])
+
+  function openModal(e?: React.MouseEvent<HTMLElement>) {
+    openerRef.current = (e?.currentTarget as HTMLElement) ?? null
+    setConfirmingClose(false)
+    setOpen(true)
+  }
+
+  function finishClose() {
+    setOpen(false)
+    setConfirmingClose(false)
+    setDismissed(true)
+    try {
+      localStorage.setItem(EXT_DISMISSED_KEY, '1')
+    } catch {}
+    if (window.location.hash === '#extension') history.replaceState(null, '', window.location.pathname + window.location.search)
+    openerRef.current?.focus()
+  }
+
+  // First close (never dismissed before) asks for confirmation; after that it closes straight away.
+  function requestClose() {
+    if (dismissed) finishClose()
+    else setConfirmingClose(true)
+  }
+
+  function pickBrowser(b: ExtensionBrowser) {
+    setBrowser(b)
+    try {
+      localStorage.setItem(EXT_BROWSER_KEY, b)
+    } catch {}
+  }
+
+  async function copyUrl() {
+    try {
+      await navigator.clipboard.writeText(extensionsUrl(browser))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {}
+  }
+
+  const label = EXTENSION_BROWSER_LABEL[browser]
+  const url = extensionsUrl(browser)
+  const muted = 'rgba(255,255,255,0.6)'
+
+  return (
+    <>
+      <button
+        id="extension-open"
+        onClick={openModal}
+        style={{ display: 'block', marginBottom: 16, background: 'transparent', border: 'none', padding: 0, cursor: 'pointer', color: GOLD, fontSize: 13, textAlign: 'left' }}
+      >
+        Get the REIscrub Puller extension (v{EXTENSION_VERSION}) →
+      </button>
+
+      {open && (
+        <div
+          onClick={requestClose}
+          style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.7)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16, overflowY: 'auto' }}
+        >
+          <div
+            id="extension"
+            ref={dialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="extension-title"
+            tabIndex={-1}
+            onClick={(e) => e.stopPropagation()}
+            style={{ position: 'relative', background: '#111', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 12, width: '100%', maxWidth: 560, maxHeight: '100%', overflowY: 'auto', padding: 22, fontSize: 13, color: muted, outline: 'none' }}
+          >
+            <button
+              onClick={requestClose}
+              aria-label="Close"
+              style={{ position: 'absolute', top: 10, right: 14, background: 'transparent', border: 'none', color: 'rgba(255,255,255,0.5)', fontSize: 22, cursor: 'pointer', lineHeight: 1 }}
+            >
+              ×
+            </button>
+
+            <h2 id="extension-title" style={{ color: '#fff', fontSize: 17, fontWeight: 600, margin: '0 28px 14px 0' }}>
+              Get the REIscrub Puller extension{' '}
+              <span style={{ color: 'rgba(255,255,255,0.4)', fontWeight: 400, fontSize: 13 }}>v{EXTENSION_VERSION}</span>
+            </h2>
+
+            {confirmingClose ? (
+              <div role="alertdialog" aria-live="polite">
+                <p style={{ color: '#fff', fontSize: 14, lineHeight: 1.5, margin: '0 0 16px' }}>
+                  To get the most out of REIscrub and DealMachine, we recommend using the REIscrub Puller extension. It collects
+                  your DealMachine search results for you, so you don&apos;t have to copy and paste addresses by hand.
+                </p>
+                <p style={{ margin: '0 0 16px' }}>You can reopen these instructions any time from the link above the paste box.</p>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  <button
+                    onClick={() => setConfirmingClose(false)}
+                    style={{ background: GOLD, color: '#000', fontWeight: 700, padding: '9px 18px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 14 }}
+                  >
+                    Show me how
+                  </button>
+                  <button
+                    onClick={finishClose}
+                    style={{ background: 'transparent', color: muted, padding: '9px 18px', borderRadius: 8, border: '1px solid rgba(255,255,255,0.2)', cursor: 'pointer', fontSize: 14 }}
+                  >
+                    Close anyway
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <a
+                  href={EXTENSION_ZIP_PATH}
+                  download
+                  style={{ display: 'inline-block', background: GOLD, color: '#000', fontWeight: 700, padding: '10px 20px', borderRadius: 8, textDecoration: 'none', fontSize: 14 }}
+                >
+                  Download extension (.zip)
+                </a>
+
+                <div style={{ display: 'flex', gap: 8, margin: '16px 0 12px', alignItems: 'center' }}>
+                  <span style={{ color: 'rgba(255,255,255,0.4)' }}>Browser:</span>
+                  {EXTENSION_BROWSERS.map((b) => (
+                    <button
+                      key={b}
+                      onClick={() => pickBrowser(b)}
+                      aria-pressed={browser === b}
+                      style={{
+                        background: browser === b ? 'rgba(245,200,66,0.15)' : 'transparent',
+                        color: browser === b ? GOLD : muted,
+                        border: `1px solid ${browser === b ? GOLD : 'rgba(255,255,255,0.15)'}`,
+                        borderRadius: 6,
+                        padding: '4px 12px',
+                        cursor: 'pointer',
+                        fontSize: 13,
+                      }}
+                    >
+                      {EXTENSION_BROWSER_LABEL[b]}
+                    </button>
+                  ))}
+                </div>
+
+                <ol style={{ paddingLeft: 20, margin: 0, display: 'flex', flexDirection: 'column', gap: 6, lineHeight: 1.5 }}>
+                  <li>
+                    Download and unzip to a permanent folder (not Downloads). Don&apos;t delete or move it later — {label} loads
+                    the extension from that folder.
+                  </li>
+                  <li>
+                    Open{' '}
+                    <code style={{ background: '#000', padding: '2px 6px', borderRadius: 4, color: '#fff' }}>{url}</code>{' '}
+                    <button
+                      onClick={copyUrl}
+                      style={{ background: 'transparent', border: '1px solid rgba(255,255,255,0.2)', color: muted, borderRadius: 4, padding: '1px 8px', cursor: 'pointer', fontSize: 12 }}
+                    >
+                      {copied ? 'Copied' : 'Copy'}
+                    </button>{' '}
+                    in {label}.
+                  </li>
+                  <li>Turn on Developer mode.</li>
+                  <li>Click &quot;Load unpacked&quot; and select the folder that contains manifest.json.</li>
+                  <li>Open DealMachine, run your search, and use the panel to Collect, then Copy.</li>
+                  <li>Paste here.</li>
+                </ol>
+
+                <p style={{ marginTop: 12, marginBottom: 0 }}>Desktop only. On mobile or other browsers, paste manually below.</p>
+                <p style={{ marginTop: 6, marginBottom: 0 }}>
+                  To update, download again, replace the folder&apos;s contents, then click the reload icon on the extension in{' '}
+                  {url}.
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+    </>
+  )
+}
+
 // ─── DealMachine Tab ──────────────────────────────────────────────────────────
 
 function DealMachineTab({ locationId }: { locationId: string }) {
@@ -472,9 +700,15 @@ function DealMachineTab({ locationId }: { locationId: string }) {
   const [importResult, setImportResult] = useState<{ added: number; skipped: number; failed: number } | null>(null)
   const [page, setPage] = useState(0)
   const [tooltipOpen, setTooltipOpen] = useState(false)
+  const [payloadError, setPayloadError] = useState('')
 
   function handleFormat() {
     const formatted = formatDealMachineData(rawText)
+    if (formatted.payloadError) {
+      setPayloadError(formatted.payloadError)
+      return
+    }
+    setPayloadError('')
     setResult(formatted)
     setSelected(new Set(formatted.contacts.map((_, i) => i)))
     setPage(0)
@@ -530,6 +764,7 @@ function DealMachineTab({ locationId }: { locationId: string }) {
   if (!result) {
     return (
       <div className="max-w-2xl mx-auto py-12 px-6">
+        <ExtensionModal />
         <textarea
           value={rawText}
           onChange={(e) => setRawText(e.target.value)}
@@ -554,6 +789,9 @@ function DealMachineTab({ locationId }: { locationId: string }) {
         <p style={{ color: 'rgba(255,255,255,0.3)', fontSize: 12, marginTop: 4 }}>
           {rawText.length} characters
         </p>
+        {payloadError && (
+          <p style={{ color: '#ef4444', fontSize: 13, marginTop: 8 }}>{payloadError}</p>
+        )}
         <button
           onClick={handleFormat}
           disabled={!rawText.trim()}
@@ -579,11 +817,39 @@ function DealMachineTab({ locationId }: { locationId: string }) {
   return (
     <div className="px-6 py-8 max-w-7xl mx-auto">
       {/* Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 24 }}>
-        <StatCard label="Lines Processed" value={result.stats.totalLines} color="rgba(255,255,255,0.5)" />
-        <StatCard label="Contacts Parsed" value={result.stats.parsed} color={GOLD} />
-        <StatCard label="Junk Lines Skipped" value={result.stats.skipped} color="rgba(255,255,255,0.5)" />
-      </div>
+      {result.flagged ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: 12, marginBottom: 24 }}>
+          <StatCard label="Properties Received" value={result.stats.totalLines} color="rgba(255,255,255,0.5)" />
+          <StatCard label="Ready to Export" value={result.stats.parsed} color={GOLD} />
+          <StatCard label="APN Rows Excluded" value={result.excludedApn ?? 0} color="rgba(255,255,255,0.5)" />
+          <StatCard label="Duplicates Removed" value={result.duplicatesRemoved ?? 0} color="rgba(255,255,255,0.5)" />
+          <StatCard label="Needs Review" value={result.flagged.length} color={result.flagged.length ? '#ef4444' : 'rgba(255,255,255,0.5)'} />
+        </div>
+      ) : (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12, marginBottom: 24 }}>
+          <StatCard label="Lines Processed" value={result.stats.totalLines} color="rgba(255,255,255,0.5)" />
+          <StatCard label="Contacts Parsed" value={result.stats.parsed} color={GOLD} />
+          <StatCard label="Junk Lines Skipped" value={result.stats.skipped} color="rgba(255,255,255,0.5)" />
+        </div>
+      )}
+
+      {result.flagged && result.flagged.length > 0 && (
+        <div style={{ background: 'rgba(239,68,68,0.08)', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 12, padding: '16px 20px', marginBottom: 20 }}>
+          <p style={{ color: '#ef4444', fontWeight: 600, fontSize: 14, marginBottom: 8 }}>
+            {result.flagged.length} row{result.flagged.length === 1 ? '' : 's'} could not be processed and {result.flagged.length === 1 ? 'is' : 'are'} not in the CSV
+          </p>
+          <ul style={{ color: 'rgba(255,255,255,0.7)', fontSize: 13, margin: 0, paddingLeft: 18 }}>
+            {result.flagged.slice(0, 50).map((f, i) => (
+              <li key={i}>
+                {[f.id, f.line1, f.line2].filter((v) => v !== undefined && v !== '').map(String).join(' · ') || '(empty row)'} — {f.reason}
+              </li>
+            ))}
+          </ul>
+          {result.flagged.length > 50 && (
+            <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 12, marginTop: 6 }}>…and {result.flagged.length - 50} more</p>
+          )}
+        </div>
+      )}
 
       {importResult && (
         <div style={{

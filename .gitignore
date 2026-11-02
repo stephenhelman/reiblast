@@ -52,5 +52,8 @@ scripts/kurv-probe/output/
 # billing audit output (customer PII)
 scripts/billing-audit/output/
 
+# local DealMachine payload samples
+deal-machine-*.txt
+
 # audit reports (local scratch)
 scratch/
