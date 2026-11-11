@@ -57,6 +57,8 @@ export const SPECS: Spec[] = [
   { table: "DiscordVerifyAttempt", delegate: "discordVerifyAttempt", by: "ghlAccountId (no FK)", where: (c) => (c.accountId ? { ghlAccountId: c.accountId } : null) },
   { table: "FounderClaim", delegate: "founderClaim", by: "ghlAccountId", where: (c) => (c.accountId ? { ghlAccountId: c.accountId } : null) },
   { table: "FounderVerifyAttempt", delegate: "founderVerifyAttempt", by: "ghlAccountId (no FK)", where: (c) => (c.accountId ? { ghlAccountId: c.accountId } : null) },
+  { table: "CampaignSnapshot", delegate: "campaignSnapshot", by: "locationId (FK, cascades)", where: (c) => inList("locationId", c.locationIds) },
+  { table: "CampaignStats", delegate: "campaignStats", by: "locationId (FK, cascades)", where: (c) => inList("locationId", c.locationIds) },
   { table: "GhlSubscriptionState", delegate: "ghlSubscriptionState", by: "contactId (no FK)", where: (c) => ({ contactId: c.contactId }) },
 ];
 export const EVENT_TABLE = "GhlEvent (externalId = contact/transaction id, or payload mentions the contact)";

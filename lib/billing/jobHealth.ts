@@ -2,8 +2,8 @@ import type { PrismaClient } from "@prisma/client";
 import { JOB_NAMES, type JobName } from "./jobs/types";
 
 export const STALE_AFTER_HOURS = 26;
-/** Jobs that run far more often than nightly go stale sooner: discord_outbox runs every 15 minutes, so 1 hour = four missed runs. */
-export const STALE_AFTER_HOURS_BY_JOB: Partial<Record<JobName, number>> = { discord_outbox: 1 };
+/** Jobs that run far more often than nightly go stale sooner: discord_outbox runs every 15 minutes, so 1 hour = four missed runs. campaign_snapshot runs monthly (1st of the month), so it is stale after 33 days. */
+export const STALE_AFTER_HOURS_BY_JOB: Partial<Record<JobName, number>> = { discord_outbox: 1, campaign_snapshot: 33 * 24 };
 
 export type JobHealth = {
   job: JobName;

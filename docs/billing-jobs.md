@@ -1,6 +1,6 @@
 # Nightly billing data jobs
 
-Eight jobs (`wallet_retention` ships disabled), triggered by a GHL scheduled workflow (no Vercel Cron). The data jobs never change billing state, tags, or stages, and
+Nine jobs (`wallet_retention` ships disabled), triggered by a GHL scheduled workflow (no Vercel Cron). The data jobs never change billing state, tags, or stages, and
 never write to GHL; `sub_sweep` feeds the dunning engine, which in shadow mode only records decisions. See `docs/ghl-server-contract.md`.
 
 | job | what it does |
@@ -12,12 +12,13 @@ never write to GHL; `sub_sweep` feeds the dunning engine, which in shadow mode o
 | `wallet_retention` | **Disabled** unless `WALLET_RETENTION_ENABLED=true`. Deletes raw `WalletTransaction` rows older than `WALLET_RETENTION_DAYS` (default 90, floor 60), one UTC day at a time, only where the month's `wallet_month_refresh` is complete and `UsageRollup` matches the raw rows for that day. `UsageRollup` is never pruned. Not shown in Health (so not "stale") until enabled. |
 | `balances` | Wallet balance per location (incl. HQ) → `WalletBalanceSnapshot`, one row per location per UTC day. |
 | `discord_outbox` | **Every 15 minutes.** Delivers due `DiscordRevokeOutbox` rows to the Discord bot (`docs/revoke-contract.md`), re-arms `config_error` rows once `DISCORD_BOT_URL` + `DISCORD_BOT_OUTBOUND_SECRET` are both set (each re-arm is an attempt, so a still-broken config ends `exhausted` after 5), and purges `done`/`superseded` rows older than 30 days. JobRun summary: `delivered`, `retried`, `exhausted`, `config_error`, `superseded`, `purged` (this run) and `standingExhausted`, `standingConfigError` (rows currently in those states — what an alert should watch); numbers only. Health marks it stale after 1 hour, not 26. |
+| `campaign_snapshot` | **Monthly, on the 1st.** For the Denver month that just ended, writes one `CampaignSnapshot` per location that has `CampaignStats` rows (cumulative totals + per list/variant `breakdown`; monthly activity = this snapshot minus the previous one). Idempotent on `(locationId, month)`; a re-run or duplicate trigger writes nothing new. Stats have no per-event timestamps, so it is "as of when it ran" — schedule it just after midnight Denver on the 1st. Health marks it stale after 33 days. Receiver: `POST /api/webhooks/campaign-event` (`CAMPAIGN_EVENT_SECRET`), see `lib/campaign/stats.ts`. |
 | `sub_sweep` | Nightly subscription sweep: lists GHL subscriptions → `GhlSubscriptionState`, and feeds status changes the ledger never shows to the dunning engine (see below). |
 
 ## Trigger
 
 `POST /api/webhooks/ghl/jobs` with header `x-reiblast-jobs-secret: <GHL_JOBS_SECRET>` and body
-`{ "job": "replay" | "tx_sweep" | "wallet_usage" | "wallet_month_refresh" | "balances" | "sub_sweep" | "discord_outbox" | "wallet_retention" }`. Always answers 200 `{ accepted, job }`; the work runs in
+`{ "job": "replay" | "tx_sweep" | "wallet_usage" | "wallet_month_refresh" | "balances" | "sub_sweep" | "discord_outbox" | "wallet_retention" | "campaign_snapshot" }`. Always answers 200 `{ accepted, job }`; the work runs in
 the background (`waitUntil`). Create one GHL scheduled workflow per job.
 
 ## Plan limit assumed
