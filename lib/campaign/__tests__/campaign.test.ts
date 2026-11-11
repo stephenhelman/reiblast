@@ -49,8 +49,9 @@ function fakeDb(accounts: Row[] = [{ id: "A1", locationId: LOC, accountType: "me
   return { db, stats, snaps, calls, state };
 }
 
-const req = (body: unknown) => new NextRequest("https://example.test/api/webhooks/campaign-event", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-const send = async (customData: Row, extra: Row = {}) => (await POST(req({ ...extra, customData: { secret: SECRET, locationId: LOC, ...customData } }))).json();
+const req = (body: unknown, headers: Record<string, string> = { "x-campaign-secret": SECRET }) =>
+  new NextRequest("https://example.test/api/webhooks/campaign-event", { method: "POST", headers: { "content-type": "application/json", ...headers }, body: JSON.stringify(body) });
+const send = async (customData: Row, extra: Row = {}, headers?: Record<string, string>) => (await POST(req({ ...extra, customData: { locationId: LOC, ...customData } }, headers))).json();
 
 let f: ReturnType<typeof fakeDb>;
 beforeEach(() => {
@@ -145,11 +146,14 @@ describe("receiver: rejections are 200s that write nothing", () => {
     expect(f.stats).toHaveLength(0);
   });
   it("auth: missing, wrong, misconfigured; bad json; invalid event/location", async () => {
-    expect(await send({ event: "entered", secret: "" })).toMatchObject({ reason: "auth_missing" });
-    expect(await send({ event: "entered", secret: "nope" })).toMatchObject({ reason: "auth_failed" });
+    expect(await send({ event: "entered" }, {}, {})).toMatchObject({ reason: "auth_missing" });
+    expect(await send({ event: "entered" }, {}, { "x-campaign-secret": "nope" })).toMatchObject({ reason: "auth_failed" });
+    // the old body path is gone: a correct secret in customData (or flat) without the header is NOT accepted
+    expect(await send({ event: "entered", secret: SECRET }, { secret: SECRET }, {})).toMatchObject({ reason: "auth_missing" });
+    expect(await send({ event: "entered", secret: SECRET }, {}, { "x-campaign-secret": "nope" })).toMatchObject({ reason: "auth_failed" });
     expect(await send({ event: "bogus" })).toMatchObject({ reason: "invalid_event" });
     expect(await send({ event: "entered", locationId: "x" })).toMatchObject({ reason: "invalid_location" });
-    const bad = await POST(new NextRequest("https://example.test/x", { method: "POST", body: "not json" }));
+    const bad = await POST(new NextRequest("https://example.test/x", { method: "POST", headers: { "x-campaign-secret": SECRET }, body: "not json" }));
     expect(bad.status).toBe(200);
     expect(await bad.json()).toMatchObject({ reason: "bad_json" });
     delete process.env.CAMPAIGN_EVENT_SECRET;
@@ -158,12 +162,12 @@ describe("receiver: rejections are 200s that write nothing", () => {
   });
   it("a DB error still answers 200 internal_error, without leaking details", async () => {
     f.db.ghlAccount.findFirst = async () => { throw new Error("db down: secret detail"); };
-    const res = await POST(req({ customData: { secret: SECRET, locationId: LOC, event: "entered" } }));
+    const res = await POST(req({ customData: { locationId: LOC, event: "entered" } }));
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ received: false, reason: "internal_error" });
   });
-  it("a request with the secret never stores it (no payload persistence at all)", async () => {
-    await send({ event: "entered" });
+  it("the secret is never stored (no payload persistence at all)", async () => {
+    await send({ event: "entered", secret: SECRET }); // even a stray customData.secret is ignored, not persisted
     expect(JSON.stringify(f.stats)).not.toContain(SECRET);
   });
 });
