@@ -758,6 +758,29 @@ export function formatDealMachineData(rawText: string): DealMachineResult {
   return { contacts, stats }
 }
 
+/** List Type options for the CSV export. Strings are EXACT: they mirror the GHL "List Type" dropdown custom field. "None" exports a blank List Type. */
+export const LIST_TYPES = [
+  'Absentee Owner', 'Tax Delinquent', 'Pre-Foreclosure', 'Probate', 'Vacant',
+  'Tired Landlord', 'High Equity', 'Expired Listing', 'Code Violation', 'None',
+] as const
+export type ListType = (typeof LIST_TYPES)[number]
+
+/** BatchLeads export rows: the contact columns plus "List Type" (blank for None) and "List Name" (the sanitized file name), on every row. */
+export function buildBatchLeadsExportRows(contacts: CleanedContact[], listType: ListType, listName: string): Record<string, string>[] {
+  return contacts.map((c) => ({
+    'First Name': c.firstName,
+    'Last Name': c.lastName,
+    'Property Address': c.propertyAddress,
+    City: c.city,
+    State: c.state,
+    Zip: c.zip,
+    Phone: c.phone,
+    Email: c.email,
+    'List Type': listType === 'None' ? '' : listType,
+    'List Name': listName,
+  }))
+}
+
 export function downloadCSV(data: Record<string, string>[], filename: string): void {
   if (data.length === 0) return
   const headers = Object.keys(data[0])
