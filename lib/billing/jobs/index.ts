@@ -1,3 +1,4 @@
+import { runCampaignSnapshot } from "./campaignSnapshot";
 import { runBalances } from "./balances";
 import { runDiscordOutbox } from "./discordOutbox";
 import { runReplay } from "./replay";
@@ -17,4 +18,5 @@ export const JOBS: Record<JobName, JobFn> = {
   balances: runBalances,
   sub_sweep: runSubSweep,
   discord_outbox: runDiscordOutbox,
+  campaign_snapshot: runCampaignSnapshot,
 };

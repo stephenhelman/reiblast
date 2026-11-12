@@ -26,6 +26,9 @@ export type Reason =
   | "not_in_guild" // Discord bot revoke: member is not in the guild, nothing to do
   | "not_holding_role" // Discord bot revoke: member is in the guild but did not hold the role
   | "discord_unavailable" // Discord bot revoke: gateway not ready or a Discord API failure — retry
+  | "invalid_location" // campaign-event: customData.locationId missing or not a valid GHL id
+  | "invalid_event" // campaign-event: customData.event not in the allowlist
+  | "unknown_location" // campaign-event: no member GhlAccount has this locationId — nothing written
   | "rate_limited"
   | "invalid_code" // Discord verify-confirm: wrong code (attemptsRemaining accompanies it)
   | "code_expired" // no live code (expired, never sent, or already used)

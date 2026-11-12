@@ -1014,6 +1014,8 @@ model GhlAccount {
   ledgerEntries         BillingLedgerEntry[]
   discordLink           DiscordLink?
   founderClaim          FounderClaim?
+  campaignStats         CampaignStats[]
+  campaignSnapshots     CampaignSnapshot[]
   createdAt             DateTime             @default(now())
   updatedAt             DateTime             @updatedAt
 }
@@ -1430,3 +1432,70 @@ model WalletMonthRefresh {
   completedAt   DateTime?
 }
 
+// Campaign SMS stats (POST /api/webhooks/campaign-event). NO per-contact rows: one counter row per (location, list, variant), bumped by
+// an atomic upsert per event. listType/listName/variant are NON-null and "" when blank, because Postgres treats NULLs as distinct in a
+// unique constraint (a nullable key would let duplicates through). replied1..7 / errored1..7 count by the contact's "SMS n" step tag.
+// Cascade: counters are derived and have no value once the member's GhlAccount is gone (the removal tool lists them in SPECS anyway).
+model CampaignStats {
+  id           String     @id @default(cuid())
+  locationId   String
+  account      GhlAccount @relation(fields: [locationId], references: [locationId], onDelete: Cascade)
+  listType     String     @default("")
+  listName     String     @default("")
+  variant      String     @default("")
+  entered      Int        @default(0)
+  replied      Int        @default(0)
+  errored      Int        @default(0)
+  noResponse   Int        @default(0)
+  replied1     Int        @default(0)
+  replied2     Int        @default(0)
+  replied3     Int        @default(0)
+  replied4     Int        @default(0)
+  replied5     Int        @default(0)
+  replied6     Int        @default(0)
+  replied7     Int        @default(0)
+  errored1     Int        @default(0)
+  errored2     Int        @default(0)
+  errored3     Int        @default(0)
+  errored4     Int        @default(0)
+  errored5     Int        @default(0)
+  errored6     Int        @default(0)
+  errored7     Int        @default(0)
+  firstEventAt DateTime
+  lastEventAt  DateTime
+
+  @@unique([locationId, listType, listName, variant])
+  @@index([locationId, lastEventAt])
+}
+
+// One row per account per Denver month ("YYYY-MM"): CUMULATIVE totals of CampaignStats taken by the campaign_snapshot job right after
+// the month ends. Monthly activity = this snapshot minus the previous one. `breakdown` is written once, so JSON is fine:
+// [{ listType, listName, variant, entered, replied, ... }] cumulative at snapshot time.
+model CampaignSnapshot {
+  id         String     @id @default(cuid())
+  locationId String
+  account    GhlAccount @relation(fields: [locationId], references: [locationId], onDelete: Cascade)
+  month      String
+  entered    Int        @default(0)
+  replied    Int        @default(0)
+  errored    Int        @default(0)
+  noResponse Int        @default(0)
+  replied1   Int        @default(0)
+  replied2   Int        @default(0)
+  replied3   Int        @default(0)
+  replied4   Int        @default(0)
+  replied5   Int        @default(0)
+  replied6   Int        @default(0)
+  replied7   Int        @default(0)
+  errored1   Int        @default(0)
+  errored2   Int        @default(0)
+  errored3   Int        @default(0)
+  errored4   Int        @default(0)
+  errored5   Int        @default(0)
+  errored6   Int        @default(0)
+  errored7   Int        @default(0)
+  breakdown  Json
+  createdAt  DateTime   @default(now())
+
+  @@unique([locationId, month])
+}

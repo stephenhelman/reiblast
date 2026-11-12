@@ -12,6 +12,9 @@ import {
   detectFileFormat,
   formatDealMachineData,
   downloadCSV,
+  buildBatchLeadsExportRows,
+  LIST_TYPES,
+  type ListType,
   type CleanedContact,
   type CleaningResult,
   type DealMachineContact,
@@ -135,21 +138,9 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
     })
   }
 
-  function handleDownload(filename: string) {
+  function handleDownload(filename: string, listType: ListType) {
     if (!result) return
-    const data = Array.from(selected).map((i) => {
-      const c = result.contacts[i]
-      return {
-        'First Name': c.firstName,
-        'Last Name': c.lastName,
-        'Property Address': c.propertyAddress,
-        City: c.city,
-        State: c.state,
-        Zip: c.zip,
-        Phone: c.phone,
-        Email: c.email,
-      }
-    })
+    const data = buildBatchLeadsExportRows(Array.from(selected).map((i) => result.contacts[i]), listType, filename)
     downloadCSV(data, `${filename}.csv`)
   }
 
@@ -459,7 +450,8 @@ function BatchLeadsTab({ locationId }: { locationId: string }) {
       {showFilenameModal && (
         <FilenameModal
           defaultName={`BatchLeads_Cleaned_${dateTag()}`}
-          onConfirm={(name) => { handleDownload(name); setShowFilenameModal(false) }}
+          showListType
+          onConfirm={({ name, listType }) => { handleDownload(name, listType as ListType); setShowFilenameModal(false) }}
           onCancel={() => setShowFilenameModal(false)}
         />
       )}
@@ -1047,7 +1039,7 @@ function DealMachineTab({ locationId }: { locationId: string }) {
       {showFilenameModal && (
         <FilenameModal
           defaultName={`DealMachine_${dateTag()}`}
-          onConfirm={(name) => { handleDownload(name); setShowFilenameModal(false) }}
+          onConfirm={({ name }) => { handleDownload(name); setShowFilenameModal(false) }}
           onCancel={() => setShowFilenameModal(false)}
         />
       )}
@@ -1161,15 +1153,21 @@ function TagModal({
 
 function FilenameModal({
   defaultName,
+  showListType = false,
   onConfirm,
   onCancel,
 }: {
   defaultName: string
-  onConfirm: (name: string) => void
+  /** Adds a required List Type select (BatchLeads export only). */
+  showListType?: boolean
+  onConfirm: (result: { name: string; listType: string }) => void
   onCancel: () => void
 }) {
   const [name, setName] = useState(defaultName)
+  const [listType, setListType] = useState('')
   const sanitized = name.trim().replace(/[\\/:*?"<>|]/g, '')
+  const ready = !!sanitized && (!showListType || !!listType)
+  const confirm = () => { if (ready) onConfirm({ name: sanitized, listType }) }
 
   return (
     <div style={{
@@ -1198,7 +1196,7 @@ function FilenameModal({
           type="text"
           value={name}
           onChange={(e) => setName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && sanitized && onConfirm(sanitized)}
+          onKeyDown={(e) => e.key === 'Enter' && confirm()}
           style={{
             width: '100%',
             background: '#1a1a1a',
@@ -1212,6 +1210,35 @@ function FilenameModal({
             marginBottom: 20,
           }}
         />
+        {showListType && (
+          <>
+            <label htmlFor="list-type" style={{ display: 'block', color: 'rgba(255,255,255,0.6)', fontSize: 13, marginBottom: 8 }}>
+              List Type <span style={{ color: GOLD }}>*</span>
+            </label>
+            <select
+              id="list-type"
+              value={listType}
+              onChange={(e) => setListType(e.target.value)}
+              style={{
+                width: '100%',
+                background: '#1a1a1a',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: 8,
+                padding: '12px 14px',
+                color: listType ? '#fff' : 'rgba(255,255,255,0.4)',
+                fontSize: 14,
+                outline: 'none',
+                boxSizing: 'border-box',
+                marginBottom: 20,
+              }}
+            >
+              <option value="" disabled>Choose list type…</option>
+              {LIST_TYPES.map((o) => (
+                <option key={o} value={o}>{o}</option>
+              ))}
+            </select>
+          </>
+        )}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, justifyContent: 'flex-end' }}>
           <button
             onClick={onCancel}
@@ -1220,16 +1247,16 @@ function FilenameModal({
             Cancel
           </button>
           <button
-            onClick={() => sanitized && onConfirm(sanitized)}
-            disabled={!sanitized}
+            onClick={confirm}
+            disabled={!ready}
             style={{
-              background: sanitized ? GOLD : 'rgba(245,200,66,0.3)',
+              background: ready ? GOLD : 'rgba(245,200,66,0.3)',
               color: '#000',
               fontWeight: 700,
               padding: '10px 20px',
               borderRadius: 8,
               border: 'none',
-              cursor: sanitized ? 'pointer' : 'not-allowed',
+              cursor: ready ? 'pointer' : 'not-allowed',
               fontSize: 14,
             }}
           >
