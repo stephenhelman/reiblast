@@ -4,7 +4,8 @@ import { checkSecret, logInternalError, missingEnvVars, type Reason } from "@/li
 import { parseCampaignPayload, recordCampaignEvent, stepForEvent } from "@/lib/campaign/stats";
 
 // Member sub-account workflows → campaign stats (GHL standard Webhook action; Custom Data carries the fields). Custom Data: locationId,
-// event (entered | replied | errored | no_response), listType, listName, variant. Blank values are stored as "".
+// event (entered | replied | errored | no_response | categorized), listType, listName, variant; `categorized` also takes `category`
+// (interested | not_now | wrong_number | opt_out | needs_reply; anything else → catOther) and bumps only that cat* column. Blank values are stored as "".
 // Auth: ONE path — the x-campaign-secret header vs CAMPAIGN_EVENT_SECRET (checkSecret → secretMatches, timing-safe). There is no body-secret
 // fallback. The secret is never logged or stored — nothing from the payload is stored.
 // ALWAYS HTTP 200 with a `reason` (contract rule 6). The request path is: one indexed GhlAccount lookup + one atomic upsert. No GhlEvent row,

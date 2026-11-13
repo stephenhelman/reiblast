@@ -6,7 +6,9 @@ vi.mock("@/lib/billing/db", () => ({ getBillingDb: async () => holder.db }));
 
 import { POST } from "@/app/api/webhooks/campaign-event/route";
 import { runCampaignSnapshot } from "@/lib/billing/jobs/campaignSnapshot";
-import { COUNTER_FIELDS, STEP_TAG_RE, extractTags, fieldsToBump, parseCampaignPayload, stepFromTags } from "../stats";
+import { CATEGORY_FIELDS, COUNTER_FIELDS, STEP_TAG_RE, categoryField, extractTags, fieldsToBump, parseCampaignPayload, stepFromTags } from "../stats";
+
+const ZERO_ROW = Object.fromEntries([...COUNTER_FIELDS, ...CATEGORY_FIELDS].map((f) => [f, 0]));
 
 type Row = Record<string, any>;
 const LOC = "LOCATION1234567890ab";
@@ -25,9 +27,9 @@ function fakeDb(accounts: Row[] = [{ id: "A1", locationId: LOC, accountType: "me
     campaignStats: {
       upsert: async ({ where, create, update }: Row) => {
         calls.upsert++;
-        if (state.raceOnce) { state.raceOnce = false; stats.push({ ...Object.fromEntries(COUNTER_FIELDS.map((f) => [f, 0])), ...k(where), firstEventAt: new Date(), lastEventAt: new Date() }); throw Object.assign(new Error("unique"), { code: "P2002" }); }
+        if (state.raceOnce) { state.raceOnce = false; stats.push({ ...ZERO_ROW, ...k(where), firstEventAt: new Date(), lastEventAt: new Date() }); throw Object.assign(new Error("unique"), { code: "P2002" }); }
         const hit = find(where);
-        if (!hit) { stats.push({ ...Object.fromEntries(COUNTER_FIELDS.map((f) => [f, 0])), ...create }); return; }
+        if (!hit) { stats.push({ ...ZERO_ROW, ...create }); return; }
         for (const [f, v] of Object.entries(update) as [string, any][]) hit[f] = v?.increment ? hit[f] + v.increment : v;
       },
       update: async ({ where, data }: Row) => {
@@ -134,6 +136,47 @@ describe("receiver: upsert increments", () => {
     expect(await send({ event: "entered" })).toEqual({ received: true, reason: "accepted" });
     expect(f.calls).toEqual({ upsert: 1, update: 1 });
     expect(f.stats[0].entered).toBe(1);
+  });
+});
+
+describe("reply categories (categorized event)", () => {
+  const cd = { listType: "Probate", listName: "Oct list", variant: "default-1" };
+  it("maps the allowlist to its column; anything else (incl. blank / unknown / wrong case-trim) → catOther", () => {
+    expect(categoryField("interested")).toBe("catInterested");
+    expect(categoryField("not_now")).toBe("catNotNow");
+    expect(categoryField("wrong_number")).toBe("catWrongNumber");
+    expect(categoryField("opt_out")).toBe("catOptOut");
+    expect(categoryField("needs_reply")).toBe("catNeedsReply");
+    expect(categoryField(" Interested ")).toBe("catInterested");
+    expect(categoryField("")).toBe("catOther");
+    expect(categoryField("hot lead")).toBe("catOther");
+    expect(categoryField("interested; DROP")).toBe("catOther");
+  });
+  it("fieldsToBump: categorized bumps exactly one category column and never replied / step columns", () => {
+    expect(fieldsToBump("categorized", null, "opt_out")).toEqual(["catOptOut"]);
+    expect(fieldsToBump("categorized", 3, "interested")).toEqual(["catInterested"]);
+    expect(fieldsToBump("categorized", null)).toEqual(["catOther"]);
+  });
+  it("parse accepts categorized and carries the category; other events carry none", () => {
+    expect(parseCampaignPayload({ customData: { locationId: LOC, event: "categorized", category: "not_now" } })).toMatchObject({ ok: true, value: { event: "categorized", category: "not_now" } });
+    const other = parseCampaignPayload({ customData: { locationId: LOC, event: "replied", category: "not_now" } });
+    expect(other.ok && "category" in other.value).toBe(false);
+  });
+  it("increments the matching column atomically, without touching replied counters or other categories", async () => {
+    await send({ ...cd, event: "replied" }, { tags: ["SMS 2"] });
+    await send({ ...cd, event: "categorized", category: "interested" }, { tags: ["SMS 2"] });
+    await send({ ...cd, event: "categorized", category: "interested" });
+    await send({ ...cd, event: "categorized", category: "whatever" });
+    expect(f.stats).toHaveLength(1);
+    expect(f.stats[0]).toMatchObject({ replied: 1, replied2: 1, entered: 0, catInterested: 2, catOther: 1, catNotNow: 0, catWrongNumber: 0, catOptOut: 0, catNeedsReply: 0 });
+  });
+  it("a categorized event on a new key creates the row with that single column at 1", async () => {
+    expect(await send({ ...cd, event: "categorized", category: "wrong_number" })).toEqual({ received: true, reason: "accepted" });
+    expect(f.stats[0]).toMatchObject({ catWrongNumber: 1, replied: 0, entered: 0 });
+  });
+  it("the monthly snapshot is unaffected by category columns (snapshot columns stay COUNTER_FIELDS only)", async () => {
+    await send({ ...cd, event: "categorized", category: "interested" });
+    expect(COUNTER_FIELDS.some((f) => f.startsWith("cat"))).toBe(false);
   });
 });
 

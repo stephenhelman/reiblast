@@ -5,7 +5,7 @@ Real estate wholesaling SaaS platform. Serves two domains from one Next.js 15 de
 | Domain | Purpose |
 |--------|---------|
 | `reiblast.app` | Public marketing site + signup flow |
-| `tools.reiblast.app` | Member tools portal + GHL iframe widgets |
+| `tools.reiblast.app` | Member tools portal (OTP session) + legacy `/widget/*` pages |
 
 ## Tech Stack
 
@@ -143,21 +143,15 @@ middleware.ts         ← Hostname-based routing
 prisma.config.ts      ← Prisma v6 datasource config for migrations
 ```
 
-## GHL Widget Embedding
+## GHL Widget Embedding (legacy — not public)
 
-The widget routes (`/widget/header`, `/widget/analyzer`) render with zero chrome — no nav, no padding, transparent background. Embed them in GHL custom pages as iframes:
+`/widget/header` and `/widget/analyzer` render with no chrome, but they are **not public**: every tools-host route except `/enter`
+requires the `reiblast_tools_session` cookie (middleware.ts). The cookie is `SameSite=Lax`, so it is not sent when the page is framed
+inside GHL (a cross-site iframe), and members never pass through `/enter` inside the frame — an embedded widget lands on the
+session-expired page. The widgets carry no member data and use no token. They are scheduled for removal once no dashboard embeds them.
 
-```html
-<!-- Dashboard header banner -->
-<iframe src="https://tools.reiblast.app/widget/header"
-  width="100%" height="80" frameborder="0" scrolling="no" />
-
-<!-- Deal analyzer widget -->
-<iframe src="https://tools.reiblast.app/widget/analyzer"
-  width="600" height="320" frameborder="0" />
-```
-
-Widget routes bypass the session check in middleware — they are publicly accessible on the tools subdomain.
+Member-facing pages are reached from a GHL custom menu link to `https://tools.reiblast.app/enter?locationId={{location.id}}`
+(OTP by SMS, then the session cookie).
 
 ## Sub-Account Provisioning
 

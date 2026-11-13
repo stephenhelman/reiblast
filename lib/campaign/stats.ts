@@ -7,7 +7,7 @@ import type { PrismaClient } from "@prisma/client";
  * NULLs as distinct in a unique constraint.
  */
 
-export const CAMPAIGN_EVENTS = ["entered", "replied", "errored", "no_response"] as const;
+export const CAMPAIGN_EVENTS = ["entered", "replied", "errored", "no_response", "categorized"] as const;
 export type CampaignEvent = (typeof CAMPAIGN_EVENTS)[number];
 
 /** Same shape rule as the stage-changed contactId check (lib/billing/events/stageChanged.ts): 8–64 alphanumeric chars. */
@@ -29,10 +29,29 @@ export const COUNTER_FIELDS = [
 ] as const;
 export type CounterField = (typeof COUNTER_FIELDS)[number];
 
-const TOTAL_FIELD: Record<CampaignEvent, CounterField> = { entered: "entered", replied: "replied", errored: "errored", no_response: "noResponse" };
+/**
+ * Reply categories (the triage outcome of a reply). Stored on CampaignStats only — NOT in COUNTER_FIELDS, because CampaignSnapshot has
+ * no category columns and the snapshot job iterates COUNTER_FIELDS. The `categorized` event bumps exactly one of these and never touches
+ * replied / replied1..7.
+ */
+export const REPLY_CATEGORIES = ["interested", "not_now", "wrong_number", "opt_out", "needs_reply"] as const;
+export type ReplyCategory = (typeof REPLY_CATEGORIES)[number];
+export const CATEGORY_FIELDS = ["catInterested", "catNotNow", "catWrongNumber", "catOptOut", "catNeedsReply", "catOther"] as const;
+export type CategoryField = (typeof CATEGORY_FIELDS)[number];
+const CATEGORY_FIELD: Record<ReplyCategory, CategoryField> = {
+  interested: "catInterested", not_now: "catNotNow", wrong_number: "catWrongNumber", opt_out: "catOptOut", needs_reply: "catNeedsReply",
+};
+/** Allowlisted value (case-insensitive, trimmed) → its column; anything else, including blank → catOther. */
+export function categoryField(raw: string): CategoryField {
+  const v = raw.trim().toLowerCase();
+  return (REPLY_CATEGORIES as readonly string[]).includes(v) ? CATEGORY_FIELD[v as ReplyCategory] : "catOther";
+}
+
+type BumpField = CounterField | CategoryField;
+const TOTAL_FIELD: Record<Exclude<CampaignEvent, "categorized">, CounterField> = { entered: "entered", replied: "replied", errored: "errored", no_response: "noResponse" };
 
 export type CampaignKey = { locationId: string; listType: string; listName: string; variant: string };
-export type ParsedCampaignEvent = CampaignKey & { event: CampaignEvent };
+export type ParsedCampaignEvent = CampaignKey & { event: CampaignEvent; /** Raw Custom Data `category`; only read for the categorized event. */ category?: string };
 
 type Obj = Record<string, unknown>;
 const isObj = (v: unknown): v is Obj => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -57,6 +76,7 @@ export function parseCampaignPayload(body: Obj): { ok: true; value: ParsedCampai
       listType: customDataString(body, "listType").slice(0, MAX_LIST_TYPE),
       listName: customDataString(body, "listName").slice(0, MAX_LIST_NAME),
       variant: customDataString(body, "variant").slice(0, MAX_VARIANT),
+      ...(event === "categorized" ? { category: customDataString(body, "category") } : {}),
     },
   };
 }
@@ -100,9 +120,10 @@ export function stepForEvent(event: CampaignEvent, body: Obj): number | null {
   return event === "replied" || event === "errored" ? stepFromTags(extractTags(body)) : null;
 }
 
-/** The counter columns one event bumps: the total, plus the step column for replied/errored with a known step. */
-export function fieldsToBump(event: CampaignEvent, step: number | null): CounterField[] {
-  const out: CounterField[] = [TOTAL_FIELD[event]];
+/** The counter columns one event bumps: the total, plus the step column for replied/errored with a known step. `categorized` bumps one category column only. */
+export function fieldsToBump(event: CampaignEvent, step: number | null, category = ""): BumpField[] {
+  if (event === "categorized") return [categoryField(category)];
+  const out: BumpField[] = [TOTAL_FIELD[event]];
   if (step !== null && (event === "replied" || event === "errored")) out.push(`${event}${step}` as CounterField);
   return out;
 }
@@ -114,7 +135,7 @@ type StatsDb = Pick<PrismaClient, "campaignStats">;
 /** One atomic upsert per event (create at 1 / update with increment). A create race on the unique key (P2002) retries once as an update. */
 export async function recordCampaignEvent(db: StatsDb, e: ParsedCampaignEvent, step: number | null, now: Date): Promise<void> {
   const where = { locationId_listType_listName_variant: { locationId: e.locationId, listType: e.listType, listName: e.listName, variant: e.variant } };
-  const fields = fieldsToBump(e.event, step);
+  const fields = fieldsToBump(e.event, step, e.category);
   const ones = Object.fromEntries(fields.map((f) => [f, 1]));
   const incs = Object.fromEntries(fields.map((f) => [f, { increment: 1 }]));
   const create = { locationId: e.locationId, listType: e.listType, listName: e.listName, variant: e.variant, firstEventAt: now, lastEventAt: now, ...ones };

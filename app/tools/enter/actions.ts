@@ -53,8 +53,6 @@ export async function verifyOtpAction(_prev: VerifyState, formData: FormData): P
   const requestHeaders = await headers()
   const host = requestHeaders.get('host') || ''
   const cookieDomain = toolsCookieDomain(host)
-  // TEMP DIAGNOSTIC — remove once session persistence is confirmed working.
-  console.log('[enter/verify] host:', host, 'cookieDomain:', cookieDomain, 'token length:', token.length)
   const cookieStore = await cookies()
   cookieStore.set(TOOLS_SESSION_COOKIE, token, {
     httpOnly: true,
@@ -64,7 +62,6 @@ export async function verifyOtpAction(_prev: VerifyState, formData: FormData): P
     maxAge: TOOLS_SESSION_MAX_AGE_SECONDS,
     path: '/',
   })
-  console.log('[enter/verify] cookie set, redirecting to /')
 
   redirect('/')
 }
