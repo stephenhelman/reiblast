@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { mintOtp } from '@/lib/otp'
 import { verifyToolsSession } from '@/lib/toolsSession'
 import { TOOLS_OTP_SEND_COOLDOWN_MS, TOOLS_SESSION_COOKIE } from '@/lib/constants'
+import { safeNext } from '@/lib/tools/safeNext'
 import { OtpForm } from './OtpForm'
 import MinimalHeader from '@/components/tools/MinimalHeader'
 
@@ -33,9 +34,11 @@ function Screen({ title, message, children }: { title: string; message?: string;
 export default async function EnterPage({
   searchParams,
 }: {
-  searchParams: { locationId?: string }
+  searchParams: { locationId?: string; next?: string }
 }) {
   const locationId = searchParams.locationId || ''
+  // Allowlisted internal path only (lib/tools/safeNext.ts); anything else is dropped.
+  const next = safeNext(searchParams.next)
 
   // Already have a valid session for this location? Skip straight to the
   // tools landing instead of re-sending an OTP on every menu-link click.
@@ -44,7 +47,7 @@ export default async function EnterPage({
   if (existingToken) {
     const session = await verifyToolsSession(existingToken)
     if (session && (!locationId || session.locationId === locationId)) {
-      redirect('/')
+      redirect(next ?? '/')
     }
   }
 
@@ -113,7 +116,7 @@ export default async function EnterPage({
         {withinCooldown ? 'A code was already sent to' : 'We sent a code to'} {formatPhone(user.a2pPhone)} inside your
         REIblast CRM. Enter that code here.
       </p>
-      <OtpForm locationId={locationId} />
+      <OtpForm locationId={locationId} next={next ?? ''} />
     </Screen>
   )
 }

@@ -4,6 +4,7 @@ import { cookies, headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { prisma } from '@/lib/prisma'
 import { verifyOtp, resendOtp } from '@/lib/otp'
+import { safeNext } from '@/lib/tools/safeNext'
 import { signToolsSession, toolsCookieDomain } from '@/lib/toolsSession'
 import {
   TOOLS_SESSION_COOKIE,
@@ -24,6 +25,8 @@ export type VerifyState = { error?: string; attemptsRemaining?: number }
 export async function verifyOtpAction(_prev: VerifyState, formData: FormData): Promise<VerifyState> {
   const locationId = String(formData.get('locationId') || '')
   const code = String(formData.get('code') || '')
+  // Re-validated server-side: the hidden field is client-controlled.
+  const next = safeNext(formData.get('next'))
 
   if (!locationId || !code) {
     return { error: 'Missing code.' }
@@ -63,7 +66,7 @@ export async function verifyOtpAction(_prev: VerifyState, formData: FormData): P
     path: '/',
   })
 
-  redirect('/')
+  redirect(next ?? '/')
 }
 
 export type ResendState = { error?: string; cooldown?: boolean; sent?: boolean }

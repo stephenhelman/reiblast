@@ -32,7 +32,7 @@ function ResendButton() {
   )
 }
 
-export function OtpForm({ locationId }: { locationId: string }) {
+export function OtpForm({ locationId, next = '' }: { locationId: string; next?: string }) {
   const [verifyState, verifyAction] = useFormState(verifyOtpAction, initialVerifyState)
   const [resendState, resendAction] = useFormState(resendOtpAction, initialResendState)
 
@@ -40,6 +40,7 @@ export function OtpForm({ locationId }: { locationId: string }) {
     <div>
       <form action={verifyAction} className="space-y-4">
         <input type="hidden" name="locationId" value={locationId} />
+        <input type="hidden" name="next" value={next} />
         <input
           name="code"
           inputMode="numeric"
