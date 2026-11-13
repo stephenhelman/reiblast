@@ -3,6 +3,7 @@ import Scorecard from "@/components/scorecard/Scorecard";
 import ScorecardShell from "@/components/scorecard/ScorecardShell";
 import { GHL_ID_RE } from "@/lib/campaign/stats";
 import { prisma } from "@/lib/prisma";
+import { isActiveMemberLocation } from "@/lib/scorecard/access";
 import { loadScorecard } from "@/lib/scorecard/data";
 import { verifyScorecardToken } from "@/lib/scorecard/token";
 
@@ -48,8 +49,7 @@ export default async function ScorecardViewPage({ searchParams }: { searchParams
   }
 
   // The token alone isn't enough: a member who is no longer active loses access immediately, not at token expiry.
-  const member = await prisma.user.findFirst({ where: { ghlLocationId: result.locationId, status: "active" }, select: { id: true } });
-  if (!member) {
+  if (!(await isActiveMemberLocation(prisma, result.locationId))) {
     return (
       <Notice title="Scorecard not available">
         <p>We couldn&apos;t find an active account for this link. Contact support if this looks wrong.</p>

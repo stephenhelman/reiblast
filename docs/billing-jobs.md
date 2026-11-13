@@ -1,6 +1,6 @@
 # Nightly billing data jobs
 
-Nine jobs (`wallet_retention` ships disabled), triggered by a GHL scheduled workflow (no Vercel Cron). The data jobs never change billing state, tags, or stages, and
+Ten jobs (`wallet_retention` ships disabled), triggered by a GHL scheduled workflow (no Vercel Cron). The data jobs never change billing state, tags, or stages, and
 never write to GHL; `sub_sweep` feeds the dunning engine, which in shadow mode only records decisions. See `docs/ghl-server-contract.md`.
 
 | job | what it does |
@@ -13,12 +13,13 @@ never write to GHL; `sub_sweep` feeds the dunning engine, which in shadow mode o
 | `balances` | Wallet balance per location (incl. HQ) → `WalletBalanceSnapshot`, one row per location per UTC day. |
 | `discord_outbox` | **Every 15 minutes.** Delivers due `DiscordRevokeOutbox` rows to the Discord bot (`docs/revoke-contract.md`), re-arms `config_error` rows once `DISCORD_BOT_URL` + `DISCORD_BOT_OUTBOUND_SECRET` are both set (each re-arm is an attempt, so a still-broken config ends `exhausted` after 5), and purges `done`/`superseded` rows older than 30 days. JobRun summary: `delivered`, `retried`, `exhausted`, `config_error`, `superseded`, `purged` (this run) and `standingExhausted`, `standingConfigError` (rows currently in those states — what an alert should watch); numbers only. Health marks it stale after 1 hour, not 26. |
 | `campaign_snapshot` | **Monthly, on the 1st.** For the Denver month that just ended, writes one `CampaignSnapshot` per location that has `CampaignStats` rows (cumulative totals + per list/variant `breakdown`; monthly activity = this snapshot minus the previous one). Idempotent on `(locationId, month)`; a re-run or duplicate trigger writes nothing new. Stats have no per-event timestamps, so it is "as of when it ran" — schedule it just after midnight Denver on the 1st. Health marks it stale after 33 days. Receiver: `POST /api/webhooks/campaign-event` (`x-campaign-secret` header checked against `CAMPAIGN_EVENT_SECRET`; no body-secret path), see `lib/campaign/stats.ts`. |
+| `scorecard_weekly` | **Weekly, Mondays.** For every member whose `CampaignStats` changed in the last 7 days (`lastEventAt`) and who passes the scorecard view page's active check (`lib/scorecard/access.ts`: an active `User` owning the location), mints a 14-day signed link (`lib/scorecard/token.ts`) and enqueues ONE `GhlIntent` (pipeline `scorecard`, key `scorecard:<locationId>:<ISO week>`, payload `{ intent: "scorecard_ready", hqContactId, scorecardUrl }`, `scorecardUrl` = `TOOLS_URL` + `/scorecard/view?t=…`). Idempotent per ISO week (Denver calendar): a duplicate trigger or a late catch-up the same week records nothing new and never replaces a stored link. With `SCORECARD_INTENTS=live` each chunk's new rows are sent immediately (failures stay `failed` for the `replay` job to retry); otherwise they are `skipped_shadow`. Resumable (cursor = last location + counts). Fails loudly (JobRun `lastError`) if `SCORECARD_TOKEN_SECRET` is missing/short/equal to another signing secret. Health marks it stale after 8 days. |
 | `sub_sweep` | Nightly subscription sweep: lists GHL subscriptions → `GhlSubscriptionState`, and feeds status changes the ledger never shows to the dunning engine (see below). |
 
 ## Trigger
 
 `POST /api/webhooks/ghl/jobs` with header `x-reiblast-jobs-secret: <GHL_JOBS_SECRET>` and body
-`{ "job": "replay" | "tx_sweep" | "wallet_usage" | "wallet_month_refresh" | "balances" | "sub_sweep" | "discord_outbox" | "wallet_retention" | "campaign_snapshot" }`. Always answers 200 `{ accepted, job }`; the work runs in
+`{ "job": "replay" | "tx_sweep" | "wallet_usage" | "wallet_month_refresh" | "balances" | "sub_sweep" | "discord_outbox" | "wallet_retention" | "campaign_snapshot" | "scorecard_weekly" }`. Always answers 200 `{ accepted, job }`; the work runs in
 the background (`waitUntil`). Create one GHL scheduled workflow per job.
 
 ## Plan limit assumed
@@ -47,6 +48,8 @@ since. Continuations refresh `lastStartAt`, so a long chain stays guarded. Ignor
 | `PIPELINE_DATABASE_URL` | preview only: routes billing DB access to the pipeline branch |
 | `GHL_EVENTS_SECRET` | secret for the GHL → server stage-changed / invoice-event webhooks (header `x-reiblast-events-secret`) |
 | `GHL_INTENT_URL_ACTIVE_CLIENT`, `GHL_INTENT_URL_ONBOARDING` | inbound-webhook workflow URLs intents are POSTed to (live mode only) |
+| `GHL_INTENT_URL_SCORECARD`, `SCORECARD_INTENTS` | scorecard intent workflow URL; `SCORECARD_INTENTS=live` sends (anything else records `skipped_shadow`), independent of `DUNNING_MODE` |
+| `SCORECARD_TOKEN_SECRET` | signs the emailed scorecard links; ≥ 32 chars, must differ from the tools/admin/founders session secrets |
 | `DUNNING_MODE`, `DUNNING_LIVE_ACCOUNTS` | engine mode (default `shadow`) and the accounts live mode may act on (default none) |
 
 ## CLI (dry-run by default, `--apply` to write, refuses the production host)

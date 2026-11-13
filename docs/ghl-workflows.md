@@ -121,5 +121,20 @@ place (it still works if something posts to it) but nothing calls it.
 One scheduled workflow per job (existing: `replay`, `tx_sweep`, `wallet_usage`, `balances`), header `x-reiblast-jobs-secret`. **New:**
 `{ "job": "sub_sweep" }` nightly.
 
+**Weekly scorecard** — workflow "Jobs — scorecard_weekly" in the **HQ** sub-account (same place as the other job workflows):
+- Trigger: *Scheduler* (custom schedule), **Mondays 7:00 AM America/Denver** — confirm the HQ location's timezone setting is `America/Denver`/Mountain so DST is handled by GHL.
+- Action: *Webhook* → `POST https://<app host>/api/webhooks/ghl/jobs`, header `x-reiblast-jobs-secret: <GHL_JOBS_SECRET>`, `Content-Type: application/json`, body `{ "job": "scorecard_weekly" }`.
+- Safe to re-fire the same week (ISO-week dedupe); a late Tuesday catch-up still works.
+
+### A4. "Scorecard ready" email  (URL → `GHL_INTENT_URL_SCORECARD`)  — HQ sub-account
+Sent by the `scorecard_weekly` job, one POST per member: `{ "intent": "scorecard_ready", "hqContactId": "...", "scorecardUrl": "https://tools.reiblast.app/scorecard/view?t=…" }`.
+1. **One-time setup:** create a contact custom field **Scorecard URL**, field type **Large Text** (the link is ~270 characters; Single Line text can truncate at 255), key `scorecard_url`.
+2. **Trigger:** *Inbound Webhook*; copy its URL into `GHL_INTENT_URL_SCORECARD`. Send one test payload so the fields can be mapped.
+3. **Find the contact** by `{{inboundWebhookRequest.hqContactId}}`.
+4. **If/Else** on `{{inboundWebhookRequest.intent}}` = `scorecard_ready` (an unmatched key does nothing).
+5. **Update Contact Field** `Scorecard URL` ← `{{inboundWebhookRequest.scorecardUrl}}`.
+6. **Send Email** to the contact. Put `{{contact.scorecard_url}}` in a button/link `href`, and keep it a link — do not paste the raw URL into the subject or preview text.
+Keep it disabled until `SCORECARD_INTENTS=live`. The link is a bearer link (valid 14 days, anyone holding it sees that account's scorecard), so use the HQ sending domain and do not add the URL to any other workflow/notification.
+
 ## C. Existing workflows this replaces at cutover
 See `docs/cutover.md` — the old payment-failed → tag/warning, pause, and active workflows and their three webhook routes.

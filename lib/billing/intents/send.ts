@@ -14,6 +14,8 @@ export const HANDOFF_DEDUPE_PREFIX = "handoff:";
 export const ONBOARDING_DEDUPE_PREFIX = "onboarding:";
 /** dedupeKey prefix of a Founder's Offer claim intent (lib/founderOffer/intent.ts): `founder:<claimId>:<attempt>`. */
 export const FOUNDER_DEDUPE_PREFIX = "founder:";
+/** dedupeKey prefix of a weekly scorecard intent (lib/scorecard/intent.ts): `scorecard:<locationId>:<ISO week>`. */
+export const SCORECARD_DEDUPE_PREFIX = "scorecard:";
 const SEND_TIMEOUT_MS = 10_000;
 
 export type IntentBody = {
@@ -35,7 +37,7 @@ export function buildIntentBody(p: { contactId: string; intent: Pick<Intent, "pi
 }
 
 export const intentUrl = (pipeline: string, env: Record<string, string | undefined> = process.env): string | null =>
-  (pipeline === "active_client" ? env.GHL_INTENT_URL_ACTIVE_CLIENT : pipeline === "onboarding" ? env.GHL_INTENT_URL_ONBOARDING : pipeline === "founder" ? env.GHL_INTENT_URL_FOUNDER : undefined) || null;
+  (pipeline === "active_client" ? env.GHL_INTENT_URL_ACTIVE_CLIENT : pipeline === "onboarding" ? env.GHL_INTENT_URL_ONBOARDING : pipeline === "founder" ? env.GHL_INTENT_URL_FOUNDER : pipeline === "scorecard" ? env.GHL_INTENT_URL_SCORECARD : undefined) || null;
 
 type Db = Pick<PrismaClient, "ghlIntent">;
 
@@ -167,6 +169,7 @@ export async function sendIntent(db: Db, id: string, deps: SendDeps = {}): Promi
  *  - onboarding intents (`onboarding:` keys): ONBOARDING_INTENTS=live, regardless of DUNNING_MODE;
  *  - Clients handoff intents (`handoff:` keys): CLIENT_HANDOFF=live, regardless of DUNNING_MODE;
  *  - Founder's Offer intents (`founder:` keys): FOUNDER_INTENTS=live, regardless of DUNNING_MODE.
+ *  - Weekly scorecard intents (`scorecard:` keys): SCORECARD_INTENTS=live, regardless of DUNNING_MODE.
  * Rows go one at a time, oldest first, with a pause between them (opts.delayMs, else INTENT_SEND_DELAY_MS, else 1500ms).
  * Called by the replay job and opportunistically after each processed event.
  */
@@ -178,6 +181,8 @@ export async function sendPendingIntents(db: Pick<PrismaClient, "ghlIntent">, op
   if (env.CLIENT_HANDOFF === "live") keyFilter.push({ dedupeKey: { startsWith: HANDOFF_DEDUPE_PREFIX } });
   const founderLive = env.FOUNDER_INTENTS === "live";
   if (founderLive) keyFilter.push({ dedupeKey: { startsWith: FOUNDER_DEDUPE_PREFIX } });
+  const scorecardLive = env.SCORECARD_INTENTS === "live";
+  if (scorecardLive) keyFilter.push({ dedupeKey: { startsWith: SCORECARD_DEDUPE_PREFIX } });
   if (!dunningLive && keyFilter.length === 0) return { sent: 0, failed: 0 };
   const rows = await db.ghlIntent.findMany({
     where: {
@@ -185,7 +190,10 @@ export async function sendPendingIntents(db: Pick<PrismaClient, "ghlIntent">, op
       attempts: { lt: MAX_INTENT_ATTEMPTS },
       ...(dunningLive ? {} : { OR: keyFilter }),
       // DUNNING_MODE=live must not send founder rows while FOUNDER_INTENTS is not live.
-      ...(dunningLive && !founderLive ? { NOT: { dedupeKey: { startsWith: FOUNDER_DEDUPE_PREFIX } } } : {}),
+      // Same for scorecard rows while SCORECARD_INTENTS is not live.
+      ...(dunningLive && (!founderLive || !scorecardLive)
+        ? { NOT: [...(!founderLive ? [{ dedupeKey: { startsWith: FOUNDER_DEDUPE_PREFIX } }] : []), ...(!scorecardLive ? [{ dedupeKey: { startsWith: SCORECARD_DEDUPE_PREFIX } }] : [])] }
+        : {}),
       ...(opts.onlyIds ? { id: { in: opts.onlyIds } } : {}),
     },
     orderBy: { createdAt: "asc" },

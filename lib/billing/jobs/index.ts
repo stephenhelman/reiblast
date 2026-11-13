@@ -2,6 +2,7 @@ import { runCampaignSnapshot } from "./campaignSnapshot";
 import { runBalances } from "./balances";
 import { runDiscordOutbox } from "./discordOutbox";
 import { runReplay } from "./replay";
+import { runScorecardWeekly } from "./scorecardWeekly";
 import { runSubSweep } from "./subSweep";
 import { runTxSweep } from "./txSweep";
 import type { JobFn, JobName } from "./types";
@@ -19,4 +20,5 @@ export const JOBS: Record<JobName, JobFn> = {
   sub_sweep: runSubSweep,
   discord_outbox: runDiscordOutbox,
   campaign_snapshot: runCampaignSnapshot,
+  scorecard_weekly: runScorecardWeekly,
 };
