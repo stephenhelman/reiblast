@@ -3,6 +3,7 @@ import type { NextRequest } from "next/server";
 import { isAnalyzerDisabled } from "@/lib/analyzerFlag";
 import { verifyToolsSession } from "@/lib/toolsSession";
 import { TOOLS_SESSION_COOKIE } from "@/lib/constants";
+import { SCORECARD_VIEW_PATH } from "@/lib/scorecard/paths";
 import { ADMIN_BASE_HEADER, ADMIN_COOKIE } from "@/lib/admin/config";
 import { isPublicAdminPath, resolveAdminRoute } from "@/lib/admin/hostRouting";
 import { verifyAdminSession } from "@/lib/admin/session";
@@ -65,6 +66,20 @@ export async function middleware(request: NextRequest) {
     // it's what mints the session in the first place. Every other tool route,
     // widgets included, now requires a valid session. No public tool routes remain.
     const isEnterRoute = pathname === "/enter" || pathname.startsWith("/enter/");
+    // The emailed scorecard link carries its own signed token (lib/scorecard/token.ts) and is verified in the page. EXACT path only —
+    // never a prefix — so no other route (e.g. /scorecard, /scorecard/view/x, /scorecard/viewer) is ever exempted by this.
+    const isScorecardView = pathname === SCORECARD_VIEW_PATH;
+
+    if (isScorecardView) {
+      // The token is in the URL: never leak it via Referer, never cache the response, never index it.
+      const viewUrl = request.nextUrl.clone();
+      viewUrl.pathname = `/tools${SCORECARD_VIEW_PATH}`;
+      const res = NextResponse.rewrite(viewUrl);
+      res.headers.set("Referrer-Policy", "no-referrer");
+      res.headers.set("Cache-Control", "private, no-store");
+      res.headers.set("X-Robots-Tag", "noindex, nofollow");
+      return res;
+    }
 
     if (!isEnterRoute) {
       const token = request.cookies.get(TOOLS_SESSION_COOKIE)?.value;

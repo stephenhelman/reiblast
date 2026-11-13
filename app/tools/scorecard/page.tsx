@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
-import { LogoFull } from "@/components/shared/Logo";
 import Scorecard from "@/components/scorecard/Scorecard";
+import ScorecardShell from "@/components/scorecard/ScorecardShell";
 import { prisma } from "@/lib/prisma";
 import { getMemberFromCookies } from "@/lib/requireMember";
 import { loadScorecard } from "@/lib/scorecard/data";
@@ -15,15 +15,9 @@ export default async function ScorecardPage() {
   if (!member) redirect("/session-expired");
 
   const data = await loadScorecard(prisma, member.locationId);
-
   return (
-    <main className="min-h-screen bg-black text-white">
-      <div className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6 sm:py-12">
-        <div className="mb-8"><LogoFull size={32} /></div>
-        <h1 className="text-2xl font-semibold">Campaign Scorecard</h1>
-        <p className="mb-8 mt-1 text-sm text-gray">How your SMS campaigns are performing.</p>
-        <Scorecard data={data} />
-      </div>
-    </main>
+    <ScorecardShell>
+      <Scorecard data={data} />
+    </ScorecardShell>
   );
 }
