@@ -12,9 +12,12 @@ export const MARKETING_URL = "https://reiblast.app";
 export const SUPPORT_EMAIL = "support@reiblast.app";
 export const SUPPORT_PHONE_DISPLAY = "(915) 800-8266";
 export const SUPPORT_PHONE_SMS = "+19158008266";
-export const SUPPORT_SMS_BODY = "Hi Stephen, I just finished onboarding! Saving your number.";
+export const SUPPORT_SMS_BODY = "Hi Stephen, I can't find an onboarding call time that works for me —";
 // `?&body=` is the form that prefills on both iOS and Android.
 export const SUPPORT_SMS_HREF = `sms:${SUPPORT_PHONE_SMS}?&body=${encodeURIComponent(SUPPORT_SMS_BODY)}`;
+// HQ onboarding-call calendar (GHL booking widget) behind the /welcome CTA.
+export const ONBOARDING_CALENDAR_ID = "SZCqdNbCvvAAH0nWli5b";
+export const ONBOARDING_BOOKING_URL = `https://api.leadconnectorhq.com/widget/booking/${ONBOARDING_CALENDAR_ID}`;
 
 export const ONBOARDING_STAGES = {
   PAYMENT_RECEIVED: "Payment Received",

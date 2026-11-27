@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { LogoFull } from '../shared/Logo'
 import MobileMenu, { type NavItem } from './MobileMenu'
+import GetStartedLink from './GetStartedLink'
 
 const MOBILE_ITEMS: NavItem[] = [
   { href: 'https://app.reiblast.app', label: 'Login', external: true },
@@ -34,12 +35,7 @@ export default function Nav() {
           <a href="https://app.reiblast.app" target="_blank" rel="noreferrer" className="text-white/70 hover:text-white text-sm transition-colors">
             Login
           </a>
-          <Link
-            href="/checkout"
-            className="bg-gold text-black font-semibold text-sm px-5 py-2 rounded-lg hover:bg-gold-hover transition-colors"
-          >
-            Get Started
-          </Link>
+          <GetStartedLink className="bg-gold text-black font-semibold text-sm px-5 py-2 rounded-lg hover:bg-gold-hover transition-colors" />
         </div>
         <MobileMenu items={MOBILE_ITEMS} />
       </div>

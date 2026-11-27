@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Script from "next/script";
+import BookingModal from "@/components/welcome/BookingModal";
 import { SUPPORT_PHONE_DISPLAY, SUPPORT_SMS_HREF } from "@/lib/constants";
+import { SETUP_FEE } from "@/lib/pricing";
 
 export const metadata: Metadata = {
   title: "Welcome — REIblast",
@@ -10,170 +12,62 @@ export const metadata: Metadata = {
 // link on a phone) — the opposite of the tools app's desktop-only gate.
 // Static and anonymous by design: no member lookup, so every line is worded for
 // every member (e.g. the setup-fee note is conditional).
+// Booking the onboarding call is the ONE primary action. Our number, Discord and
+// the setup fee are the call's agenda, not self-serve buttons.
 
-const BTN =
-  "inline-flex items-center justify-center gap-2 w-full sm:w-auto px-8 py-4 text-lg rounded-xl font-semibold transition-colors duration-150";
-const BTN_GOLD = `${BTN} bg-gold text-black hover:bg-gold-hover font-bold`;
-// Same classes as Button variant="outline" size="lg" — Button renders a <button>, so it can't carry an href.
-const BTN_OUTLINE = `${BTN} border border-gold text-gold bg-transparent hover:bg-gold/10`;
-
-const VERIFY_STEPS = [
-  "Press Verify",
-  "Enter your signup email",
-  "Enter the code we text you",
-  "Agree to the rules",
-  "You get the REIblast role",
+const CALL_AGENDA = [
+  {
+    title: "Our number",
+    body: "We’ll make sure it’s saved, so your setup texts and invoice don’t get missed.",
+  },
+  {
+    title: "The REIblast Discord",
+    body: "We’ll get you joined and verified, and show you where your courses are.",
+  },
+  {
+    title: "Your setup payment",
+    body: `If your signup included the $${SETUP_FEE} setup fee, it covers account setup and provisioning by OP Web Studio. We release your account access once it’s paid.`,
+  },
 ];
-
-function Step({
-  n,
-  title,
-  children,
-}: {
-  n: number;
-  title: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <section className="w-full max-w-[880px] bg-surface border border-border-default rounded-[20px] p-5 sm:p-10">
-      <div className="flex items-start gap-4">
-        <span
-          aria-hidden="true"
-          className="shrink-0 flex items-center justify-center h-9 w-9 rounded-full border border-gold text-gold font-bold"
-        >
-          {n}
-        </span>
-        <div className="flex-1 min-w-0">
-          <h2 className="text-white text-xl sm:text-2xl font-bold mb-2">
-            <span className="sr-only">Step {n}: </span>
-            {title}
-          </h2>
-          {children}
-        </div>
-      </div>
-    </section>
-  );
-}
 
 export default function WelcomePage() {
   const ariVslLink = process.env.ARI_VSL_LINK?.trim();
   const hasVsl = !!ariVslLink;
-  const discordInviteUrl = process.env.DISCORD_INVITE_URL?.trim();
-  const verifyChannel = process.env.DISCORD_VERIFY_CHANNEL?.trim() || "verify";
-  const verifyVideoUrl = process.env.VERIFY_VIDEO_URL?.trim();
 
   return (
-    <div className="min-h-screen bg-black flex flex-col items-center px-4 sm:px-6 py-12 sm:py-20 gap-6 sm:gap-8">
+    <div className="min-h-screen bg-black flex flex-col items-center px-4 sm:px-6 pt-24 sm:pt-28 pb-12 sm:pb-20 gap-6 sm:gap-8">
       <header className="w-full max-w-[880px] text-center">
         <p className="text-gold text-xs font-bold uppercase tracking-widest mb-2">
           Welcome
         </p>
         <h1 className="text-white text-2xl sm:text-4xl font-bold">
-          You&apos;re in. Here&apos;s what to do next.
+          You&apos;re in. Book your onboarding call.
         </h1>
       </header>
 
-      <Step n={1} title="Text us">
-        <p className="text-gray-400 text-sm sm:text-base mb-6">
-          Text us now so our messages reach you. This saves our number on your
-          phone so your setup texts and invoice don&apos;t land in spam.
+      <section className="w-full max-w-[880px] bg-surface border border-gold/30 rounded-[20px] p-5 sm:p-10 flex flex-col items-center">
+        <p className="text-gold text-xs font-bold uppercase tracking-widest text-center mb-2">
+          Your Next Step
         </p>
-        <a href={SUPPORT_SMS_HREF} className={BTN_OUTLINE}>
-          Text Us Now
-        </a>
-        <p className="text-gray-400 text-sm mt-4">
-          Text us at{" "}
-          <span className="text-white font-semibold">{SUPPORT_PHONE_DISPLAY}</span>
-        </p>
-        <p className="text-gray-500 text-xs sm:text-sm mt-3">
-          If you signed up with a $97 setup fee, your invoice will come by text
-          and email. We release your account access once it&apos;s paid.
-        </p>
-      </Step>
+        <h2 className="text-white text-xl sm:text-2xl font-bold text-center mb-6">
+          Book Your Onboarding Call
+        </h2>
 
-      <Step n={2} title="Join the REIblast Discord">
-        <p className="text-gray-400 text-sm sm:text-base mb-6">
-          Your community, 24/7 AI support, and live Support Group Sessions are
-          all there.
-        </p>
-        {discordInviteUrl ? (
-          <a
-            href={discordInviteUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={BTN_GOLD}
-          >
-            Join the Discord
-          </a>
-        ) : (
-          <p className="text-white/85 text-sm sm:text-base">
-            Text us for the Discord link.
-          </p>
-        )}
-      </Step>
+        <BookingModal />
 
-      <Step n={3} title="Verify your account">
-        <p className="text-gray-400 text-sm sm:text-base mb-6">
-          In the Discord, go to{" "}
-          <span className="text-white font-semibold">#{verifyChannel}</span> and
-          press Verify. Use the email you signed up with, and we&apos;ll text
-          you a code.
-        </p>
-        {verifyVideoUrl ? (
-          <div
-            className="rounded-xl overflow-hidden border border-border-default bg-black"
-            style={{ aspectRatio: "16 / 9" }}
-          >
-            <iframe
-              src={verifyVideoUrl}
-              title="How to verify your account"
-              className="w-full h-full border-0 block"
-              allow="autoplay; fullscreen"
-              allowFullScreen
-            />
-          </div>
-        ) : (
-          <ol className="list-decimal list-inside space-y-1 text-white/85 text-sm sm:text-base">
-            {VERIFY_STEPS.map((t) => (
-              <li key={t}>{t}</li>
+        <div className="w-full max-w-[560px] border-t border-border-default mt-8 pt-6">
+          <h3 className="text-white text-base font-semibold mb-4">
+            What we&apos;ll handle together
+          </h3>
+          <ul className="list-disc pl-5 space-y-3 marker:text-gold text-gray-400 text-sm sm:text-base leading-relaxed">
+            {CALL_AGENDA.map(({ title, body }) => (
+              <li key={title}>
+                <span className="text-white font-semibold">{title}.</span> {body}
+              </li>
             ))}
-          </ol>
-        )}
-        <p className="text-gray-500 text-xs sm:text-sm mt-4">
-          Verify not working?{" "}
-          <a href={SUPPORT_SMS_HREF} className="text-gold underline">
-            Text us
-          </a>{" "}
-          and we&apos;ll sort it out.
-        </p>
-      </Step>
-
-      <Step n={4} title="Start your courses">
-        <p className="text-gray-400 text-sm sm:text-base">
-          Your REIblast courses are already unlocked. Once you&apos;re verified,
-          you&apos;ll find direct links to each course in the Discord. Start
-          with Onboarding.
-        </p>
-      </Step>
-
-      <section className="w-full max-w-[880px] bg-surface border border-gold/30 rounded-[20px] p-5 sm:p-10">
-        <p className="text-gold text-xs font-bold uppercase tracking-widest mb-2">
-          What happens next
-        </p>
-        <p className="text-white/85 text-base leading-relaxed">
-          We&apos;re submitting your A2P messaging registration now. We&apos;ll
-          text you as soon as it&apos;s approved, and then your account is ready
-          to send.
-        </p>
+          </ul>
+        </div>
       </section>
-
-      <p className="w-full max-w-[880px] text-center text-gray-400 text-sm">
-        Stuck? Post in the Q&amp;A forum in the Discord or{" "}
-        <a href={SUPPORT_SMS_HREF} className="text-gold underline">
-          text us
-        </a>
-        .
-      </p>
 
       {/*
         Ari VSL slot — message and video share this SAME outer card (fixed
@@ -211,9 +105,8 @@ export default function WelcomePage() {
             <div className="flex-1 text-center md:text-left order-2 md:order-1">
               <p className="text-white/85 text-base leading-relaxed">
                 Hey, it&apos;s Ari — welcome to REIblast! I&apos;m glad
-                you&apos;re here. Work through the steps above and
-                we&apos;ll get your account ready to send. See you in the
-                Discord.
+                you&apos;re here. Book your onboarding call and we&apos;ll get
+                your account ready to send. See you in the Discord.
               </p>
             </div>
 
@@ -227,6 +120,14 @@ export default function WelcomePage() {
           </div>
         )}
       </div>
+
+      <p className="w-full max-w-[880px] text-center text-gray-400 text-sm">
+        Can&apos;t find a time? Text us at{" "}
+        <a href={SUPPORT_SMS_HREF} className="text-gold underline whitespace-nowrap">
+          {SUPPORT_PHONE_DISPLAY}
+        </a>
+        .
+      </p>
     </div>
   );
 }

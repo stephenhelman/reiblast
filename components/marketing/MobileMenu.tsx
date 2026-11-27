@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import GetStartedLink from "./GetStartedLink";
 
 export type NavItem = { href: string; label: string; external?: boolean };
 
@@ -26,12 +27,7 @@ export default function MobileMenu({ items }: { items: NavItem[] }) {
 
   return (
     <div className="md:hidden flex items-center gap-2">
-      <Link
-        href="/checkout"
-        className="bg-gold text-black font-semibold text-sm px-4 py-2 rounded-lg"
-      >
-        Get Started
-      </Link>
+      <GetStartedLink className="bg-gold text-black font-semibold text-sm px-4 py-2 rounded-lg" />
       <button
         type="button"
         aria-label={open ? "Close menu" : "Open menu"}
